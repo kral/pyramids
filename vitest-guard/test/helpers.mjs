@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const here = path.dirname(fileURLToPath(import.meta.url));
 export const pkgDir = path.join(here, '..');
@@ -41,7 +41,7 @@ export function project(files, { modules = 'link', prefix = 'vmg-test-' } = {}) 
 }
 
 /** A config wrapped with defineVitestGuardConfig (imports this checkout by path). */
-export const wrappedConfig = (test, guard = {}) => `import { defineVitestGuardConfig } from ${JSON.stringify(indexFile)};
+export const wrappedConfig = (test, guard = {}) => `import { defineVitestGuardConfig } from ${JSON.stringify(pathToFileURL(indexFile).href)};
 // the temp project links node_modules from outside its root: let Vite serve it (real installs live inside the root)
 export default defineVitestGuardConfig({ server: { fs: { strict: false } }, test: ${JSON.stringify(test)} }, ${JSON.stringify(guard)});\n`;
 

@@ -62,7 +62,7 @@ test('scan detects mocks, factories, traits and top-level side effects', () => {
   const r = scanSource(src, '/p/test/x.test.ts');
   assert.deepEqual(r.mocks.map((m) => m.spec), ['../src/a', '@tanstack/query-core']);
   assert.equal(r.mocks[1].factory, 'automock'); assert.equal(r.mocks[1].pkg, '@tanstack/query-core');
-  assert.equal(r.mocks[0].target, '/p/src/a');
+  assert.equal(r.mocks[0].target, path.resolve('/p/test', '../src/a')); // platform path (D:\\p\\src\\a on Windows)
   assert.ok(r.imports.includes('i18next'));
   assert.ok(r.pollutes.includes('mock:node_modules') && r.pollutes.includes('global-assign') && r.pollutes.includes('top-level-side-effect'));
   assert.equal(r.traits.topLevel.length, 2); // window.foo = 1; setupThing();

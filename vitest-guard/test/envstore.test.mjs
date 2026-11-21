@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 // env.json has ONE owner (src/envstore.mjs): precedence miss > probe > static, lock, atomic write
 // (REVIEW-2-architecture N4 / A-6, REVIEW-2-security N9).
 import { test } from 'node:test';
@@ -96,7 +97,7 @@ test('envstore: never writes through a symlinked state dir; replaces a symlinked
 test('envstore: concurrent writers lose no update (lock + atomic replace)', async () => {
   const root = mk();
   const procs = 6, per = 25;
-  const script = `import { updateEnv } from ${JSON.stringify(store)};
+  const script = `import { updateEnv } from ${JSON.stringify(pathToFileURL(store).href)};
 const [root, id, per] = process.argv.slice(2);
 for (let i = 0; i < Number(per); i++) { const r = updateEnv(root, { ['p' + id + '/f' + i + '.test.ts']: { source: i % 2 ? 'probe' : 'static', group: 'node', dom: false } }, { producer: 'p' + id }); if (!r.written || !r.locked) { console.error('not written/locked', r.written, r.locked); process.exit(3); } }`;
   const f = path.join(root, 'writer.mjs');
