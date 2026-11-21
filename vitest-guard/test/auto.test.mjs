@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 import { fileURLToPath } from 'node:url';
 // mode 'auto': classification, generated dom/node projects, stored modes, probe + self-healing of misclassified files.
 import { test } from 'node:test';
@@ -100,7 +101,7 @@ test('auto: generated projects, stored modes, overrides, user projects keep thei
 test('auto end to end: a hidden DOM user fails in node with a clear message, then moves to dom; probe demotes a file that never touches the DOM', integration, async () => {
   const root = project({
     'package.json': '{"type":"module"}',
-    'vitest.config.mjs': `import { defineVitestGuardConfig } from '${path.join(here, '..', 'src', 'index.mjs')}';\n// the temp project links node_modules from outside its root: let Vite serve it (real installs live inside the root)
+    'vitest.config.mjs': `import { defineVitestGuardConfig } from '${pathToFileURL(path.join(here, '..', 'src', 'index.mjs')).href}';\n// the temp project links node_modules from outside its root: let Vite serve it (real installs live inside the root)
 export default defineVitestGuardConfig({ server: { fs: { strict: false } }, test: { environment: 'jsdom', include: ['test/**/*.test.ts'] } }, { mode: 'auto', nodeEnvironment: 'node' });\n`,
     'src/title.js': 'export const setTitle = (t) => { globalThis.document.title = t; return document.title; };\n',
     'test/hidden-dom.test.ts': `import { it, expect } from 'vitest';\nimport { setTitle } from '../src/title.js';\nit('sets title', () => { expect(setTitle('x')).toBe('x'); });\n`,

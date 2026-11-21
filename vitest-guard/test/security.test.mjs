@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 import { fileURLToPath } from 'node:url';
 // Regression tests for SECURITY-REVIEW F8 (PoC 8), F9 (PoC 9), F12 and the projects support (ARCHITECTURE #10).
 // Integration tests spawn real Vitest (devDependency); see test/helpers.mjs for the opt-out.
@@ -76,7 +77,7 @@ test('F9: conflict edges and per-file maps are restricted to listed files', () =
 test('F9 / PoC 9 end to end: a non-test module listed in incompatible.json is not executed', integration, async () => {
   const root = project({
     'package.json': '{"type":"module","name":"p9"}',
-    'vitest.config.mjs': `import { defineVitestGuardConfig } from '${path.join(here, '..', 'src', 'index.mjs')}';\nexport default defineVitestGuardConfig({ test: { environment: 'node' } }, { mode: 'vm' });\n`,
+    'vitest.config.mjs': `import { defineVitestGuardConfig } from '${pathToFileURL(path.join(here, '..', 'src', 'index.mjs')).href}';\nexport default defineVitestGuardConfig({ test: { environment: 'node' } }, { mode: 'vm' });\n`,
     'test/a.test.ts': `import { it, expect } from 'vitest';\nit('a', () => expect(1).toBe(1));\n`,
     'scripts/release-helper.mjs': `import { writeFileSync } from 'node:fs';\nwriteFileSync(new URL('../PAYLOAD-RAN.txt', import.meta.url), 'ran');\n`,
     '.vitest-guard/incompatible.json': JSON.stringify({ version: 1, vm: { 'scripts/release-helper.mjs': { signature: 'x' } }, shared: {} }),
@@ -144,7 +145,7 @@ test('F8 / PoC 8 end to end: planted files at the old predictable paths are neit
 test('F12: a file that replaces a core matcher fails the next file in a shared worker', integration, async () => {
   const root = project({
     'package.json': '{"type":"module"}',
-    'vitest.config.mjs': `import { defineVitestGuardConfig } from '${path.join(here, '..', 'src', 'index.mjs')}';\nexport default defineVitestGuardConfig({ test: { environment: 'node' } }, { mode: 'shared' });\n`,
+    'vitest.config.mjs': `import { defineVitestGuardConfig } from '${pathToFileURL(path.join(here, '..', 'src', 'index.mjs')).href}';\nexport default defineVitestGuardConfig({ test: { environment: 'node' } }, { mode: 'shared' });\n`,
     'test/1-tamper.test.ts': `import { it, expect } from 'vitest';\nit('tampers', () => { const p = Object.getPrototypeOf(expect(0)); let o = p; while (o && !Object.getOwnPropertyDescriptor(o, 'toBe')) o = Object.getPrototypeOf(o); Object.defineProperty(o, 'toBe', { value: function () { return this; }, configurable: true, writable: true }); expect(1).toBe(1); });\n`,
     'test/2-gate.test.ts': `import { it, expect } from 'vitest';\nit('security gate', () => { expect('admin').toBe('guest'); });\n`,
   });
