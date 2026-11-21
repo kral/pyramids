@@ -82,6 +82,15 @@ function nodeTests(cwd, files, env = {}) {
   const skipped = lines.map((l) => /^\s*ok \d+ - (.*?) # SKIP\s*(.*)$/i.exec(l)).filter(Boolean).map((m) => `${m[1]} ${m[2]}`.trim());
   const count = (k) => Number((new RegExp(`^# ${k} (\\d+)`, 'm').exec(r.out) ?? [])[1] ?? 0);
   process.stdout.write(`  tests ${count('tests')}, pass ${count('pass')}, fail ${count('fail')}, skipped ${count('skipped')}\n`);
+  // a test file that died natively (exitCode > 255: an NTSTATUS on Windows, e.g. 3221226505 = 0xC0000409) leaves no
+  // subtest output: run it once more on its own so its stderr reaches the log
+  for (const m of r.out.matchAll(/^not ok \d+ - (.+)\n(?:  .*\n)*?  exitCode: (\d+)/gm)) {
+    if (Number(m[2]) <= 255) continue;
+    const file = m[1].replace(/\\\\/g, '\\');
+    process.stdout.write(`  ${file} died with exit code ${m[2]} (0x${Number(m[2]).toString(16)}); re-running it alone for its stderr:\n`);
+    const d = spawnSync(process.execPath, [file], { cwd, env: baseEnv(env), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    process.stdout.write(`${(d.stdout || '').split('\n').slice(-30).join('\n')}\n--- stderr ---\n${(d.stderr || '').split('\n').slice(-60).join('\n')}\n--- exit ${d.status ?? d.signal} ---\n`);
+  }
   if (r.status !== 0 || failed.length) { process.stdout.write(r.out.split('\n').filter((l) => !/^\s+(Test\.|async |at |node:)/.test(l)).join('\n') + r.err); fail(`${failed.length || 'some'} test(s) failed in ${rel(cwd)}`); }
   if (!count('tests')) fail(`0 tests ran in ${rel(cwd)}`);
   checkSkips(rel(cwd), skipped);
