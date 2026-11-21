@@ -1,22 +1,58 @@
 {
   "name": "@kral/vitest-guard",
-  "version": "0.1.0",
-  "private": true,
-  "license": "MIT OR Apache-2.0",
-  "type": "module",
+  "version": "0.1.0-alpha.1",
   "description": "Makes Vitest fast pools (vmThreads, isolate:false) safe: realm shims, leak detection, quarantine, planned shared workers",
-  "bin": { "vitest-guard": "./bin/vitest-guard.mjs" },
+  "keywords": [
+    "isolate",
+    "jsdom",
+    "react",
+    "test performance",
+    "vitest",
+    "vmThreads"
+  ],
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kral/pyramids.git",
+    "directory": "vitest-guard"
+  },
+  "homepage": "https://github.com/kral/pyramids/tree/main/docs/vitest-guard",
+  "bugs": {
+    "url": "https://github.com/kral/pyramids/issues"
+  },
+  "type": "module",
+  "bin": {
+    "vitest-guard": "./bin/vitest-guard.mjs"
+  },
   "exports": {
-    ".": { "types": "./src/index.d.ts", "default": "./src/index.mjs" },
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    },
     "./setup": "./src/setup.bundle.mjs",
     "./sequencer": "./src/sequencer.mjs",
     "./realm": "./src/realm.mjs",
-    "./envstore": { "types": "./src/envstore.d.ts", "default": "./src/envstore.mjs" },
+    "./envstore": {
+      "types": "./src/envstore.d.ts",
+      "default": "./src/envstore.mjs"
+    },
     "./package.json": "./package.json"
   },
-  "files": ["bin/", "src/", "scripts/", "README.md", "README.cs.md"],
-  "engines": { "node": "^22.22.2 || >=24.15.0" },
-  "peerDependencies": { "vitest": ">=5.1 <6" },
+  "files": [
+    "LICENSE-APACHE",
+    "LICENSE-MIT",
+    "README.cs.md",
+    "README.md",
+    "bin/",
+    "scripts/",
+    "src/"
+  ],
+  "engines": {
+    "node": "^22.22.2 || >=24.15.0"
+  },
+  "peerDependencies": {
+    "vitest": ">=5.1 <6"
+  },
   "devDependencies": {
     "jsdom": "^31.0.1",
     "vitest": "^5.1.1"
@@ -26,5 +62,10 @@
     "check:bundle": "node scripts/bundle-setup.mjs --check",
     "test": "node scripts/bundle-setup.mjs && node --test --test-concurrency=1 test/*.test.mjs",
     "test:unit": "VITEST_GUARD_TEST_NO_INTEGRATION=1 node --test test/*.test.mjs"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "tag": "next"
   }
 }

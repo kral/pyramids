@@ -1,0 +1,74 @@
+# Publish @kral/vitest-guard to npm (usable from npm, pnpm and yarn) with SLSA provenance.
+#
+# Trigger: push a tag `vitest-guard-v<version>` whose version equals vitest-guard/package.json.
+# Safety: the publish job runs in the protected environment `npm-publish`. Nothing is published until
+# a required reviewer approves the job in the GitHub UI.
+#
+# One-time setup (repository Settings → Environments → New environment "npm-publish"):
+#   1. Required reviewers: add yourself.   2. Deployment branches and tags: only tags `vitest-guard-v*`.
+#   3. Environment variable PUBLISH_ENV_PROTECTED = yes   (the job refuses to run without it, so an
+#      environment auto-created by GitHub without protection can never publish).
+#   4. Auth, either:
+#      a) npm trusted publishing (preferred, no token): on npmjs.com → package settings → Trusted
+#         publisher → GitHub Actions, repository kral/pyramids, workflow publish-vitest-guard.yml,
+#         environment npm-publish. (npm may require the package to exist first – see b.)
+#      b) a granular npm token (publish-only, short expiry) as environment secret NPM_TOKEN; delete it
+#         once trusted publishing is set up.
+name: publish-vitest-guard
+
+on:
+  push:
+    tags: ['vitest-guard-v*']
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    uses: ./.github/workflows/vto-ci.yml
+
+  publish:
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write    # npm provenance + trusted publishing (OIDC)
+    steps:
+      - name: environment must be protected
+        if: ${{ vars.PUBLISH_ENV_PROTECTED != 'yes' }}
+        run: |
+          echo "::error::Environment npm-publish is not configured (see the header of this workflow). Refusing to publish."
+          exit 1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with: { node-version: 24, registry-url: 'https://registry.npmjs.org' }
+      - name: tag matches package version
+        shell: bash
+        run: |
+          set -euo pipefail
+          want="${GITHUB_REF_NAME#vitest-guard-v}"
+          have="$(node -p "require('./vitest-guard/package.json').version")"
+          name="$(node -p "require('./vitest-guard/package.json').name")"
+          [ "$name" = "@kral/vitest-guard" ] || { echo "::error::unexpected package name $name"; exit 1; }
+          [ "$want" = "$have" ] || { echo "::error::tag $GITHUB_REF_NAME does not match package.json version $have"; exit 1; }
+      - name: install and test the package itself
+        working-directory: vitest-guard
+        run: |
+          npm ci --ignore-scripts
+          npm test
+      - name: dry run (contents)
+        working-directory: vitest-guard
+        run: npm pack --dry-run
+      - name: publish with provenance
+        working-directory: vitest-guard
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          tag=latest; case "$version" in *-*) tag=next;; esac
+          npm publish --provenance --access public --tag "$tag"
