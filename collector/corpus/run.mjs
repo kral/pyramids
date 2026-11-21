@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Differential test harness for the vto v2 instrumenter (see ../../FORMAT.md, "v2").
+// Differential test harness for the vto v2 instrumenter (see ../../FORMAT.md, "How the collector produces hits").
 //
 //   node run.mjs [--plugin <path>] [--only a,b] [--setup <setupFile>] [--keep] [--verbose] [--json <file>]
 //
