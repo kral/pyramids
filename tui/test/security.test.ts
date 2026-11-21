@@ -250,7 +250,7 @@ describe('`o` / `O` open only project source files, never through an OS handler 
   const suspend = async (fn: () => Promise<void>) => { await fn(); };
   const withEditor = () => fakeDeps({ env: { PATH: '/usr/bin', VTO_EDITOR: 'code' }, files: ['/usr/bin/code', '/usr/bin/xdg-open', '/usr/bin/open'] });
 
-  itPosix('review PoC editor-poc.mjs: ../outside/evil.desktop is rejected and nothing is spawned', async () => {
+  itPosix('review PoC editor-poc.mjs: ../outside/evil.desktop is rejected and nothing is spawned [POSIX fs]', async () => {
     for (const d of [withEditor(), fakeDeps({ files: ['/usr/bin/xdg-open'] })]) {
       const a = realActions(root, { hasTTY: false, writeTerminal: () => {}, deps: d.deps });
       await expect(a.openEditor({ file: '../outside/evil.desktop', line: 3 }, suspend)).rejects.toThrow(/outside the project root/);
@@ -307,7 +307,7 @@ describe('`o` / `O` open only project source files, never through an OS handler 
     expect(d.calls[0]).toMatchObject({ cmd: '/usr/bin/code', args: ['-g', `${path.join(root, 'src', 'ok.ts')}:2:3`] });
     expect(d.calls[0].opts.shell).toBe(false);
   });
-  itPosix('no editor → NoEditorError with the validated path; xdg-open / open / explorer are never spawned', async () => {
+  itPosix('no editor → NoEditorError with the validated path; xdg-open / open / explorer are never spawned [POSIX fs]', async () => {
     for (const platform of ['linux', 'darwin', 'win32'] as const) {
       const d = fakeDeps({ platform, env: { PATH: '/usr/bin' }, exists: (p) => /xdg-open|open|explorer/i.test(p) });
       expect(resolveEditor(d.deps, false)).toBeNull();
