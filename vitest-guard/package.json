@@ -1,6 +1,6 @@
 {
   "name": "@jirikral/vitest-guard",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "description": "Makes Vitest fast pools (vmThreads, isolate:false) safe: realm shims, leak detection, quarantine, planned shared workers",
   "keywords": [
     "isolate",
