@@ -121,10 +121,10 @@ const COMMANDS = {
     sub: { overlap: { node: 'verify/verify.mjs', helpArgs: ['--help'], summary: 'confirm or reject the candidates of report.json by mutation testing' } },
   },
   guard: {
-    summary: 'vm-guard: check | verify | compare | calibrate | scan | plan | run | hunt | report',
+    summary: 'vitest-guard: check | verify | compare | calibrate | scan | plan | run | hunt | report',
     usage: 'vto guard <check|verify|compare|calibrate|scan|plan|run|hunt|report> [options]',
-    detail: 'Fast Vitest pools made safe (vmThreads / shared workers). Needs vitest.config wrapped with defineVmGuardConfig.',
-    node: 'vm-guard/bin/vm-guard.mjs', helpArgs: ['--help'],
+    detail: 'Fast Vitest pools made safe (vmThreads / shared workers). Needs vitest.config wrapped with defineVitestGuardConfig.',
+    node: 'vitest-guard/bin/vitest-guard.mjs', helpArgs: ['--help'],
   },
   ci: {
     summary: 'print a CI template: `vto ci github` | `vto ci azure`',

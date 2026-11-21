@@ -3,7 +3,7 @@
 Reviewer: independent AppSec re-test, 2026-11-21. Baseline: `SECURITY-REVIEW.md` (F1–F20) and its PoCs in
 `/home/claude/sec-scratch/poc*`. The code tested is the current `HEAD` (`e6598d9`). The new code reviewed is `mcp/`
 (daemon, IPC `vto-ipc/1`, lanes, fix loop, task queue, metrics, redaction, MCP tools, hook, classifier), `tui/`,
-vm-guard auto/calibrate/compare, and collector/analyzer `fileload.reads`.
+vitest-guard auto/calibrate/compare, and collector/analyzer `fileload.reads`.
 
 **Ground rules.** All PoCs ran locally in `/home/claude/review2-security/`, with no network and no product code
 changed. Two temporary OS users (`r2victim`, `r2mallory`) were created for the multi-user tests and deleted
@@ -54,11 +54,11 @@ controls**, and **two new fail-open paths in test selection** appeared:
 | F5 | `--raw DIR` recursive delete | **Fixed** | `run-raw.mjs src`, `.`, `..`, `~` and `/` are all refused. A non-marker dir holding `w-*.jsonl` plus other files is refused. `src/app.ts` survives. |
 | F6 | fail-open selection | **Fixed (original cases)**, new regressions in N2 | Committed `.gitattributes -diff` still selects the test (`--text`). Changing `.gitattributes` gives run-all. `vendor/src/price.ts` gives run-all ("not in the coverage map"). |
 | F7 | map poisoning | **Partially fixed** | Missing `gitHead` gives run-all. The PoC7 map ("file in map, loaded by no test") gives run-all ("inconsistent map"). The map is still trusted: no signature or manifest verification. CI guidance is documented in FORMAT.md. |
-| F8 | vm-guard predictable `/tmp` report | **Fixed** | `privateTmp()` (mkdtemp `0700`) + `readOwnedFile` (O_NOFOLLOW, owner, nlink). The other user cannot read the report or plant a symlink (EACCES). |
-| F9 | `incompatible.json` makes Vitest execute modules | **Fixed** | PoC9: `scripts/release-helper.mjs` is not executed. `VM_GUARD_LANE_FILE` entry gives "ignoring … does not match the include globs". |
+| F8 | vitest-guard predictable `/tmp` report | **Fixed** | `privateTmp()` (mkdtemp `0700`) + `readOwnedFile` (O_NOFOLLOW, owner, nlink). The other user cannot read the report or plant a symlink (EACCES). |
+| F9 | `incompatible.json` makes Vitest execute modules | **Fixed** | PoC9: `scripts/release-helper.mjs` is not executed. `VITEST_GUARD_LANE_FILE` entry gives "ignoring … does not match the include globs". |
 | F10 | Markdown/terminal injection | **Partially fixed** | Analyzer `report.md` escapes everything (PoC4: no `<img`, no ESC, no injected heading). `verify/report-md.mjs` still has `esc = s.replace(/\|/g,'\\|')` only. The TUI renders SGR and OSC 8 from non-daemon sources (N3). |
 | F11 | sensitive data in artifacts | **Partially fixed** | Raw data uses relative paths, raw dir is `0700`, `.vto/.gitignore` is `*`, `.gitignore` is extended. Still open: `samples/demo-raw` keeps full source (`t:"script"`) and `/home/claude/demo` paths. `state.json` stacks keep absolute paths. `.vto/` is created `0755` and its files `0644`. `tasks.json` is unredacted (N6). |
-| F12 | shared realms / tampering | **Partially fixed** | The vm-guard worker store is non-writable. The collector globals are still writable: PoC6 zeroes `__vto_reg` hits and injects a fake file. |
+| F12 | shared realms / tampering | **Partially fixed** | The vitest-guard worker store is non-writable. The collector globals are still writable: PoC6 zeroes `__vto_reg` hits and injects a fake file. |
 | F13 | verify runs mutants with real env | **Still vulnerable** (mitigated) | `verify/verify.mjs:273` uses `env: { ...process.env }` with no scrub and no offline mode. Mitigation: no MCP `verify` tool. |
 | F14 | pragma spoof / identifier collision | **Fixed** | A `/*@vto-instrumented*/` file is instrumented (nonce pragma). `let __vto_k` now loads. |
 | F15 | resource exhaustion | **Fixed** (minor rest) | A 300 MB line is rejected (`--max-line-bytes`), but only after it is read whole: 575 MB RSS. `**a**…b` and `{a,b}`×22 globs finish in 0.01 s (alternation capped at 64). |
@@ -196,11 +196,11 @@ files that a test can load** as a reason to run all, or at least the file's impo
   - Never use the OS opener for anything but a known text extension. On Windows prefer `notepad.exe` by absolute
     path over `explorer.exe`, or show "no editor configured" instead.
 
-### N5 – Symlink-following writes in repo-controlled `.vto/` and `.vm-guard/run/` — **Medium**
+### N5 – Symlink-following writes in repo-controlled `.vto/` and `.vitest-guard/run/` — **Medium**
 
 - **Where:** `daemon.log`, `engine.log`, `metrics.jsonl` (append), `tasks.json` (`writeFileSync`, overwrite),
-  `runs/<id>.jsonl`, `lane-*.log`, `.vto/setup/*` (`copyFileSync`), `.vm-guard/run/env.json.tmp` (both writers).
-  `.vto/` and `.vm-guard/run/` are gitignored by vto, but a PR or a cloned repository can commit them, symlinks
+  `runs/<id>.jsonl`, `lane-*.log`, `.vto/setup/*` (`copyFileSync`), `.vitest-guard/run/env.json.tmp` (both writers).
+  `.vto/` and `.vitest-guard/run/` are gitignored by vto, but a PR or a cloned repository can commit them, symlinks
   included.
 - **PoC** (`symproj/`): `.vto/daemon.log` and `.vto/metrics.jsonl` are committed symlinks to `victim-file.txt`
   outside the repo. The read-only MCP calls `affected_tests` + `daemon_status` append daemon log lines and metrics
@@ -216,7 +216,7 @@ files that a test can load** as a reason to run all, or at least the file's impo
     (`git ls-files .vto`).
   - Open files with `O_NOFOLLOW`/`wx` + rename.
   - Create `.vto/` `0700` at its first creation (client side too) and files `0600`.
-  - Use the same rules for `.vm-guard/run/`.
+  - Use the same rules for `.vitest-guard/run/`.
 
 ### N6 – Task queue: unredacted secrets on disk, cross-agent instruction channel — **Medium-Low**
 
@@ -273,9 +273,9 @@ files that a test can load** as a reason to run all, or at least the file's impo
 ### N9 – Shared state files and repo-controlled configuration — **Low**
 
 - **`env.json` read-modify-write without a lock.** It has two writers (daemon `classify.mjs` with a fixed
-  `env.json.tmp` name, and vm-guard `auto.mjs`, run once per lane process). Concurrent config loads of the dom and
+  `env.json.tmp` name, and vitest-guard `auto.mjs`, run once per lane process). Concurrent config loads of the dom and
   node lanes can lose updates. This affects classification correctness only.
-- **Legacy fallback without validation.** vm-guard `load()` falls back to the committed `.vm-guard/<name>` for
+- **Legacy fallback without validation.** vitest-guard `load()` falls back to the committed `.vitest-guard/<name>` for
   run-state files (for example `modes.json`). Values merge unvalidated into `run/modes.json` during compare. A data
   file can thereby suppress calibration or steer isolation choices (an F12 risk).
 - **Repo-controlled `.vto/config.json`.** It can set `collectorDir`, `configFile`, `pool`, `groups` and
@@ -301,7 +301,7 @@ files that a test can load** as a reason to run all, or at least the file's impo
 | `collector/corpus` | 138 | `fsevents` |
 | `mcp/test/fixture` | 67 | `fsevents` |
 
-- `vm-guard/` has no dependencies (peer `vitest` only), so a missing lockfile is fine there. `tui/dev/fixture` and
+- `vitest-guard/` has no dependencies (peer `vitest` only), so a missing lockfile is fine there. `tui/dev/fixture` and
   `analyzer/faultinject/fixture` have no dependencies.
 - Rust: 30 crates, 29 from the registry, `Cargo.lock` committed, built with `--locked`.
 
@@ -316,7 +316,7 @@ files that a test can load** as a reason to run all, or at least the file's impo
 - `actions/checkout` keeps `persist-credentials` (default true). Low impact with `contents: read`; set it to
   `false`.
 - No `cargo deny`/`cargo audit`, no `npm audit signatures`, no Dependabot/Renovate, no SBOM, no `SECURITY.md` file.
-  `tui/` and `vm-guard/` tests are not in CI.
+  `tui/` and `vitest-guard/` tests are not in CI.
 - PR builds upload `analyzer-*` artifacts (7 days). This is fine as long as releases never take artifacts from PR
   runs: document it, and build releases only from tags with `attest-build-provenance` and npm `--provenance`.
 - Good: `pull_request` (not `pull_request_target`), `permissions: contents: read`, no `actions/cache`, so fork PRs
@@ -357,7 +357,7 @@ files that a test can load** as a reason to run all, or at least the file's impo
    run-all or its importers.
 3. **N4**: TUI `o` stays inside the root, never uses the OS opener for non-text files, and never `explorer.exe` by
    bare name.
-4. **N5**: refuse symlinked or git-tracked `.vto/` / `.vm-guard/run/`. `0700`/`0600`, `O_NOFOLLOW`.
+4. **N5**: refuse symlinked or git-tracked `.vto/` / `.vitest-guard/run/`. `0700`/`0600`, `O_NOFOLLOW`.
 5. **N3 + N7**: one shared sanitiser (incl. Unicode tags, U+2028/9) for TUI rendering, prompts, clipboard, the CI
    printer and MCP. Delimited prompts with an explicit "untrusted" header. Extended token patterns.
 6. **N6**: redact `tasks.json`. Label the origin of notes.
@@ -374,7 +374,7 @@ files that a test can load** as a reason to run all, or at least the file's impo
 | Expectation (NIS2 Art. 21(2), Czech transposition zákon č. 264/2025 Sb.) | Status after review 2 |
 |---|---|
 | (e) secure development: input validation, least privilege, fail-safe defaults | Good progress (F1, F3, F5, F6, F9). New gaps: N1 (read-only contract), N2 (fail-safe selection), N4/N5 (unsafe file handling). |
-| (e) vulnerability handling and disclosure | No `SECURITY.md` in the repo yet (the proposal is in SECURITY-REVIEW §7). Security unit tests exist (`analyzer/tests/security.rs`, `mcp/test/unit-security.test.mjs`, `vm-guard/test/security.test.mjs`). Add regression tests for every PoC above. |
+| (e) vulnerability handling and disclosure | No `SECURITY.md` in the repo yet (the proposal is in SECURITY-REVIEW §7). Security unit tests exist (`analyzer/tests/security.rs`, `mcp/test/unit-security.test.mjs`, `vitest-guard/test/security.test.mjs`). Add regression tests for every PoC above. |
 | (d) supply-chain security | Lockfiles, `--ignore-scripts` and least-privilege CI are in place. Missing: provenance/signing, dependency policy (cooldown, audit, deny), actions pinned by SHA, SBOM (N10). |
 | (i) access control | POSIX IPC is now user-private and token-authenticated (verified across users). Windows relies on the token plus a random name (no DACL); no handshake timeout (N8). |
 | (b) logging / incident handling | `daemon.log` records caller name and method (no uid/pid of the peer; injectable name, N8). |

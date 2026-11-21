@@ -185,8 +185,8 @@ selection is an accelerator, not a security gate.
   test (coverage of one test can depend on earlier tests of the same file through module-level caches).
   `--test-granularity` restores per-test selection (opt-in, not recall-safe for such code).
 - Ignore rules are ordered, gitignore-like (last match wins, `!pattern` re-includes). Defaults:
-  `*.md`, `docs/**`, `.vm-guard/**`, `!.vm-guard/incompatible.json`, `!.vm-guard/conflicts.json`; the two
-  re-included vm-guard files are "run all" triggers, the rest of `.vm-guard/` is volatile state.
+  `*.md`, `docs/**`, `.vitest-guard/**`, `!.vitest-guard/incompatible.json`, `!.vitest-guard/conflicts.json`; the two
+  re-included vitest-guard files are "run all" triggers, the rest of `.vitest-guard/` is volatile state.
 - `--vitest` output: JSON array of `"./file:line"` filters; **run all = `null`**, nothing selected = `[]`.
   With `--print0`: NUL-separated filters; **run all = the single filter `.`** (matches every test file),
   nothing selected = no output. Use `vto affected … --vitest --print0 | xargs -0 -r npx vitest run` and

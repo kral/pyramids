@@ -12,7 +12,7 @@ instead of a full `vitest run` (~200 s for 3400 tests), with answers small enoug
                   |  warm Vitest (Node API createVitest, Vite server, transform cache)
                   |  collector plugin v2 always on (per-test hits, fileload, durations)
                   |  vto core (Rust, napi or child process) – map in memory, incremental
-                  +-- state: .vto/ (map snapshot, gitHead, file hashes, vm-guard quarantine)
+                  +-- state: .vto/ (map snapshot, gitHead, file hashes, vitest-guard quarantine)
 ```
 
 - One daemon per project root; started lazily by the first MCP/CLI call; IPC over a local
@@ -49,7 +49,7 @@ instead of a full `vitest run` (~200 s for 3400 tests), with answers small enoug
 | `slow_imports` | `{ file? }` | heaviest modules loaded (loadMs × files), unused imports for that file |
 | `suggest_env` | `{ file? }` | test files that never touched DOM → can run in `node` env |
 | `coverage_of` | `{ test }` or `{ file, line }` | which tests cover a line / which lines a test covers (paginated) |
-| `vm_guard_status` | `{}` | quarantined files, last check, leak warnings |
+| `vitest_guard_status` | `{}` | quarantined files, last check, leak warnings |
 | `daemon_status` | `{}` | map age, gitHead, stale reasons, warm/cold, memory |
 
 Resources (read-only, cacheable by clients): `vto://report/summary`, `vto://report/overlap`,
@@ -75,13 +75,13 @@ A Claude Code hook (PreToolUse on Bash) can redirect `npx vitest run` / `npm tes
 1. Daemon core: warm Vitest via Node API, rerun by file:line filters, incremental map patch.
 2. MCP server (stdio, official TS SDK) with `affected_tests`, `run_affected`, `why_failed`,
    `daemon_status`; measure tokens per response on the bench project.
-3. Remaining analysis tools (overlap, slow, imports, env, coverage_of, vm-guard).
+3. Remaining analysis tools (overlap, slow, imports, env, coverage_of, vitest-guard).
 4. Claude Code hook + `.mcp.json` snippet, Windows named pipe, idle shutdown.
 
 ## Open questions
 
 - Rust core as napi addon (in-process, fastest) vs child process (simpler distribution).
-- Run in the daemon with the user's pool (vmThreads + vm-guard) or forks for safety?
+- Run in the daemon with the user's pool (vmThreads + vitest-guard) or forks for safety?
 - Concurrency: two agents/editors calling `run_*` at once → queue, coalesce identical requests.
 
 ---

@@ -88,7 +88,7 @@ export class Engine extends EventEmitter {
     if (!fileCfg || typeof fileCfg !== 'object' || Array.isArray(fileCfg)) fileCfg = {};
     // precedence: defaults < VTO_POOL < project .vto/config.json < user-level config < programmatic.
     // U-6: the default pool is the PROJECT's configured pool ("config"): vto never switches the pool
-    // (vm-guard vm/shared, auto groups) unless the user configured it.
+    // (vitest-guard vm/shared, auto groups) unless the user configured it.
     this.config = { ...DEFAULT_CONFIG, ...(process.env.VTO_POOL ? { pool: process.env.VTO_POOL } : {}), ...fileCfg, ...userConfig(this.root), ...this.config };
     if (!POOLS.has(this.config.pool)) throw userError(`unknown pool "${String(this.config.pool).slice(0, 40)}" (use one of: ${[...POOLS].join(', ')})`);
     this.lockFile = path.join(this.dir, 'engine.lock');
@@ -164,7 +164,7 @@ export class Engine extends EventEmitter {
   slowTests(p) { return analysis.slowTests(this, p); }
   slowImports(p) { return analysis.slowImports(this, p); }
   suggestEnv(p) { return analysis.suggestEnv(this, p); }
-  vmGuardStatus(p) { return analysis.vmGuardStatus(this, p); }
+  vitestGuardStatus(p) { return analysis.vitestGuardStatus(this, p); }
   savings(p) { return this.envelope(this.metrics.report(p)); }
 
   async close() {

@@ -85,13 +85,13 @@ export function suggestEnv(eng, { file, limit = 20, cursor } = {}) {
     note: probed ? 'never accessed document/window/DOM globals after setup files: candidates for `// @vitest-environment node` (verify by running them in node)' : 'no env probe data yet: run tests through vto once' });
 }
 
-export function vmGuardStatus(eng) {
-  const dir = path.join(eng.root, '.vm-guard');
+export function vitestGuardStatus(eng) {
+  const dir = path.join(eng.root, '.vitest-guard');
   const read = (f) => { try { return JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch { return null; } };
   const q = read('incompatible.json') || {};
   const conflicts = read('conflicts.json');
   let dirty = 0, files = 0, last = null;
-  // run logs: .vm-guard/run/logs/*.jsonl (vm-guard ≥ 2d7ddf9) and the older .vm-guard/run/*.jsonl
+  // run logs: .vitest-guard/run/logs/*.jsonl (vitest-guard ≥ 2d7ddf9) and the older .vitest-guard/run/*.jsonl
   const logFiles = [];
   for (const d of [path.join(dir, 'run', 'logs'), path.join(dir, 'run')]) {
     try { for (const n of fs.readdirSync(d)) if (n.endsWith('.jsonl')) logFiles.push(path.join(d, n)); } catch {}
@@ -104,10 +104,10 @@ export function vmGuardStatus(eng) {
   } catch {}
   const lane = eng.store.state.lane;
   return eng.envelope({
-    enabled: !!lane?.vmGuard, mode: lane?.vmGuard || null, pool: lane?.pool || null,
+    enabled: !!lane?.vitestGuard, mode: lane?.vitestGuard || null, pool: lane?.pool || null,
     quarantined: { vm: Object.keys(q.vm || {}).slice(0, 20), shared: Object.keys(q.shared || {}).slice(0, 20), vmCount: Object.keys(q.vm || {}).length, sharedCount: Object.keys(q.shared || {}).length },
     conflicts: conflicts ? (Array.isArray(conflicts) ? conflicts.length : Object.keys(conflicts).length) : 0,
     lastRun: last ? new Date(last).toISOString() : null, filesLogged: files, dirtyStarts: dirty,
-    ...(dirty ? { hint: 'some files started with state left by a previous file (see the vm-guard README, check command, for quarantine)' } : {}),
+    ...(dirty ? { hint: 'some files started with state left by a previous file (see the vitest-guard README, check command, for quarantine)' } : {}),
   });
 }

@@ -2,7 +2,7 @@
 #
 #   main          full run with the collector → coverage map published as a pipeline artifact
 #   pull request  only the tests affected by the PR; whole suite whenever the map cannot answer
-#   nightly       whole suite in isolated forks (+ vm-guard verify if you use vm-guard)
+#   nightly       whole suite in isolated forks (+ vitest-guard verify if you use vitest-guard)
 #
 # Trust rule: the map is recorded only on the protected branch; PR builds only consume it.
 #
@@ -145,8 +145,8 @@ stages:
             displayName: build the vto analyzer
           - script: npx --no-install vitest run
             workingDirectory: $(Build.SourcesDirectory)/app
-            env: { VM_GUARD_MODE: isolated }   # no effect unless vitest.config is wrapped with defineVmGuardConfig
-          # Only with vm-guard (exit 5 = false green, exit 4 = quarantine changed: commit it):
+            env: { VITEST_GUARD_MODE: isolated }   # no effect unless vitest.config is wrapped with defineVitestGuardConfig
+          # Only with vitest-guard (exit 5 = false green, exit 4 = quarantine changed: commit it):
           # - script: node "$(VTO_HOME)/bin/vto.mjs" guard verify --sample 500
           #   workingDirectory: $(Build.SourcesDirectory)/app
           # - script: node "$(VTO_HOME)/bin/vto.mjs" guard check --prune

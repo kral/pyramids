@@ -21,9 +21,9 @@ Owner = the work package that fixes it (WP1–WP5 below). Status is tracked in t
 | S-N2b | daemon base diff drops git-quoted file names (diacritics) | WP3 |
 | A-2 | clean (uninstrumented) lane marks every passing test dirty | WP3 |
 | C-M4 | daemon stored map drops `reads`; missed edit forgotten after version advance | WP3 |
-| C-M6 | vm-guard shared: order-dependent false greens not caught by verify --sample all | WP4 |
-| C-M7 | vm-guard check labels deterministic vm-only failure FLAKY, exit 0 | WP4 |
-| U-2 | vm-guard check/compare silently run forks when config not wrapped → wrong modes.json | WP4 |
+| C-M6 | vitest-guard shared: order-dependent false greens not caught by verify --sample all | WP4 |
+| C-M7 | vitest-guard check labels deterministic vm-only failure FLAKY, exit 0 | WP4 |
+| U-2 | vitest-guard check/compare silently run forks when config not wrapped → wrong modes.json | WP4 |
 | C-M8 | verify "confirmed" for tests differing by a sign literal; pairs not listed | WP5 |
 
 ## P0 – security
@@ -38,7 +38,7 @@ Owner = the work package that fixes it (WP1–WP5 below). Status is tracked in t
 | S-N8 | IPC: no handshake timeout, non-string token crash, client name log forging | WP3 |
 | S-F10 | verify report-md escapes only `|` | WP5 |
 | S-F11 | `.vto/` world-readable; samples/demo-raw contains full source + absolute paths | WP3 + WP5 |
-| U-3 | `npx vm-guard` / `vto` names taken on npm (docs fixed in 61dcfbf); need scoped names | WP5 |
+| U-3 | `npx vitest-guard` / `vto` names taken on npm (docs fixed in 61dcfbf); need scoped names | WP5 |
 
 ## P1 – consistency, structure, install
 
@@ -63,7 +63,7 @@ Owner = the work package that fixes it (WP1–WP5 below). Status is tracked in t
 - **WP1 analyzer & selection** – `analyzer/**`, `FORMAT.md`, `contracts/raw*`, `contracts/map*`
 - **WP2 collector** – `collector/**` (except `collector/corpus/cases` additions are fine), `vitest-overlap.mjs`
 - **WP3 daemon & MCP** – `mcp/**`, `MCP.md`, `contracts/ipc*`, `contracts/env*` (schema only)
-- **WP4 vm-guard** – `vm-guard/**`
+- **WP4 vitest-guard** – `vitest-guard/**`
 - **WP5 TUI, verify, CI, packaging, docs** – `tui/**`, `verify/**`, `.github/**`, root `package.json`, `README*.md`, `ARCHITECTURE.md` (status notes only), `samples/**`, new `LICENSE`/`SECURITY.md` (after owner decision)
 
 ## Performance (REVIEW-2-performance.md) – added after WP launch
@@ -75,5 +75,5 @@ Owner = the work package that fixes it (WP1–WP5 below). Status is tracked in t
 | P-2 | live coverage events recompute over all tests hitting a file (32 ms/event at 30k) → incremental totals | WP3 |
 | P-3/P-4 | daemon regenerates whole report on first query; re-reads 48 MB map per selection | WP3 |
 | P-5 | no cleanup of `.vto/` blobs, metrics, lane logs → retention/rotation | WP3 |
-| P-6 | run where no worker starts reports green (`ran 0, failed 0`) | WP3 (+WP4 for vm-guard runner) |
+| P-6 | run where no worker starts reports green (`ran 0, failed 0`) | WP3 (+WP4 for vitest-guard runner) |
 | P-8 | perf claims without data in repo → commit `perf/data/` with raw measurements; collector overhead under vm pools is +12 %, not ~3 % | WP5 (docs) |

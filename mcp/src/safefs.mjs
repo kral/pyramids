@@ -1,4 +1,4 @@
-// Writes under repo-controlled state directories (.vto/, .vm-guard/run/) – SECURITY N5 / F11.
+// Writes under repo-controlled state directories (.vto/, .vitest-guard/run/) – SECURITY N5 / F11.
 // A cloned repository or a PR can commit these directories, symlinks included, so:
 //  - every directory component below the project root is lstat-checked: a symlink (or a non-directory)
 //    is refused, never followed; directories are created 0700 and narrowed to 0700 when wider

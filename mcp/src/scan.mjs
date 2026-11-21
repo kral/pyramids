@@ -36,7 +36,7 @@ export class Scanner {
   }
 }
 
-/** Run-all triggers (MCP.md): config, package manifests, lockfiles, tsconfig, setup files, .env*, vm-guard lists. */
+/** Run-all triggers (MCP.md): config, package manifests, lockfiles, tsconfig, setup files, .env*, vitest-guard lists. */
 export function triggerFiles(root, info = {}) {
   const out = new Set();
   const add = (f) => { if (f) out.add(f.replace(/\\/g, '/')); };
@@ -49,7 +49,7 @@ export function triggerFiles(root, info = {}) {
   try { for (const n of fs.readdirSync(envDir)) if (/^\.env(\..*)?$/.test(n)) add(`${envDir}/${n}`); } catch {}
   add(info.configFile);
   for (const s of info.setupFiles || []) add(s);
-  add(`${root}/.vm-guard/incompatible.json`);
-  add(`${root}/.vm-guard/conflicts.json`);
+  add(`${root}/.vitest-guard/incompatible.json`);
+  add(`${root}/.vitest-guard/conflicts.json`);
   return [...out];
 }

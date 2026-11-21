@@ -34,8 +34,8 @@ běhy s instrumentací), `fix` (opakování selhaných testů, zatímco hlavní 
 |---|---|---|---|
 | `npx vitest run` (holý, default reporter) | forks (výchozí Vitest) | 698 s | 308,5 s |
 | první studený běh vto = plný sběr mapy (s instrumentací) | forks | 455 s | 305 s |
-| první studený běh vto = plný sběr mapy | vm-guard `vm` (vmThreads) | 71 s | 47 s |
-| `npx vitest run` s vm-guard konfigurací (referenční běhy kontroly recall) | vm-guard `vm` | 49–58 s | – |
+| první studený běh vto = plný sběr mapy | vitest-guard `vm` (vmThreads) | 71 s | 47 s |
+| `npx vitest run` s vitest-guard konfigurací (referenční běhy kontroly recall) | vitest-guard `vm` | 49–58 s | – |
 
 Instrumentace a collector na celé sadě nestojí měřitelné CPU (305 vs 308,5 s, v rámci šumu).
 
@@ -54,12 +54,12 @@ Proti plnému běhu: **o 98 % méně CPU** pro úpravu komponenty, o 87 % pro š
 ARCHITECTURE.md (ADR-7), ≈80 % ceny je prostředí jsdom a vyhodnocení modulů pro každý soubor, které
 zahřátý hlavní proces při `isolate: true` neudrží. Démon přináší: žádný start Vitestu/Vite při volání
 (~1–2 s wall), selhání *během* běhu (první selhání po 1,3 s proti 9,2 s celého běhu), fix loop, živé
-pokrytí a mapu v paměti. Velké páky jsou výběr testů a pool (vm-guard `vm`).
+pokrytí a mapu v paměti. Velké páky jsou výběr testů a pool (vitest-guard `vm`).
 
-S poolem vm-guard `vm`: úprava komponenty (80 testů) za **1,9 s** (holý `vitest run <soubory>` 2,2 s, bez démona 2,0 s)
+S poolem vitest-guard `vm`: úprava komponenty (80 testů) za **1,9 s** (holý `vitest run <soubory>` 2,2 s, bez démona 2,0 s)
 proti 56–71 s celé sady (−97 %) a 698 s / 308 s CPU výchozího Vitestu (forks). Rozdíl zahřátý/studený je jen 0,1–0,8 s.
 
-Čas do prvního selhání (celá sada, vm-guard): selhání v souboru na pozici 174/312 přijde po 40,8 s místo 56,7 s
+Čas do prvního selhání (celá sada, vitest-guard): selhání v souboru na pozici 174/312 přijde po 40,8 s místo 56,7 s
 (konec běhu); na pozici 306/312 bez zisku. Pořadí souborů určuje sekvencer Vitestu.
 
 Objem událostí: celý běh pošle 3195 událostí `test` (494 KB) a 349 událostí `coverage` (2,7 MB, max 14 KB);
@@ -79,7 +79,7 @@ ne tokeny. U selhání je vto 3,4× menší (seskupení, ≤3 rámce, krátké d
 ### Správnost (kontrola recall)
 
 `node dev/recall.mjs` – náhodné jednořádkové mutace v `src/` (operátory z faultinject), po každé zahřátý
-`run_affected` a plný referenční běh bez vto (stejná vm-guard konfigurace): **10 mutantů, 6 zabitých, 171 testů
+`run_affected` a plný referenční běh bez vto (stejná vitest-guard konfigurace): **10 mutantů, 6 zabitých, 171 testů
 selhalo v plném běhu, všech 171 bylo vybráno (recall 100 %), 0 rozdílů ve stavu testů**, žádný „run all“,
 průměrně vybráno 74 z 3174 testů (2,3 %), vto 8,6 s proti 58 s plného běhu (průměr; jeden mutant s timeouty 61 s).
 

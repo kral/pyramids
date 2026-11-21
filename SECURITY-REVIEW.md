@@ -1,7 +1,7 @@
 # vto – threat model and security review (pre-1.0)
 
 Reviewer: independent AppSec review, 2026-11-21. Scope: `collector/`, `analyzer/` (Rust CLI), `verify/`,
-`vm-guard/`, `vitest-overlap.mjs`, and the **design** of the daemon + MCP server + Claude Code hook (`MCP.md`).
+`vitest-guard/`, `vitest-overlap.mjs`, and the **design** of the daemon + MCP server + Claude Code hook (`MCP.md`).
 At review time `mcp/` holds only `package.json`, so daemon, MCP and hook findings are design findings. They are
 requirements for the implementation, not bugs in shipped code.
 
@@ -52,7 +52,7 @@ Must-fix-before-1.0 list: §6.
 | Developer | trusted | runs CLI/daemon, approves agent actions |
 | AI agent (Claude Code, Cursor) | semi-trusted: acts for the developer, but **reads untrusted content and can be steered by it** | calls MCP tools with arbitrary arguments; runs Bash subject to permission rules and hooks |
 | Malicious dependency (npm, including transitive) | untrusted, executes in tests | arbitrary code at import time in workers; can tamper with globals |
-| Malicious repo / PR content (test names, file names, failure messages, `.gitattributes`, `.vm-guard/*.json`, snapshots) | untrusted **data**; becomes code once tests run | controls everything vto parses and echoes |
+| Malicious repo / PR content (test names, file names, failure messages, `.gitattributes`, `.vitest-guard/*.json`, snapshots) | untrusted **data**; becomes code once tests run | controls everything vto parses and echoes |
 | Other local users on the same machine (shared dev boxes, jump hosts, multi-tenant CI runners) | untrusted | shared `/tmp`, can connect to sockets they have permission for, Windows pipe namespace |
 | CI runner | trusted for main / protected branches; **untrusted for fork PRs** | caches, artifacts, secrets |
 | Release pipeline / registry | trusted only if verified | publishes npm and binaries |
@@ -126,19 +126,19 @@ Legend: ✅ adequately handled · ⚠ finding (see §3, ID in brackets) · ℹ a
 |---|---|---|
 | T | Raw data is fully trusted by the analyzer. A poisoned map yields 0 tests and exit 0 (PoC 7). | ⚠ [F7] |
 | T | Markdown / HTML / ANSI injection through test names and file names into `report.md` (PoC 4) and `verify.md`. Raw newlines are echoed to stderr / CI logs (PoC 3 output). | ⚠ [F10] |
-| I | `process.env` values are **not** written. vm-guard logs env *keys* only. | ✅ |
+| I | `process.env` values are **not** written. vitest-guard logs env *keys* only. | ✅ |
 | I | Absolute paths (user names, home layout), source snippets and string literals (`verify.json` `desc`/`original`), and failure messages (`e`, 160 chars) are written. `.gitignore` lacks `.vto/`, `.vto-tmp/`, `verify-report/`, and raw dirs. | ⚠ [F11] |
 | D | Analyzer reads all of `*.jsonl` into memory: 300 MB in gives 1.7 GB RSS (PoC 7). Symlinked `*.jsonl` are followed. | ⚠ [F15, F19] |
 | T | `--raw DIR` / collector `rawDir` is `rm -rf`'d **before any validation**, so `--raw src` wipes `src/` (PoC 5). | ⚠ [F5] |
 
-### 2.6 vm-guard (`vm-guard/src`)
+### 2.6 vitest-guard (`vitest-guard/src`)
 | | Threat | Status |
 |---|---|---|
 | T | `Symbol.hasInstance` shims make `x instanceof Error/Array/Object/…` true for outer-realm objects. Exact by design (same intrinsic only), but tests like `toThrow(TypeError)` can pass on foreign-realm errors. Test-correctness risk only. | ℹ / [F12] |
-| T | vm contexts and `isolate:false` share process, builtins and module cache. One test file can neuter `expect`, patch `node:fs`, etc. for **later files**, giving false-green results (vm-guard detects some pollution only when `diag` is on). | ⚠ [F12] |
+| T | vm contexts and `isolate:false` share process, builtins and module cache. One test file can neuter `expect`, patch `node:fs`, etc. for **later files**, giving false-green results (vitest-guard detects some pollution only when `diag` is on). | ⚠ [F12] |
 | T | `process.env` restore between files is a hygiene measure, not isolation: secrets in env are visible to all files and dependencies. | ℹ |
-| E | Committed `.vm-guard/incompatible.json` entries become Vitest `include` globs of the isolated project. A JSON-only PR change makes Vitest **execute an arbitrary non-test module** (PoC 9). `VM_GUARD_LANE_FILE` behaves similarly. | ⚠ [F9] |
-| T/I | `runner.mjs` uses the predictable `os.tmpdir()/vm-guard-<pid>-<seq>-<tag>.json`. Another local user can clobber victim files via symlink, or read and **forge** results (PoC 8). | ⚠ [F8] |
+| E | Committed `.vitest-guard/incompatible.json` entries become Vitest `include` globs of the isolated project. A JSON-only PR change makes Vitest **execute an arbitrary non-test module** (PoC 9). `VITEST_GUARD_LANE_FILE` behaves similarly. | ⚠ [F9] |
+| T/I | `runner.mjs` uses the predictable `os.tmpdir()/vitest-guard-<pid>-<seq>-<tag>.json`. Another local user can clobber victim files via symlink, or read and **forge** results (PoC 8). | ⚠ [F8] |
 | ✅ | `spawn`/`spawnSync` use argv arrays, with no `shell:true` anywhere in the repo. | ✅ |
 
 ### 2.7 Mutation verify (`verify/`)
@@ -220,24 +220,24 @@ Ordering is by severity, then likelihood. "PoC" refers to `/home/claude/sec-scra
   3. Git error / injection (F1) gives 0 tests.
   4. Pure renames select nothing for the renamed module (importers usually change too, but not always, e.g. `index.ts` re-exports).
 - **Rationale**: with CI "run affected only" on PRs, I:H for A3. Likelihood: medium (also triggered accidentally).
-- **Fix**: `git diff --text` (`-a`) plus `-c diff.external=` and `--no-ext-diff`. Treat any changed file without hunk data as file-level (importers) or run-all. Add `.gitattributes`, `.gitmodules`, `.vm-guard/**`, `.vto/**`, `**/__mocks__/**`, `vitest.*` and `.nvmrc`/`.node-version` to the run-all defaults. Use exact path matching (suffix matching only as an explicit option, and then only when unique **and** the path is in `fileload.modules`). Exit 3 on any doubt. In CI, always run the full suite on the merge queue / main (selection is an accelerator, not a gate).
+- **Fix**: `git diff --text` (`-a`) plus `-c diff.external=` and `--no-ext-diff`. Treat any changed file without hunk data as file-level (importers) or run-all. Add `.gitattributes`, `.gitmodules`, `.vitest-guard/**`, `.vto/**`, `**/__mocks__/**`, `vitest.*` and `.nvmrc`/`.node-version` to the run-all defaults. Use exact path matching (suffix matching only as an explicit option, and then only when unique **and** the path is in `fileload.modules`). Exit 3 on any doubt. In CI, always run the full suite on the merge queue / main (selection is an accelerator, not a gate).
 
 ### F7 – Coverage map / raw data poisoning (CI cache, shared `.vto/`) — **Medium**
 - **Rationale**: the analyzer trusts raw data completely. A map where a file has blocks that no test covers and the file is absent from `fileload` yields **0 tests, exit 0** for real changes (PoC 7). Fork PR jobs that can write `actions/cache` entries restorable by base-branch jobs (cache scope rules vary by CI; GitHub restricts by branch, others often do not) can poison the selection for everyone. Same for a map committed to the repo or shared over a network drive.
 - **Fix**: produce maps only in trusted jobs (main / protected branches). Cache key includes the git SHA, vto version and a config hash. Never restore PR-written caches in trusted jobs. Store a manifest with a SHA-256 per raw file, optionally signed (Sigstore/cosign in CI). The analyzer verifies `meta.gitHead` against the diff base and **refuses (run-all)** when the gitHead is missing or mismatched, instead of warning. Add sanity checks (every test file in the map has a `fileload`; a file with blocks but zero hits across all tests gets flagged).
 
-### F8 – vm-guard: predictable report file in shared `/tmp` (symlink clobber, read and forge results) — **Medium**
-- **Where**: `vm-guard/src/runner.mjs`: `path.join(os.tmpdir(), \`vm-guard-${pid}-${++seq}-${tag}.json\`)`, followed by `rmSync`, Vitest `--outputFile`, then `readFileSync`.
+### F8 – vitest-guard: predictable report file in shared `/tmp` (symlink clobber, read and forge results) — **Medium**
+- **Where**: `vitest-guard/src/runner.mjs`: `path.join(os.tmpdir(), \`vitest-guard-${pid}-${++seq}-${tag}.json\`)`, followed by `rmSync`, Vitest `--outputFile`, then `readFileSync`.
 - **PoC 8** (two local users, `fs.protected_symlinks=0`, `protected_regular=0`, as in many containers):
   - (a) Mallory plants a symlink, and the victim's `~/notes.txt` is overwritten with the JSON report.
   - (b) Mallory pre-creates a `0666` file, reads the report (test names, failure messages) and flips `failed` to `passed`. The victim's quarantine/check decision is forged. The final `rmSync` also crashes (DoS).
 - **Scope**: Linux/BSD with shared `/tmp`. Mitigated by `protected_symlinks=1`/`protected_regular≥1` on most desktop distros. macOS (`$TMPDIR` per user) and Windows (`%TEMP%` per user) are not affected.
-- **Fix**: `fs.mkdtempSync(path.join(os.tmpdir(), 'vm-guard-'))` (created `0700`), file inside it, and remove the directory afterwards. Or write into `<root>/.vm-guard/run/`. Same pattern check for the future daemon.
+- **Fix**: `fs.mkdtempSync(path.join(os.tmpdir(), 'vitest-guard-'))` (created `0700`), file inside it, and remove the directory afterwards. Or write into `<root>/.vitest-guard/run/`. Same pattern check for the future daemon.
 
-### F9 – `.vm-guard/incompatible.json` (committed) makes Vitest execute arbitrary non-test modules — **Medium**
-- **Rationale**: quarantine keys go unvalidated into `include` of the isolated project (`index.mjs:101–103`). Reviewers treat the file as generated data ("commit `.vm-guard/*.json`" per the README) and skim it. A PR adding `"scripts/release-helper.mjs"` runs that module in CI with CI secrets in env. Writing a regular `*.test.ts` would also run code, but this hides execution in a data file, and the target may be an existing file whose import-time side effects were never meant to run in CI (deploy and seed scripts).
+### F9 – `.vitest-guard/incompatible.json` (committed) makes Vitest execute arbitrary non-test modules — **Medium**
+- **Rationale**: quarantine keys go unvalidated into `include` of the isolated project (`index.mjs:101–103`). Reviewers treat the file as generated data ("commit `.vitest-guard/*.json`" per the README) and skim it. A PR adding `"scripts/release-helper.mjs"` runs that module in CI with CI secrets in env. Writing a regular `*.test.ts` would also run code, but this hides execution in a data file, and the target may be an existing file whose import-time side effects were never meant to run in CI (deploy and seed scripts).
 - **PoC 9**: `PAYLOAD-RAN.txt` was written by `scripts/release-helper.mjs`. The only signal is "No test suite found", which a payload can avoid by registering a dummy test.
-- **Fix**: accept only entries that are literal relative paths (no glob metacharacters, no `..`, no absolute paths), exist, **and** match the user's `include` globs (and not `exclude`). Drop others with a warning. Same validation for `VM_GUARD_LANE_FILE` contents and `conflicts.json`. Recommend CODEOWNERS on `.vm-guard/` and `.vto/`.
+- **Fix**: accept only entries that are literal relative paths (no glob metacharacters, no `..`, no absolute paths), exist, **and** match the user's `include` globs (and not `exclude`). Drop others with a warning. Same validation for `VITEST_GUARD_LANE_FILE` contents and `conflicts.json`. Recommend CODEOWNERS on `.vitest-guard/` and `.vto/`.
 
 ### F10 – Markdown / HTML / terminal injection in reports and logs — **Medium**
 - **Where**: `analyzer/src/report.rs` `esc()` escapes only `|`. Names are wrapped in backticks with no backtick handling. `verify/report-md.mjs` does the same. `eprintln!` echoes raw file names with newlines and escape sequences.
@@ -249,14 +249,14 @@ Ordering is by severity, then likelihood. "PoC" refers to `/home/claude/sec-scra
   - v8 engine stores full transformed source (`samples/demo-raw/*.jsonl`, committed, including `/home/claude/...` absolute paths).
   - `verify.json`/`verify.md` contain source snippets and string literals (`desc`, `original`), so hard-coded keys or URLs leak, plus failure messages (`e`, ≤ 160 chars) that may contain tokens or connection strings.
   - Raw data contains absolute paths (user names, internal directory structure) and test names (customer names, ticket IDs in fixtures).
-  - `.gitignore` is missing `.vto/`, `.vto-tmp/`, `verify-report/`, `.vm-guard/run/`, `node_modules/.vto/`.
+  - `.gitignore` is missing `.vto/`, `.vto-tmp/`, `verify-report/`, `.vitest-guard/run/`, `node_modules/.vto/`.
   - The planned MCP sends console output and source lines to an external LLM provider.
   - Good: env values are never written, and `mkdtemp` raw dirs are `0700`.
 - **Fix**: relative paths only in persisted data (root stored once in `meta`). No full source in raw data (v8: store hash plus line map, or keep it opt-in and redacted). Redact string-literal content in mutant descriptions (`"…" → ""` with the length only). Run the secret redaction from F4 on all persisted messages. Write `.vto/.gitignore` containing `*` on creation (as `.pytest_cache` does). Document data flows to the LLM provider. Add `retention-days` guidance for CI artifacts.
 
 ### F12 – Shared realms (`vmThreads`, `isolate:false`) are not a security boundary: false-green results — **Medium**
 - **Rationale**: one test file or dependency can patch `expect`/chai, `node:*` builtins or Vitest internals, and later files in the same worker silently pass. In vm mode the outer realm (process, builtins, `Symbol.hasInstance` shims) is shared. vto's own globals can be tampered with (PoC 6), which makes the redundancy report flag a security test as "redundant", and a developer then deletes it. Matters where CODEOWNERS-protected security tests are a merge gate but other test files are freely editable.
-- **Fix**: document clearly. Security-critical gates run in `isolated` mode (`forks`, `isolate:true`), and vm-guard `diag` pollution findings fail CI there. Freeze collector state: keep it in a module-scoped closure exposed through a non-writable, non-configurable `Symbol` property defined with `Object.defineProperty`. Mark records whose arrays were replaced or zeroed as tainted.
+- **Fix**: document clearly. Security-critical gates run in `isolated` mode (`forks`, `isolate:true`), and vitest-guard `diag` pollution findings fail CI there. Freeze collector state: keep it in a module-scoped closure exposed through a non-writable, non-configurable `Symbol` property defined with `Object.defineProperty`. Mark records whose arrays were replaced or zeroed as tainted.
 
 ### F13 – Mutation verify runs mutated code with real side effects — **Medium**
 - **Rationale**: mutants flip safety guards (`if (dryRun) return`, `if (env !== 'prod')`, confirmation prompts) and remove calls (`remove-call` on `cleanup()`, `release()`). Tests that are not hermetic (real DB/S3/HTTP with credentials in env) can then delete or modify real data. Likelihood: low to medium (React component suites are mostly hermetic, but the tool targets "any Vitest project").
@@ -341,17 +341,17 @@ commercial activity and should be assessed separately.
 **Analyzer / affected**
 - [ ] `--end-of-options` + SHA resolution for every git call. Hardened `-c` flags. `--text` (F1, F6, F18).
 - [ ] Fail-safe everywhere: any doubt (git error, no hunks, unknown file, gitHead mismatch or missing) → `runAll`, exit 3 (F6, F7).
-- [ ] Exact path matching by default. `.gitattributes`, `.vm-guard/**`, `.vto/**` are run-all triggers.
+- [ ] Exact path matching by default. `.gitattributes`, `.vitest-guard/**`, `.vto/**` are run-all triggers.
 - [ ] Input limits on raw data. Linear-time glob matcher. No symlink following (F15, F19).
 - [ ] All human-facing output (Markdown, terminal, CI logs) escaped (F10).
 
 **Data**
 - [ ] Persisted data uses relative paths. No full source by default. Redacted messages and literals (F11).
-- [ ] `.vto/.gitignore` with `*` created automatically. Repo `.gitignore` covers `.vto-tmp/`, `verify-report/`, `.vm-guard/run/`.
+- [ ] `.vto/.gitignore` with `*` created automatically. Repo `.gitignore` covers `.vto-tmp/`, `verify-report/`, `.vitest-guard/run/`.
 - [ ] Destructive operations only on vto-owned dirs (marker file). Arguments validated before deletion (F5).
 - [ ] Temp files via `mkdtemp` only (F8).
 
-**vm-guard / verify**
+**vitest-guard / verify**
 - [ ] Quarantine and lane entries validated against include globs and existing files (F9).
 - [ ] Docs: `vm`/`shared` modes are not isolation. Security gates run `isolated` (F12).
 - [ ] Verify: scrubbed env, optional offline/permission model, warning on first run (F13).
@@ -370,7 +370,7 @@ commercial activity and should be assessed separately.
 4. **F3** – hook never returns `allow` and never builds shell strings (design requirement).
 5. **F4** – MCP input validation and output sanitisation and caps (design requirement).
 6. **F6 + F7** – fail-safe selection (`--text`, no-hunk handling, exact path matching, gitHead enforcement, `.gitattributes` trigger) and CI map-provenance guidance.
-7. **F8** – `mkdtemp` in vm-guard runner (one-line class fix).
+7. **F8** – `mkdtemp` in vitest-guard runner (one-line class fix).
 8. **F9** – validate quarantine / lane entries.
 9. **F10** – one escaping helper for Markdown and terminal output.
 10. **F20** – release pipeline with provenance and signing before publishing any prebuilt binary. Lockfile for `mcp/`.
@@ -398,7 +398,7 @@ Prebuilt `vto` binaries are supported only when installed from the official npm 
 - Use GitHub private vulnerability reporting ("Report a vulnerability" on the Security tab), or e-mail
   security@<company-domain> (PGP key: <link>). Please do not open public issues.
 - Include affected version, platform (Windows/Linux/macOS), component (collector, analyzer, verify,
-  vm-guard, daemon, MCP server, hook), reproduction steps and impact.
+  vitest-guard, daemon, MCP server, hook), reproduction steps and impact.
 - We acknowledge within 3 working days, give an initial assessment within 10 working days, and aim to
   release a fix within 90 days (critical: as soon as possible). We coordinate disclosure with you and
   credit you unless you prefer otherwise. We request a CVE for confirmed issues where appropriate.

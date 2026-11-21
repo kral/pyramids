@@ -35,8 +35,8 @@ Raw data: `/tmp/vto-work/*.json` (not in the repo); scripts `dev/bench.mjs`, `de
 |---|---|---|---|
 | `npx vitest run` (plain, default reporter) | forks (Vitest default) | 698 s | 308.5 s |
 | vto cold first run = full collection (instrumented, map recorded) | forks | 455 s | 305 s |
-| vto cold first run = full collection | vm-guard `vm` (vmThreads) | 71 s | 47 s |
-| `npx vitest run` with the vm-guard config (reference runs of the recall check) | vm-guard `vm` | 49–58 s | – |
+| vto cold first run = full collection | vitest-guard `vm` (vmThreads) | 71 s | 47 s |
+| `npx vitest run` with the vitest-guard config (reference runs of the recall check) | vitest-guard `vm` | 49–58 s | – |
 
 Instrumentation + collector cost no measurable CPU on the full suite (305 vs 308.5 s, within noise).
 
@@ -55,22 +55,22 @@ vs. the full run: **98 % less CPU** for a component edit (7 s vs 305–308 s), 8
 ARCHITECTURE.md ADR-7, ≈80 % of the cost is the per-file jsdom environment + module evaluation, which a warm
 main process cannot keep under `isolate: true`. What the daemon does buy: no Vitest/Vite startup per call
 (~1–2 s wall), failures *during* the run (time to first failure 1.3 s vs 9.2 s for the whole run), the
-fix loop, live coverage and the map in memory. The big levers are selection and the pool (vm-guard `vm`).
+fix loop, live coverage and the map in memory. The big levers are selection and the pool (vitest-guard `vm`).
 
-### Same edits with the vm-guard `vm` pool (bench copy with `"pool":"vm"`)
+### Same edits with the vitest-guard `vm` pool (bench copy with `"pool":"vm"`)
 
-| scenario | selected | plain `vitest run <files>` (vm-guard config) | vto stateless | vto warm daemon |
+| scenario | selected | plain `vitest run <files>` (vitest-guard config) | vto stateless | vto warm daemon |
 |---|---|---|---|---|
 | CartBadge, behaviour-preserving | 80 | 2.2 s / 2.2 s CPU | 2.0 s / 2.2 s CPU | 1.9 s / 2.2 s CPU (1.6 s after revert) |
 | CartBadge, breaking (19 failures) | 80 | 2.4 s / 2.3 s CPU | 2.4 s / 2.4 s CPU | 1.9 s / 1.8 s CPU, first failure after 0.8 s |
 | useQuantity hook | 61 (67 run) | 2.7 s / 2.5 s CPU | 3.0 s / 2.8 s CPU | 2.2 s / 2.1 s CPU |
 | api/client.ts top-level | 400 | 13.1 s / 6.9 s CPU | 13.9 s / 7.6 s CPU | 13.3 s / 7.8 s CPU |
 
-With vm-guard the whole agent iteration (select + run + map patch) is ~2 s for a component edit vs 56–71 s
+With vitest-guard the whole agent iteration (select + run + map patch) is ~2 s for a component edit vs 56–71 s
 for the full suite (−97 %), and vs 698 s / 308 s CPU for the plain Vitest default (forks). Warm vs cold again
 differs by only 0.1–0.8 s wall: Vitest + Vite start is cheap here (~0.5 s), the cost is per test file.
 
-### Time to first failure (full run, vm-guard, failing tests injected into two files)
+### Time to first failure (full run, vitest-guard, failing tests injected into two files)
 
 | | first failure | whole run (when the classic workflow shows it) |
 |---|---|---|
@@ -83,7 +83,7 @@ file runs; the gain is (run end − that moment), on average about half a run fo
 
 ### One lane vs two lanes (dom / node groups, `pool: "auto"`)
 
-Two warm main lanes run in parallel inside one run: `dom` (vm-guard `vm`) and `node` (`forks`); see PROTOCOL.md §9.
+Two warm main lanes run in parallel inside one run: `dom` (vitest-guard `vm`) and `node` (`forks`); see PROTOCOL.md §9.
 CPU budget on this box = 1 worker (cores − 1) per single lane; the two lanes get 1 worker each.
 
 | project / run | one lane | two lanes | Δ wall | Δ CPU |
@@ -104,9 +104,9 @@ of two lanes is mostly parallelism (two workers instead of one): against one lan
 full run is −14 % wall / −5 % CPU (node-environment files are cheaper in forks than in vmThreads, as the
 the real-world suite validation measured), the edit run is within noise. Load average was 5–7 during these runs.
 The classification is also written to
-`.vm-guard/run/env.json` for vm-guard `mode: 'auto'`.
+`.vitest-guard/run/env.json` for vitest-guard `mode: 'auto'`.
 
-### Event stream volume (daemon → subscriber, bench-project, vm-guard)
+### Event stream volume (daemon → subscriber, bench-project, vitest-guard)
 
 | run | events | bytes | largest event |
 |---|---|---|---|
@@ -142,7 +142,7 @@ Typical response sizes (warm daemon, bench-project):
 | `rerun_failed` | 53 | | `coverage_of {file}` | 97 |
 | `coverage_of {file, detail:"full"}` (10 lines/page) | 649 | | `tests_for_line` (10/page) | 305 |
 | `test_overlap {file}` (5/page) | 446 | | `slow_tests` | 430 |
-| `suggest_env` (10/page) | 251 | | `vm_guard_status` | 78 |
+| `suggest_env` (10/page) | 251 | | `vitest_guard_status` | 78 |
 | `savings_report` | 197 | | `slow_imports` | 284 |
 | `list_tasks` | 35 | | `coverage_of {test}` | 44 |
 
@@ -151,7 +151,7 @@ Budgets are enforced per tool by `test/integration.test.mjs` (CI); every respons
 ### Correctness (recall check)
 
 `node dev/recall.mjs` – random single-line mutations (faultinject operators) of `src/`, each followed by a warm
-`run_affected` and a full reference run without vto (same vm-guard config, no instrumentation):
+`run_affected` and a full reference run without vto (same vitest-guard config, no instrumentation):
 
 | mutants | killed | tests failing in the full runs | of them selected by vto | state mismatches (vto vs full, selected tests) | run-all answers | mean selected | mean time vto / full |
 |---|---|---|---|---|---|---|---|
@@ -246,7 +246,7 @@ substring); paths are relative and must stay inside the project; `base` must be 
 | `suggest_env` | `file?`, page | test files that never touched DOM globals → candidates for `node` environment |
 | `coverage_of` | `{test}` / `{file, line}` / `{file, live?, detail?}` | lines a test covers / tests covering a line / covered-partial-uncovered ranges (live during a run) |
 | `tests_for_line` | `file`, `line`, page | tests covering the line |
-| `vm_guard_status` | – | mode, quarantined files, dirty-start warnings |
+| `vitest_guard_status` | – | mode, quarantined files, dirty-start warnings |
 | `savings_report` | `since?` (`30d`) | runs, full runs avoided, CPU/wall saved, tokens vs classic, time to first failure (SAVINGS.md) |
 
 Resources: `vto://runs/{runId}/failures` (subscribable: `notifications/resources/updated` on new failures),
@@ -270,7 +270,7 @@ Exit codes of `run*`: 0 green, 1 failures, 2 error.
 
 | key / env | default | meaning |
 |---|---|---|
-| `pool` / `VTO_POOL` | `auto` | `auto`: two warm main lanes, `dom` + `node` (below); `vm` / `shared`: one lane, config wrapped with vm-guard; `forks` / `threads` / `vmThreads` / `vmForks`: one lane with that pool; `config`: one lane as configured |
+| `pool` / `VTO_POOL` | `auto` | `auto`: two warm main lanes, `dom` + `node` (below); `vm` / `shared`: one lane, config wrapped with vitest-guard; `forks` / `threads` / `vmThreads` / `vmForks`: one lane with that pool; `config`: one lane as configured |
 | `groups` | on with `pool: auto` | `false` = one main lane |
 | `groupPools` | `{"dom":"vm","node":"forks"}` | pools of the two lanes |
 | `nodeEnvironment` | – | `"node"`: also route jsdom files that never touched the DOM to the node lane and run them in `node` |
@@ -294,7 +294,7 @@ Exit codes of `run*`: 0 green, 1 failures, 2 error.
   outside blocks or in import-time code, marks the affected tests/files **dirty** (always selected until re-run).
 - Always selected: dirty tests, previously failing tests, new test files, changed test files (whole file).
 - Run-all triggers (map stale, lanes restarted): package.json, lockfiles, vite/vitest config, tsconfig*,
-  setup files, `.env*`, `.gitattributes`, `.vm-guard/incompatible.json` / `conflicts.json`.
+  setup files, `.env*`, `.gitattributes`, `.vitest-guard/incompatible.json` / `conflicts.json`.
 - Files edited *during* a run do not advance; the tests of that run that touched them are marked dirty.
 - Change detection is stat (mtime+size) → hash, no file watchers (same behaviour on all OSes).
 
@@ -322,13 +322,13 @@ Exit codes of `run*`: 0 green, 1 failures, 2 error.
 - Workers reused across runs (`isolate: false`, shared mode) may skip re-emitting unchanged block tables; the
   map keeps the previous table (identical by construction).
 - `suggest_env` only sees DOM access after the user's setup files; a DOM-touching setup file makes every file look DOM-dependent.
-- The vm-guard wrapper for non-vm-guard configs is generated in `.vto/setup/`; vm-guard's sequencer prints a
+- The vitest-guard wrapper for non-vitest-guard configs is generated in `.vto/setup/`; vitest-guard's sequencer prints a
   harmless "vitest/node treated as external" warning into `.vto/lane-main.log`.
 - New source files that no test imports yet are ignored until an importer changes (reported in `notes`).
 - The fix lane is a second warm Vitest (memory); it is closed after 5 idle minutes.
-- The vm-guard `vm` gain depends on the per-file environment cost: large for jsdom suites (here −85 %), small or
+- The vitest-guard `vm` gain depends on the per-file environment cost: large for jsdom suites (here −85 %), small or
   negative for pure-node projects (a private real-world repository validation: node project +9 % CPU vs forks) – use `forks`
-  or vm-guard `shared` there (`"pool"` in `.vto/config.json`).
+  or vitest-guard `shared` there (`"pool"` in `.vto/config.json`).
 - Any analyzer failure (crash, rejected map, unreadable output) makes `affected` answer `runAll` with the
   analyzer's message as the reason; the map files are named `s-*.jsonl` because the analyzer reads only `w-*`/`s-*`.
 - Engines refuse to start outside a Vitest project (no `.vto/` is created there) and only one engine (daemon or

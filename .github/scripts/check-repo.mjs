@@ -65,12 +65,12 @@ for (const f of walk(path.join(REPO, '.github', 'workflows')).filter((p) => /\.y
 }
 
 // ---- 3. docs (the ones this check owns; package READMEs of other components are linted for npx only)
-const BIN_NAMES = 'vm-guard|vto|vto-daemon|vto-mcp|vto-ui|vitest-overlap';
+const BIN_NAMES = 'vitest-guard|vto|vto-daemon|vto-mcp|vto-ui|vitest-overlap';
 const NPX = new RegExp(`\\bnpx\\s+(?!--no-install\\b)(?:-y\\s+|--yes\\s+)?(?:${BIN_NAMES})\\b`);
 const docs = [
   ...fs.readdirSync(REPO).filter((f) => /^(README.*|SECURITY|CONTRIBUTING)\.md$|^README/.test(f)).map((f) => path.join(REPO, f)),
   ...walk(path.join(REPO, 'docs')).filter((f) => /\.(md|ya?ml)$/.test(f)),
-  ...['tui', 'mcp', 'vm-guard', 'samples'].flatMap((d) => (fs.existsSync(path.join(REPO, d)) ? fs.readdirSync(path.join(REPO, d)).filter((f) => /^README.*\.md$/.test(f)).map((f) => path.join(REPO, d, f)) : [])),
+  ...['tui', 'mcp', 'vitest-guard', 'samples'].flatMap((d) => (fs.existsSync(path.join(REPO, d)) ? fs.readdirSync(path.join(REPO, d)).filter((f) => /^README.*\.md$/.test(f)).map((f) => path.join(REPO, d, f)) : [])),
 ];
 for (const f of docs) {
   const text = read(f);
@@ -90,13 +90,13 @@ for (const f of docs) {
 
 // ---- 4. manifests
 const LICENSE = 'MIT OR Apache-2.0';
-for (const rel of ['package.json', 'tui/package.json', 'mcp/package.json', 'vm-guard/package.json']) {
+for (const rel of ['package.json', 'tui/package.json', 'mcp/package.json', 'vitest-guard/package.json']) {
   const f = path.join(REPO, rel);
   if (!fs.existsSync(f)) continue;
   const p = JSON.parse(read(f));
   if (p.license !== LICENSE) bad(f, `"license" is ${JSON.stringify(p.license)}, expected "${LICENSE}"`);
   if (!p.engines?.node) bad(f, 'no engines.node');
-  if (/^(vm-guard|vto)$/.test(p.name ?? '')) bad(f, `package name "${p.name}" belongs to somebody else on npm – use a scope`);
+  if (/^(vitest-guard|vto)$/.test(p.name ?? '')) bad(f, `package name "${p.name}" belongs to somebody else on npm – use a scope`);
 }
 for (const f of ['LICENSE-MIT', 'LICENSE-APACHE', 'SECURITY.md', 'README.md']) if (!fs.existsSync(path.join(REPO, f))) bad(path.join(REPO, f), 'missing');
 

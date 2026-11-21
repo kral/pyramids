@@ -18,7 +18,7 @@ vto is meant to make that loop much cheaper. It has five capabilities:
 
 | # | capability | component | maturity |
 |---|---|---|---|
-| G1 | Fast **safe pools**: run the full suite in a fraction of the time with failures identical to `forks` | `vm-guard/` | working, measured on a 312-file fixture |
+| G1 | Fast **safe pools**: run the full suite in a fraction of the time with failures identical to `forks` | `vitest-guard/` | working, measured on a 312-file fixture |
 | G2 | **Test impact analysis**: run only the tests a change can affect (`vto affected`) | `collector/` + `analyzer/src/affected.rs` | working, safety-validated on a 43-test fixture only |
 | G3 | **Overlap detection**: find redundant or near-duplicate tests as review candidates | `analyzer/src/analysis.rs`, `report.rs` | working, precision is low unless signals are added |
 | G4 | **Mutation verification** of overlap candidates (`vto verify`) | `verify/` | working on one fixture |
@@ -31,13 +31,13 @@ deletion of tests.
 
 | QA | scenario / metric | target for 1.0 | measured so far | status |
 |---|---|---|---|---|
-| **Performance: full run** | full suite CPU vs `forks` baseline, same machine | ≥ 80 % less CPU in `vm` mode, with failures identical to forks | heavy fixture, 312 files / 3,193 tests: forks 480–507 s, vm-guard `vm` 65.6–67.2 s (**−86 %**), `shared` 16.1 s (**−96.7 %**), same 5 failures [M] `vm-guard/README.md` "Celá heavy sada", `perf/RESULTS.md` §5 | met on fixture. **[GAP]** the user's real suite, and Windows/macOS |
+| **Performance: full run** | full suite CPU vs `forks` baseline, same machine | ≥ 80 % less CPU in `vm` mode, with failures identical to forks | heavy fixture, 312 files / 3,193 tests: forks 480–507 s, vitest-guard `vm` 65.6–67.2 s (**−86 %**), `shared` 16.1 s (**−96.7 %**), same 5 failures [M] `vitest-guard/README.md` "Celá heavy sada", `perf/RESULTS.md` §5 | met on fixture. **[GAP]** the user's real suite, and Windows/macOS |
 | **Performance: agent iteration** | edit one component, then get test feedback (p50 / p95 wall) | p50 ≤ 15 s, p95 ≤ 45 s on the user's suite (warm daemon) | `--changed` on fixture: 8 of 312 files for one component [M] `perf/RESULTS.md` §4. Fault injection: mean **16 %** of tests selected [M] `analyzer/faultinject/last-result.json` | **[GAP]** no end-to-end measurement. The daemon does not exist yet |
 | **Correctness: `affected` recall** | every test that fails after a change is selected (or exit 3) | **100 %** on ≥ 500 mutants across the user's repo plus 2 OSS repos, plus a replay of ≥ 200 historical commits | 60 mutants / 43 tests, recall 1.0, 0 misses, 2 run-all [M] `analyzer/faultinject/last-result.json` | small sample. **[GAP]** real repo, historical replay (REVIEW-1 §7.4) |
 | **Correctness: `affected` precision (value)** | selected set compared with `vitest related` / `--changed` | vto ⊆ related always; median size ≤ 50 % of related | **[GAP]** never compared | must be measured. This is the value proposition (REVIEW-1 M10) |
 | **Correctness: overlap verdicts** | precision of the "strong candidate" tier against labelled ground truth | ≥ 0.8 precision; the report never claims "removable" | coverage only: P 0.11 / R 1.0. coverage+assert+dom: P 0.60 / R 0.52. coverage+static: P 0.76 / R 0.34. assert → mutation pipeline: **P 0.81 / R 0.52** [M] `/home/claude/verify-fixture/results/vf-eval-*.json` | met only by the pipeline tier. Ground truth was labelled by the same team (REVIEW-1 M12) |
 | **Overhead: collection** | v2 collection wall overhead vs a plain run in the same pool | ≤ 10 % wall, ≤ 0.5 ms/test | collect loop 0.19 ms/test at 150k blocks, 0.29 ms at 900k [M] REVIEW-1 §5. Signals +0.5 ms/test [M] `collector/setup-signals.mjs` header. V8 engine: +14.5 ms/test (≈10×) [M] REVIEW-1 §5 | **[GAP]** no end-to-end suite overhead number. `bench/bench.mjs` exists, but no result is recorded |
-| **Overhead: vm-guard layer** | CPU over a bare pool | ≤ 5 % | vm +2.0–4.0 %, shared +3.5–5 % [M] `vm-guard/README.md` "Měření" | met |
+| **Overhead: vitest-guard layer** | CPU over a bare pool | ≤ 5 % | vm +2.0–4.0 %, shared +3.5–5 % [M] `vitest-guard/README.md` "Měření" | met |
 | **Analyzer scale** | report for N tests | ≤ 1 s and ≤ 300 MB RSS at 10k tests; raw ≤ 50 MB per 10k tests | 3,174 tests: 45 ms total (parse 25, analysis 2.7, report 17) [M] this review (`/home/claude/arch-scratch/rep`). Raw 1.5 MB / 3,195 tests on the light fixture [M]. REVIEW-1 M9 estimates **~22 KB/test** (220 MB / 10k) for app-shell-heavy suites [E] | CPU met. Raw size **[GAP]**: hit interning is not implemented |
 | **Output size** | report artefacts that humans and agents read | report.md ≤ 200 KB; agent answers ≤ 300 tokens by default, p95 ≤ 600 | report.json **3.1 MB**, report.md **891 KB** for 3,174 tests [M] this review (≈ 220k tokens) | **not met**. MCP must never return report files |
 | **Token budget (MCP)** | tokens per tool response | rules of `MCP.md` §"Token budget" | **[GAP]** no server yet | add CI token tests (§3 ADR-8) |
@@ -57,7 +57,7 @@ flowchart LR
   agent([AI coding agent<br/>Claude Code, Cursor…])
   ci([CI pipeline<br/>GitHub Actions / Azure Pipelines / GitLab])
   subgraph vto[vto system]
-    core[vto toolchain<br/>collector · analyzer · verify · vm-guard · daemon · MCP]
+    core[vto toolchain<br/>collector · analyzer · verify · vitest-guard · daemon · MCP]
   end
   vitest[[Vitest 5 + Vite<br/>project's own copy]]
   git[(Git repository<br/>diffs, HEAD, blobs)]
@@ -75,7 +75,7 @@ flowchart LR
 ```
 
 Actors:
-- **Developer**: runs `vitest` through vm-guard, `vto affected`, and the overlap report.
+- **Developer**: runs `vitest` through vitest-guard, `vto affected`, and the overlap report.
 - **AI agent**: talks only to the MCP server and needs small, deterministic answers.
 - **CI**:
   - produces the authoritative map on the main branch;
@@ -91,13 +91,13 @@ flowchart TB
     entry[vitest-overlap.mjs<br/>CLI entry]
     runraw[collector/run-raw.mjs<br/>createVitest + config overrides]
     plugin[collector/plugin.mjs<br/>Vite transform: oxc + magic-string]
-    vmcfg[vm-guard defineVmGuardConfig<br/>index.mjs]
+    vmcfg[vitest-guard defineVitestGuardConfig<br/>index.mjs]
     vrun[verify/runner.mjs + plugin.mjs<br/>mutant schemata]
   end
   subgraph worker[Vitest worker: thread / fork / vm context]
     setup[collector/setup-v2.mjs<br/>reset / collect per test, fileload]
     sig[collector/setup-signals.mjs<br/>assertHash, domHash]
-    vmsetup[vm-guard/setup.bundle.mjs<br/>realm shims, leak detector, resets]
+    vmsetup[vitest-guard/setup.bundle.mjs<br/>realm shims, leak detector, resets]
     vset[verify/setup-verify.mjs<br/>task.repeats per mutant]
     code[instrumented project modules<br/>__vto_reg Uint8Array per file]
   end
@@ -105,8 +105,8 @@ flowchart TB
   ana[analyzer/ Rust CLI vto<br/>raw.rs → model.rs → analysis / affected / imports / report]
   rep[(overlap-report/<br/>report.md, report.json)]
   ver[verify/verify.mjs<br/>plan, kill matrix, verdicts]
-  vg[vm-guard CLI<br/>check · verify · plan · run · hunt · scan]
-  vgstate[(.vm-guard/*.json<br/>quarantine, conflicts, durations)]
+  vg[vitest-guard CLI<br/>check · verify · plan · run · hunt · scan]
+  vgstate[(.vitest-guard/*.json<br/>quarantine, conflicts, durations)]
   daemon[vto daemon<br/>warm Vitest, incremental map]
   mcp[vto MCP server<br/>stdio, token rules]
   vstate[(.vto/<br/>map snapshot, blobs, socket meta)]
@@ -141,7 +141,7 @@ flowchart TB
 | V8 fallback | v1 engine via inspector precise coverage + source maps | `collector/setup.ts`, `analyzer/src/v1.rs`, `sourcemap.rs`, `flatten.rs` |
 | Analyzer | parallel JSONL load, unit identity (file, name, line), identical / subset / near (prefix-filtered Jaccard), greedy cover statistic, unused imports, `affected` | `analyzer/src/*.rs` |
 | Verify | mutant generation (oxc), schemata module per file, in-worker repeats per mutant, watchdog, verdicts and evaluation | `verify/*.mjs` |
-| vm-guard | config wrapper (vm / shared / isolated), realm shims, outer-realm leak detection, resets, quarantine, conflict planner, lanes, bisection | `vm-guard/src/*.mjs` |
+| vitest-guard | config wrapper (vm / shared / isolated), realm shims, outer-realm leak detection, resets, quarantine, conflict planner, lanes, bisection | `vitest-guard/src/*.mjs` |
 | Daemon (planned) | warm Vitest, run queue, incremental map patch, invalidation, idle shutdown | `MCP.md`, `mcp/src/platform.mjs`, `mcp/src/diff.mjs` |
 | MCP server (planned) | stdio MCP tools; summary-first, paginated, relative ids | `MCP.md` |
 | Hooks (planned) | Claude Code PreToolUse redirect from `npm test` to `run_affected`; git pre-push | `MCP.md` "Typical agent loop" |
@@ -220,7 +220,7 @@ ranges, see §6):
 | `vto` (npm, JS) | CLI shim, collector, verify, daemon, MCP server | `npm i -D vto` |
 | `@kral/vto-analyzer-<os>-<arch>` (npm, optional deps) | static Rust binary: win32-x64-msvc, win32-arm64-msvc, linux-x64-gnu, linux-x64-musl, linux-arm64-gnu, darwin-arm64, darwin-x64 | `optionalDependencies` (oxlint/biome pattern, REVIEW-1 M11). `mcp/src/platform.mjs` `analyzerCandidates` already expects `@kral/vto-analyzer-<platform>-<arch>` |
 | `@kral/vto-analyzer-wasm` | `wasm32-wasip1` build run via `node:wasi` | fallback for `--omit=optional`, odd platforms and corporate mirrors that drop binaries |
-| `vm-guard` (npm, JS) | independent package, own semver | `npm i -D vm-guard` |
+| `vitest-guard` (npm, JS) | independent package, own semver | `npm i -D vitest-guard` |
 
 Where state lives (today, plus the recommended layout):
 
@@ -231,7 +231,7 @@ Where state lives (today, plus the recommended layout):
 | instrumented module cache | Vitest `fsModuleCache`, keyed by plugin name + hash (`plugin.mjs` VERSION) | unchanged, but probe-tested (§4) | no |
 | overlap report | `./overlap-report/` | unchanged | no |
 | daemon state | `.vto/` (map snapshot, blobs); socket `<tmp>/vto-<hash>.sock` or `\\.\pipe\vto-<hash>` (`mcp/src/platform.mjs`) | `.vto/` per project; maps fetched from the remote store go to the user cache dir: `%LOCALAPPDATA%\vto`, `~/Library/Caches/vto`, `$XDG_CACHE_HOME/vto` | `.vto/config.json` only |
-| vm-guard | `.vm-guard/{incompatible,conflicts,pollution,durations}.json` committed; `run/`, `plan.json`, `files-cache.json` ignored (`vm-guard/README.md` "CLI") | unchanged | committed subset |
+| vitest-guard | `.vitest-guard/{incompatible,conflicts,pollution,durations}.json` committed; `run/`, `plan.json`, `files-cache.json` ignored (`vitest-guard/README.md` "CLI") | unchanged | committed subset |
 
 Per-OS notes:
 - **Windows:**
@@ -278,11 +278,11 @@ flowchart LR
 | Overlap Analysis | Application Service | realised by Analyzer |
 | Test Impact Analysis | Application Service | realised by Analyzer (`affected`) + Daemon |
 | Mutation Verification | Application Service | realised by Verify Engine |
-| Safe Fast Execution | Application Service | realised by vm-guard |
+| Safe Fast Execution | Application Service | realised by vitest-guard |
 | Agent Test Feedback | Application Service | realised by MCP Server + Daemon |
-| Collector Plugin, Collector Setup, Analyzer, Verify Engine, vm-guard, Daemon, MCP Server, vto CLI, Hooks | Application Components | as in §2.2 |
+| Collector Plugin, Collector Setup, Analyzer, Verify Engine, vitest-guard, Daemon, MCP Server, vto CLI, Hooks | Application Components | as in §2.2 |
 | CLI, MCP (stdio), Daemon IPC (JSON-RPC over socket/pipe), Vite Plugin API, Vitest setupFiles hook, Report files | Application Interfaces | — |
-| Raw Record Stream, Coverage Map, Overlap Report, Verify Report, Quarantine List, Conflict Graph, Durations, Blob Store | Data Objects | `w-*.jsonl`, `.vto/map`, `report.{md,json}`, `verify.{md,json}`, `.vm-guard/*.json`, `.vto/blobs` |
+| Raw Record Stream, Coverage Map, Overlap Report, Verify Report, Quarantine List, Conflict Graph, Durations, Blob Store | Data Objects | `w-*.jsonl`, `.vto/map`, `report.{md,json}`, `verify.{md,json}`, `.vitest-guard/*.json`, `.vto/blobs` |
 | Node.js runtime, Vitest/Vite framework, Rust native binary / WASM module, Git | System Software | — |
 | Developer Workstation (Win/macOS/Linux), CI Runner | Nodes (Device + System Software) | — |
 | npm registry, Map store | Technology Services | package distribution, map sharing |
@@ -291,7 +291,7 @@ flowchart LR
 Relationships worth modelling explicitly:
 - Analyzer *accesses* (read) Raw Record Stream; Collector *accesses* (write) it.
 - Daemon *serves* MCP Server via Daemon IPC.
-- vm-guard *accesses* Raw Record Stream (`--vto-raw`, `fileload.modules`). This is the only coupling between the vm-guard product and the vto product, and it should stay that narrow.
+- vitest-guard *accesses* Raw Record Stream (`--vto-raw`, `fileload.modules`). This is the only coupling between the vitest-guard product and the vto product, and it should stay that narrow.
 - Collector Plugin *depends on* (serving) "Vite Plugin API". Collector Setup *depends on* the "Vitest Runner internals" interface (§4). Model the latter as a separate Application Interface named "Vitest internal (unsupported)", so the coupling risk is visible in the model.
 
 ---
@@ -316,7 +316,7 @@ Relationships worth modelling explicitly:
 - **Consequences:**
   - 3,174 tests are analysed in 45 ms, of which the analysis itself is **2.7 ms** [M]. Parsing JSON dominates.
   - The cost is a seven-target build matrix, toolchain pinning, binary provenance, and the corporate-mirror problem (optional deps get stripped).
-  - The Node side (verify, vm-guard, daemon) already re-implements raw parsing in JS (`verify/verify.mjs` reads `w-*.jsonl` itself). This is a second, independent reader of the contract.
+  - The Node side (verify, vitest-guard, daemon) already re-implements raw parsing in JS (`verify/verify.mjs` reads `w-*.jsonl` itself). This is a second, independent reader of the contract.
 - **Verdict: agree with Rust, but challenge the distribution plan.**
   - At the user's scale, the analysis is milliseconds. The binary matrix is pure operational cost that the value doesn't justify.
   - Make **WASM (wasm32-wasip1) the default shipped artefact** (one file, works everywhere Node runs, 1.5–3× slower, so still well under 1 s). Make native binaries an optional speed-up.
@@ -366,21 +366,21 @@ Relationships worth modelling explicitly:
   - Position verify as a **nightly / on-demand** tool, not part of the inner loop.
   - The 0.52 recall means the pipeline misses half of the true redundancies. That is acceptable, because the report only proposes review candidates.
 
-### ADR-6: vm-guard: `vm` mode default, `shared` with `resetModules` opt-in
+### ADR-6: vitest-guard: `vm` mode default, `shared` with `resetModules` opt-in
 - **Context:**
   - Module-graph and environment re-evaluation per file is ≥ 80 % of CPU (`perf/RESULTS.md` §0).
   - Bare `isolate:false` breaks `vi.mock` across files: 308–311 failures on the full suite [M].
 - **Decision:**
-  - `defineVmGuardConfig` adds `pool: vmThreads`, realm `Symbol.hasInstance` shims, missing web globals, an outer-realm leak detector, `process.env` restore, and quarantine into `forks` projects.
-  - The `shared` mode uses `threads` + `isolate:false` + per-file `vi.resetModules()` + resets, with a conflict planner and self-healing bisection (`vm-guard/src/*`, README).
+  - `defineVitestGuardConfig` adds `pool: vmThreads`, realm `Symbol.hasInstance` shims, missing web globals, an outer-realm leak detector, `process.env` restore, and quarantine into `forks` projects.
+  - The `shared` mode uses `threads` + `isolate:false` + per-file `vi.resetModules()` + resets, with a conflict planner and self-healing bisection (`vitest-guard/src/*`, README).
 - **Consequences:**
   - vm: −86 % CPU, shared: −96.7 %, both with failures identical to forks [M].
-  - The shims make vm **more tolerant** than forks, so false greens are possible. A nightly `forks` run + `vm-guard verify` is mandatory (README "Co vrstva nepokryje").
+  - The shims make vm **more tolerant** than forks, so false greens are possible. A nightly `forks` run + `vitest-guard verify` is mandatory (README "Co vrstva nepokryje").
   - `test.projects` configs are refused (`index.mjs:53`), which is a blocker for many company repos.
 - **Verdict: agree.** This is the component with the best evidence and the fastest payoff. Ship it first, as a separate package with its own semver.
   - Add `projects` support (wrap each project).
   - Publish the README in English.
-  - Add an interaction test with the vto collector. This review found that `collector/setup-v2.mjs` registers `process.on('exit')` **once per test file** under `vmThreads`, because its state lives on the context `globalThis` while `process` is the shared outer realm. Running 117 files gave `MaxListenersExceededWarning: 11 exit listeners` [M] (`/home/claude/arch-scratch/bs`). Each listener closes over that file's context, so contexts are likely retained (heap growth not measured). vm-guard's own leak detector is designed to flag exactly this. Fix: keep collector state on the outer realm (`vm.runInThisContext('globalThis')`, as `vm-guard/src/realm.mjs` does) or register the listener once via a `Symbol.for` flag on `process`.
+  - Add an interaction test with the vto collector. This review found that `collector/setup-v2.mjs` registers `process.on('exit')` **once per test file** under `vmThreads`, because its state lives on the context `globalThis` while `process` is the shared outer realm. Running 117 files gave `MaxListenersExceededWarning: 11 exit listeners` [M] (`/home/claude/arch-scratch/bs`). Each listener closes over that file's context, so contexts are likely retained (heap growth not measured). vitest-guard's own leak detector is designed to flag exactly this. Fix: keep collector state on the outer realm (`vm.runInThisContext('globalThis')`, as `vitest-guard/src/realm.mjs` does) or register the listener once via a `Symbol.for` flag on `process`.
 
 ### ADR-7: Daemon with warm Vitest
 - **Context:** The agent loop needs seconds, not 200 s (`MCP.md`).
@@ -392,9 +392,9 @@ Relationships worth modelling explicitly:
   - It brings long-lived-process problems: memory growth in workers, a stale Vite module graph, config reloads, concurrent clients (`MCP.md` open questions), and orphaned processes on Windows.
 - **Verdict: agree in principle. Challenge what it is expected to save.**
   - The measured cost is **per-file environment and module evaluation** (80 %), which a warm main process does not remove. Vitest 5's `fsModuleCache` (default on) already persists transforms across cold runs (`perf/RESULTS.md` §4).
-  - The daemon saves config load + Vite startup (≈1–3 s [E]) and keeps the map in memory. That matters for an agent doing 30 iterations, but it is not where the 200 s go. The big wins are `affected` selection plus vm-guard `vm` mode, and **both work without a daemon**.
-  - **Build order:** (1) a stateless `vto run-affected` CLI that uses vm-guard + affected + compact output. (2) The MCP server on top of the stateless CLI. (3) The daemon as an optimisation behind the same protocol, once measured.
-  - Use only public rerun APIs of the Vitest Node API: `createVitest`, `vitest.runTestSpecifications` / `rerunTestSpecifications`. Make "collector always on" configurable. Instrumented code is not the code CI runs (ADR-1 consequence); make the agent's final `run_affected { base: origin/main }` run **without** instrumentation, or with vm-guard only.
+  - The daemon saves config load + Vite startup (≈1–3 s [E]) and keeps the map in memory. That matters for an agent doing 30 iterations, but it is not where the 200 s go. The big wins are `affected` selection plus vitest-guard `vm` mode, and **both work without a daemon**.
+  - **Build order:** (1) a stateless `vto run-affected` CLI that uses vitest-guard + affected + compact output. (2) The MCP server on top of the stateless CLI. (3) The daemon as an optimisation behind the same protocol, once measured.
+  - Use only public rerun APIs of the Vitest Node API: `createVitest`, `vitest.runTestSpecifications` / `rerunTestSpecifications`. Make "collector always on" configurable. Instrumented code is not the code CI runs (ADR-1 consequence); make the agent's final `run_affected { base: origin/main }` run **without** instrumentation, or with vitest-guard only.
 
 ### ADR-8: MCP token rules
 - **Context:** An agent reading a full Vitest log, or report.md (891 KB ≈ 220k tokens [M]), wastes context.
@@ -430,13 +430,13 @@ Legend: **P** = public documented API, **S** = semi-public (exported or typed, b
 | V12 | Vite plugin hook `configureVitest`, `vitest.projects`, `project.matchesTestGlob`, `project.config.setupFiles`, `project.vite.config.plugins` | `collector/plugin.mjs:241-251`; `run-raw.mjs:109` | P/S | test files get instrumented (wrong overlap), or the plugin-attached check misfires | medium |
 | V13 | **mutating `config.plugins` array in `configResolved`** to move vto first | `plugin.mjs` `configResolved` | I (Vite) | vto runs after other `pre` plugins → files skipped with warning (fail-safe) | medium |
 | V14 | `fsModuleCache` cache key includes plugin names | `plugin.mjs:221` (`VERSION` in name); `verify/plugin.mjs:9` | I | **instrumented or mutant-schemata modules could be served to a plain run**, or stale instrumentation reused. Schemata are inert without `__vto_mut`, but instrumented code would run in CI | **high** (correctness of plain runs) |
-| V15 | Vitest batching: with `isolate:false` + `maxWorkers:1`, all files go in one run request in sequencer order (`groupSpecs`) | `vm-guard/src/sequencer.mjs` header; README "Realizace" | I | lane order no longer equals execution order → planner and bisection become wrong | medium |
-| V16 | `vmMemoryLimit` checked against `heapUsed` after each file; default `totalmem/maxWorkers` | `vm-guard/src/index.mjs` `autoMemoryLimit` | I (behaviour) | memory tuning becomes off. Performance only | low |
-| V17 | vm pool realm layout: Node builtins and copied globals from the outer realm, `node_modules` evaluated per context | `vm-guard/src/realm.mjs`, `fingerprint.mjs` | I | shims become unnecessary or wrong; leak detector false positives | medium |
-| V18 | `vi.resetModules()` keeps `node_modules` cached and resets only project modules | `vm-guard/src/setup.mjs:233` | S (documented behaviour) | shared mode becomes slow or unsafe | medium |
-| V19 | `inject('vmGuard')` / `provide` | `vm-guard/src/setup.mjs:22` | P | — | low |
-| V20 | `BaseSequencer` from `vitest/node` | `vm-guard/src/sequencer.mjs` | P | — | low |
-| V21 | `vitest list --filesOnly --json` output shape; JSON reporter shape (`testResults[].assertionResults[]`) | `vm-guard/src/cli.mjs` `listFilesUncached`; `vm-guard/src/runner.mjs` | S | CLI cannot list or compare runs (loud) | medium |
+| V15 | Vitest batching: with `isolate:false` + `maxWorkers:1`, all files go in one run request in sequencer order (`groupSpecs`) | `vitest-guard/src/sequencer.mjs` header; README "Realizace" | I | lane order no longer equals execution order → planner and bisection become wrong | medium |
+| V16 | `vmMemoryLimit` checked against `heapUsed` after each file; default `totalmem/maxWorkers` | `vitest-guard/src/index.mjs` `autoMemoryLimit` | I (behaviour) | memory tuning becomes off. Performance only | low |
+| V17 | vm pool realm layout: Node builtins and copied globals from the outer realm, `node_modules` evaluated per context | `vitest-guard/src/realm.mjs`, `fingerprint.mjs` | I | shims become unnecessary or wrong; leak detector false positives | medium |
+| V18 | `vi.resetModules()` keeps `node_modules` cached and resets only project modules | `vitest-guard/src/setup.mjs:233` | S (documented behaviour) | shared mode becomes slow or unsafe | medium |
+| V19 | `inject('vitestGuard')` / `provide` | `vitest-guard/src/setup.mjs:22` | P | — | low |
+| V20 | `BaseSequencer` from `vitest/node` | `vitest-guard/src/sequencer.mjs` | P | — | low |
+| V21 | `vitest list --filesOnly --json` output shape; JSON reporter shape (`testResults[].assertionResults[]`) | `vitest-guard/src/cli.mjs` `listFilesUncached`; `vitest-guard/src/runner.mjs` | S | CLI cannot list or compare runs (loud) | medium |
 | V22 | `TestContext.onTestFinished`, `task.location` with `includeTaskLocation` | `setup-v2.mjs` | P | — | low |
 | V23 | Vitest/Vite id format (`/abs/path?query`, `\0` virtual ids, `/@fs/`) | `plugin.mjs` `handler` | S | wrong files instrumented or skipped | low–medium |
 | V24 | `@testing-library/dom` resolved via `@testing-library/react`'s require path | `verify/setup-verify.mjs` | I (RTL layout) | `asyncUtilTimeout` not applied → verify slower | low |
@@ -458,7 +458,7 @@ There are 25 touch points. Six are high risk (V1, V6–V8, V9, V10, V14), and **
    - `ensurePluginFirst(config)`
    - `capabilities()`
 
-   The collector, verify and vm-guard import only from the adapter. vm-guard can vendor its own adapter to stay independent.
+   The collector, verify and vitest-guard import only from the adapter. vitest-guard can vendor its own adapter to stay independent.
 2. **Capability probes, fail closed.** At startup, run a micro test file in a throwaway project (cost ≈ 1 s, cached per Vitest version). It asserts each behaviour:
    - hook order (V9);
    - config override honoured (V10);
@@ -480,11 +480,11 @@ There are 25 touch points. Six are high risk (V1, V6–V8, V9, V10, V14), and **
    - V14: set a vto-specific `cacheDir` / disable `fsModuleCache` for instrumented runs, if the cost is acceptable. The measured effect of the fs cache on this fixture was 0 % (`perf/RESULTS.md` row 16), so turning it off for vto runs is cheap insurance.
 4. **Version matrix CI:**
    - Rows: Vitest {lowest supported minor, latest minor, `beta`} × Node {20, 22, 24} × OS {ubuntu, windows, macos}.
-   - Run on each row: the corpus (`collector/corpus/run.mjs`), the probe suite, fault injection (`analyzer/faultinject/run.mjs`, n=60), and vm-guard unit and lab subsets.
+   - Run on each row: the corpus (`collector/corpus/run.mjs`), the probe suite, fault injection (`analyzer/faultinject/run.mjs`, n=60), and vitest-guard unit and lab subsets.
    - Run the `beta` row nightly. It is allowed to fail but must open an issue.
    - Let Renovate bump Vitest weekly.
 5. **Honest peer ranges.**
-   - Today the root package claims `vitest >=4` (`package.json`), but everything was measured on 5.1.1 only. vm-guard claims `>=5.1 <6`.
+   - Today the root package claims `vitest >=4` (`package.json`), but everything was measured on 5.1.1 only. vitest-guard claims `>=5.1 <6`.
    - Declare `>=5.1 <6` everywhere for 1.0. Widen only when a matrix row proves it.
    - Refuse to run (exit 2) outside the range unless `VTO_UNSAFE_VITEST=1` is set.
 
@@ -496,12 +496,12 @@ There are 25 touch points. Six are high risk (V1, V6–V8, V9, V10, V14), and **
 |---|---|---|
 | **Other runners (Jest, Mocha, node:test)** | none. The raw contract is almost runner-neutral (no Vitest field names except `vitest` in meta) | Freeze the raw contract as runner-neutral (`runner: "vitest@5.1.1"` in meta). `instrument()` is a pure function, so it can be wrapped in a Jest transformer that runs **before** `ts-jest`/`babel-jest` (Jest allows one transformer per pattern, so the wrapper chains them). A Jest `setupFilesAfterEach` plus `testEnvironment` events give per-test reset/collect. Expect 2–3 weeks [E]. Not for 1.0 |
 | **Vitest browser mode / Playwright component tests** | explicitly refused (`run-raw.mjs` "browser mode is not supported") | The instrumentation is runtime-neutral (`Uint8Array` on `globalThis`). In browser mode, collect through Vitest browser `commands` or `page.evaluate` at `onTestFinished`. Playwright CT: collect in a fixture after each test. The `affected` logic is unchanged. Post-1.0 |
-| **Monorepos / Vitest `projects`** | collector: supported with `extends: true` projects (`run-raw.mjs:95-117`). vm-guard: **refuses `test.projects`** (`index.mjs:53`). `fileload.modules` filters to `f.startsWith(ROOT)` where `ROOT = cwd` (`setup-v2.mjs`) | (a) vm-guard wraps each project. (b) Use the **git top-level**, not `cwd`, as ROOT for module filtering. Otherwise, running from `packages/app` drops non-instrumented modules of sibling workspace packages from `fileload.modules`, which is a silent recall risk **[GAP: test it]**. (c) The per-project map lives in one file keyed by project name. (d) `affected` treats workspace `package.json` changes as run-all for that project only |
+| **Monorepos / Vitest `projects`** | collector: supported with `extends: true` projects (`run-raw.mjs:95-117`). vitest-guard: **refuses `test.projects`** (`index.mjs:53`). `fileload.modules` filters to `f.startsWith(ROOT)` where `ROOT = cwd` (`setup-v2.mjs`) | (a) vitest-guard wraps each project. (b) Use the **git top-level**, not `cwd`, as ROOT for module filtering. Otherwise, running from `packages/app` drops non-instrumented modules of sibling workspace packages from `fileload.modules`, which is a silent recall risk **[GAP: test it]**. (c) The per-project map lives in one file keyed by project name. (d) `affected` treats workspace `package.json` changes as run-all for that project only |
 | **CI caching of the map** | none (raw lives in a tmp dir) | **Main branch:** collect nightly or on merge; publish `map-<sha>.vto` + `map-latest` keyed by `hash(lockfile, vitest/vite config, tsconfig*, setupFiles, vto version, vitest version)`. **PR:** `git merge-base origin/main HEAD`, then fetch the closest older map; the per-file content hashes (C4) decide what is still valid; `vto affected --git <map sha>`; exit 3 ⇒ full run. **Gate:** the full suite still runs on merge to main (or nightly). Provide templates for **GitHub Actions** (`actions/cache` / artefacts) and **Azure Pipelines** (`Cache@2` + pipeline artefacts) — the user's company is likely on Azure DevOps — plus GitLab |
 | **Team-wide map sharing (remote cache)** | none | Phase 1: developers pull the CI artefact (`vto map pull --from <ci-artefact-url|dir>`). Phase 2: a git-native store (`refs/vto/maps/<sha>` or `git notes`) needs no infrastructure and is portable. Trust rules: accept maps only from protected-branch CI; never from fork PRs; validate the schema; the map is data only. A poisoned map can hide a failing test from a PR's `affected` run, so the merge gate must not rely on `affected` alone |
 | **IDE integration** | none | Define the daemon protocol once (JSON-RPC 2.0 over the same socket/pipe). MCP, CLI and a VS Code extension are three thin clients. Extension features: "tests covering this line" (`coverage_of`), "run affected" code lens, overlap hints. Reuse the official Vitest VS Code extension for running tests, and add only vto queries |
 | **Hooks** | planned (`MCP.md`) | Claude Code PreToolUse hook that maps `npx vitest run` / `npm test` to `run_affected`; git `pre-push` runs `vto affected --git @{u}`. Ship as copy-paste snippets plus `vto init` |
-| **vm-guard ↔ vto** | vm-guard reads `fileload.modules` and `durationMs` (`--vto-raw`) | Keep it this narrow and document it as a published interface of the raw contract |
+| **vitest-guard ↔ vto** | vitest-guard reads `fileload.modules` and `durationMs` (`--vto-raw`) | Keep it this narrow and document it as a published interface of the raw contract |
 
 ---
 
@@ -518,19 +518,19 @@ There are 25 touch points. Six are high risk (V1, V6–V8, V9, V10, V14), and **
 | R5 | Raw/map contract: no version, absolute paths, no content hashes, `meta.setupFiles` missing | §2.4 C1–C4 | no sharing, stale-map errors, upgrade breakage |
 | R6 | Output size (report.json 3.1 MB, report.md 891 KB at 3k tests) | §1.2 | unusable for agents; heavy for humans |
 | R7 | Verify rewrites Vitest results | `setup-verify.mjs:72` | can break on any runner change; masks real failures if baseline detection fails |
-| R8 | Inconsistent packaging: three private `package.json` files; root `files` omits the analyzer, so an npm install cannot run; engines `>=20` vs `>=22`; peer `vitest >=4` vs `>=5.1 <6` | `package.json`, `vm-guard/package.json`, `mcp/package.json` | not installable as a product |
-| R9 | Language: reports and the vm-guard README are Czech only; code comments English | `report.rs`, `vm-guard/README.md` | fine for the first internal team; blocker for OSS / international colleagues |
+| R8 | Inconsistent packaging: three private `package.json` files; root `files` omits the analyzer, so an npm install cannot run; engines `>=20` vs `>=22`; peer `vitest >=4` vs `>=5.1 <6` | `package.json`, `vitest-guard/package.json`, `mcp/package.json` | not installable as a product |
+| R9 | Language: reports and the vitest-guard README are Czech only; code comments English | `report.rs`, `vitest-guard/README.md` | fine for the first internal team; blocker for OSS / international colleagues |
 | R10 | Open REVIEW-1 items: M2 (order-dependence shuffle pass), M4 (setup/body phase split, only `common_cutoff` exists), §7.1 differential oracle, §7.4 historical replay, M12 independence of ground truth | grep finds no `shuffle` / phase code; eval GT authored in-team | overlap precision ceiling; unknown instrumenter bugs |
 | R11 | Security of local IPC: Windows named pipe default DACL; `/tmp` socket fallback | `mcp/src/platform.mjs` `endpointFor` | another local user could drive test runs (arbitrary code execution as the victim) on shared build boxes / terminal servers |
-| R12 | Committed generated file `vm-guard/src/setup.bundle.mjs` with no freshness check | `vm-guard/scripts/bundle-setup.mjs` | the bundle and its sources drift apart |
+| R12 | Committed generated file `vitest-guard/src/setup.bundle.mjs` with no freshness check | `vitest-guard/scripts/bundle-setup.mjs` | the bundle and its sources drift apart |
 | R13 | No LICENSE; IP ownership unclear | repo root | cannot legally share with the company or open-source it |
-| R14 | Test coverage of the product itself: 30 Rust unit tests (`cargo test`, 0 in `raw.rs`/`report.rs`), vm-guard `node --test`, corpus 90 cases; collector setup logic has no unit tests | `cargo test` output | regressions in the most subtle code (hook timing) go unnoticed |
+| R14 | Test coverage of the product itself: 30 Rust unit tests (`cargo test`, 0 in `raw.rs`/`report.rs`), vitest-guard `node --test`, corpus 90 cases; collector setup logic has no unit tests | `cargo test` output | regressions in the most subtle code (hook timing) go unnoticed |
 
 ### 6.2 Prioritised roadmap
 
 **Phase 0: make it shippable (blocks 1.0)**
 1. **One product, one repo layout, one version.**
-   - npm workspaces: `packages/vto` (CLI, collector, verify, MCP, daemon), `packages/vto-analyzer-*` (binaries), `packages/vto-analyzer-wasm`, `packages/vm-guard`.
+   - npm workspaces: `packages/vto` (CLI, collector, verify, MCP, daemon), `packages/vto-analyzer-*` (binaries), `packages/vto-analyzer-wasm`, `packages/vitest-guard`.
    - Consistent `engines` (Node ≥ 20.19 or ≥ 22, decide once) and peer `vitest >=5.1 <6`.
    - Changesets for releases.
 2. **CI matrix** (§4.2 item 4) on GitHub Actions *and* an Azure Pipelines template. Native release builds with static CRT on Windows, and SLSA/npm provenance.
@@ -551,13 +551,13 @@ There are 25 touch points. Six are high risk (V1, V6–V8, V9, V10, V14), and **
 8. **Telemetry-free by default.** State in the README that vto makes no network calls (true today). Add a CI test that fails on any `fetch`/`http` import outside an allow-list. Any future opt-in telemetry must be off by default and documented.
 9. **Docs (English primary, Czech secondary):**
    - a quick start for each capability;
-   - a rollout guide: vm-guard first (`vm-guard/README.md` "Doporučený rollout" is a good base);
+   - a rollout guide: vitest-guard first (`vitest-guard/README.md` "Doporučený rollout" is a good base);
    - "how to read the overlap report: candidates, not deletions";
    - a troubleshooting page with an exit-code table;
    - CI templates.
 
 **Phase 1: 1.0 feature scope**
-10. vm-guard 1.0: `projects` support, English README, interaction test with the collector. **Roll this out to the company first.** It has the strongest evidence and needs no map.
+10. vitest-guard 1.0: `projects` support, English README, interaction test with the collector. **Roll this out to the company first.** It has the strongest evidence and needs no map.
 11. `vto run-affected` stateless CLI with compact output (the MCP response shape), plus CI templates with fail-open.
 12. MCP server over the stateless CLI, with token-budget tests, redaction, and versioned schemas. The daemon only after measuring what it saves (ADR-7).
 13. Report: size caps (`--top`, per-section limits are partly there), English/Czech templates, report.json split into `summary.json` + paged detail.
@@ -570,7 +570,7 @@ There are 25 touch points. Six are high risk (V1, V6–V8, V9, V10, V14), and **
 
 ### 6.3 What blocks 1.0 (go/no-go checklist)
 
-- [ ] CI green on Windows, macOS and Linux for the corpus, probes, fault injection and vm-guard tests.
+- [ ] CI green on Windows, macOS and Linux for the corpus, probes, fault injection and vitest-guard tests.
 - [ ] All high-risk Vitest couplings either replaced with public APIs or covered by fail-closed probes.
 - [ ] `affected`: 0 misses on ≥ 500 mutants + 200-commit replay on the user's repo; documented fail-open CI policy.
 - [ ] Contract 2.1: versioned, relative paths, content hashes, `setupFiles` in meta.

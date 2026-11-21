@@ -19,7 +19,7 @@ const a = process.argv.slice(2);
 const opt = (k, d) => { const i = a.indexOf(k); return i >= 0 ? a[i + 1] : d; };
 const root = path.resolve(opt('--root'));
 const outFile = opt('--out', '/tmp/vto-bench.json');
-const plainCfg = opt('--config', null); // config for the plain Vitest runs (e.g. the generated vm-guard wrapper)
+const plainCfg = opt('--config', null); // config for the plain Vitest runs (e.g. the generated vitest-guard wrapper)
 const cfgArgs = plainCfg ? ['--config', plainCfg] : [];
 const CLI = path.join(here, '../bin/vto-daemon.mjs');
 const res = { root, at: new Date().toISOString(), scenarios: [], tokens: [] };
@@ -112,7 +112,7 @@ const T = [
   ['daemon_status', {}], ['affected_tests', {}], ['coverage_of', { file: 'src/components/badges/CartBadge.tsx' }],
   ['coverage_of', { file: 'src/components/badges/CartBadge.tsx', detail: 'full' }], ['tests_for_line', { file: 'src/components/badges/CartBadge.tsx', line: 19 }],
   ['coverage_of', { test: 'test/badges/CartBadge.1.test.tsx:1' }], ['test_overlap', { file: 'test/badges/' }], ['slow_tests', {}], ['slow_imports', {}],
-  ['slow_imports', { file: 'test/badges/CartBadge.1.test.tsx' }], ['suggest_env', {}], ['vm_guard_status', {}], ['savings_report', {}],
+  ['slow_imports', { file: 'test/badges/CartBadge.1.test.tsx' }], ['suggest_env', {}], ['vitest_guard_status', {}], ['savings_report', {}],
 ];
 for (const [name, args] of T) { const r = await call(name, args); res.tokens.push({ tool: name, args, tokens: r.tokens, ms: r.ms, isError: r.isError }); console.error(`${name} ${JSON.stringify(args)}: ${r.tokens} tok, ${r.ms} ms`); }
 // streaming tools on a failing run

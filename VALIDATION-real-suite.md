@@ -3,10 +3,10 @@
 Date 2026-11-21. Target: a private real-world repository @ `00be2f6` (React 19.3, TS 7, Vite 8.3, Vitest 5.1.0, jsdom 31,
 `test.projects` = `node` (120 files / 1120 tests) + `dom` (129 files / 872 tests), both `pool: 'vmThreads'`).
 The repo was treated as read-only; all work ran in a copy `/path/to/real-lab` (`npm ci`). Lab-only files there:
-`vmg.config.ts` (the repo's own config wrapped by vm-guard, `testTimeout: 30000`) and `.vm-guard/`.
+`vmg.config.ts` (the repo's own config wrapped by vitest-guard, `testTimeout: 30000`) and `.vitest-guard/`.
 
 Also measured: `vto-daemon` (mcp, `8ee1310`+). Tools under test: vto repo snapshot **`95d1395`** (`/path/to/real-work/vto-snap2`, analyzer built from the committed
-source; byte-identical to the `792389a` binary). The vto repo changed while the validation ran (format 2.1, vm-guard
+source; byte-identical to the `792389a` binary). The vto repo changed while the validation ran (format 2.1, vitest-guard
 `projects` support at 03:43), so the first collector runs (raw1–raw3) used older collector code; every number marked
 "snapshot" is from `95d1395`/`792389a`.
 
@@ -70,7 +70,7 @@ Sanity check of 5 candidates (read the tests):
 Plausible as *coverage* findings (5/5), but 0/5 are deletable: on this data-driven game the dominant false-redundancy
 source is data (JSON fixtures, `it.each` rows), which coverage cannot see.
 
-## 3. vm-guard (`vmg.config.ts` = repo config wrapped, native `test.projects` support of `2d7ddf9`)
+## 3. vitest-guard (`vmg.config.ts` = repo config wrapped, native `test.projects` support of `2d7ddf9`)
 
 | project | forks (isolated) | vm | shared (`resetModules`) | failures forks / vm / shared |
 |---|---|---|---|---|
@@ -78,7 +78,7 @@ source is data (JSON fixtures, `it.each` rows), which coverage cannot see.
 | dom, CPU s | 238.1, 228.8 → **233.4** | 108.7, 108.2 → **108.5** (−53.5 %) | 84.8, 87.9 → **86.3** (−63.0 %) | 0 / 0 / 0 |
 | total | 293.1 | 173.6 (**−40.8 %**) | 111.7 (**−61.9 %**) | identical lists (empty) = baseline |
 
-vm-guard `vm` vs the repo's bare `vmThreads`: node +1.9 %, dom +5.9 % (layer overhead).
+vitest-guard `vm` vs the repo's bare `vmThreads`: node +1.9 %, dom +5.9 % (layer overhead).
 `shared` vs the repo's current setup (bare vmThreads, 166.4 s summed per project): **−32.9 % CPU**.
 
 | CLI (both projects, 249 files) | CPU s | wall s | result |
@@ -168,7 +168,7 @@ text that lives in `texts.cs.json`. Code mutants cannot distinguish data-driven 
 
 | step | CPU s | wall s | result |
 |---|---|---|---|
-| first run (records map) | 201.5 (self-reported 199.9) | 305.6 (load 4.8) | 1992/1992 pass, `runAll` "no coverage map yet", `pool: vm-guard:vm` |
+| first run (records map) | 201.5 (self-reported 199.9) | 305.6 (load 4.8) | 1992/1992 pass, `runAll` "no coverage map yet", `pool: vitest-guard:vm` |
 | one-line edit `src/game/hash.ts` (live analyzer) | – | – | **crash**: `Error: write EPIPE … at mcp/src/analyzer.mjs:42:32` (bug D1) |
 | same edit, `VTO_ANALYZER` = committed-source binary | **20.0** | 52.4 (load 9.4) | 64 tests (= `vto affected`), 63 pass, 1 load-induced timeout (`determinism.test.ts`, 5 s); **−88 % CPU** vs full suite |
 | immediately again | 4.0 | 12.0 | re-ran only the failing test (correct) |
@@ -181,7 +181,7 @@ text that lives in `texts.cs.json`. Code mutants cannot distinguish data-driven 
 | `affected` recall 100 % | 100 syntax-valid mutants: 2 strict test-level misses (1 collateral, 1 real order-dependent memo case), every killed mutant detected; full-suite subset 21/21; plus 2 confirmed misses through `fs` reads (CSS, source guard) | **disproved at test level** (≥ 99.4 %); holds at mutant level and at file granularity for the harness misses, but not for `fs` readers |
 | vm −80 %+ CPU | vm vs forks: −40.8 % total (dom −53.5 %, node +9.0 %) | **disproved here** (no jsdom in half the suite) |
 | shared mode | −61.9 % vs forks, −32.9 % vs the repo's current vmThreads | best mode for this repo |
-| no new failures | vm-guard vm/shared: identical (empty) failure lists vs forks and baseline, `verify` 0 false-green / 0 false-red both modes; collector runs: 0 failures | **holds** (load-induced timeouts excluded, also present in plain baseline) |
+| no new failures | vitest-guard vm/shared: identical (empty) failure lists vs forks and baseline, `verify` 0 false-green / 0 false-red both modes; collector runs: 0 failures | **holds** (load-induced timeouts excluded, also present in plain baseline) |
 
 ## Bugs and findings in our tools
 
@@ -190,7 +190,7 @@ text that lives in `texts.cs.json`. Code mutants cannot distinguish data-driven 
 | A1 | high | `collector/setup-v2.mjs`, `analyzer/src/affected.rs` | tests that read project files via `node:fs` (11 files here: `tests/guards/*`, `typeScale`, `lazyScreens`, `workerData`, …) are invisible: CSS `font-size` edit → `typeScale.test.ts` fails, not selected; `Math.random` in `src/game` → `no-math-random.test.ts` fails, not selected | collector: wrap `fs.readFileSync/readdirSync/existsSync/statSync/promises.readFile` per test file and emit `fileload.reads` (files + dirs); analyzer: a change under a read path selects that file. Cheap fallback: test files importing `node:fs` are selected for any `src/` change (here ~4 % of tests) |
 | A2 | med | `affected.rs` (test-level selection) | order-dependent coverage with cross-test memoization: `telephone.ts:31` mutant fails `rerenders.test.tsx:48` alone, but its recorded hits were only [51, 53] because test 1 warmed `reachedMemo`. Also collateral failures (`newspaper.test.tsx`) | option (or default) `--file-granularity`: widen to all tests of a selected test file; or mark modules with module-level caches (WeakMap/Map at top level, hit by an earlier test of the same file) as file-level |
 | A3 | med | `analyzer/src/main.rs:363` | `--vitest` prints `[]` on run-all, the same as "nothing selected"; `--print0` prints nothing in both cases. Only the exit code (3 vs 0) differs, and it is lost in a pipe without `pipefail`. The documented `… --print0 \| xargs -0 npx vitest run` runs the full suite for an empty selection, and with `xargs -r` runs nothing on run-all | make the outputs distinct (e.g. run-all → `null`, or a sentinel line), document `xargs -r` plus explicit exit-3 handling |
-| A4 | med | `affected.rs:213` `DEFAULT_RUN_ALL` `.vm-guard/**` + vm-guard | vm-guard rewrites `durations.json` / `pollution.json` (README: commit them) and writes `run/`, `plan.json`, `files-cache.json`, `verify-*.json`, `settings.json` on every run → `vto affected --git HEAD` on an unchanged tree: `run all` with 13 `.vm-guard/...: configuration / dependency / setup / attributes file changed` reasons, exit 3 | run-all only for `.vm-guard/incompatible.json` (+ `conflicts.json`); vm-guard puts volatile state under `.vm-guard/run/` and writes a `.gitignore` there |
+| A4 | med | `affected.rs:213` `DEFAULT_RUN_ALL` `.vitest-guard/**` + vitest-guard | vitest-guard rewrites `durations.json` / `pollution.json` (README: commit them) and writes `run/`, `plan.json`, `files-cache.json`, `verify-*.json`, `settings.json` on every run → `vto affected --git HEAD` on an unchanged tree: `run all` with 13 `.vitest-guard/...: configuration / dependency / setup / attributes file changed` reasons, exit 3 | run-all only for `.vitest-guard/incompatible.json` (+ `conflicts.json`); vitest-guard puts volatile state under `.vitest-guard/run/` and writes a `.gitignore` there |
 | V1 | med | `verify/verify.mjs:63-78` | with format-2.1 raw (root-relative `file`, `hits` keys) every unit is "test nenalezen v raw datech" → `0 mutantů … {"nelze ověřit":14}`, exit 0 (silent). Reads only top-level `w-*.jsonl` (no shard sub-dirs, unlike the analyzer) | resolve `r.file`/hit keys with `path.resolve(meta.root, …)`, walk sub-dirs, exit ≠ 0 when no unit matches |
 | V2 | med | `verify` verdicts | "potvrzeno redundantní" for data-driven pairs: 7 of 10 confirmations wrong in the sample (`it.each` rows over sector JSON, different JSON files, texts from `texts.cs.json`). Some verdicts rest on 5–7 mutants | never "confirmed" for units on the same test line (`it.each`) or whose tests differ in data/literals; with `--max-mutants` or < N mutants say "not refuted (k mutants)" |
 | R1 | low | `analyzer/src/imports.rs:68-74` | unused-import ranking sums `loadMs` over **all** loading test files, including those that exercise the module → `src/game/chain/buildings.ts` (used in 157/171 files) ranked #2 "suspect" | sum `loadMs` only over files where the module is unused |
@@ -200,8 +200,8 @@ text that lives in `texts.cs.json`. Code mutants cannot distinguish data-driven 
 | C2 | info | collector | a +11 % CPU run under load makes timing-sensitive tests flakier: the base collector run of instance 2 failed twice on `survey24.test.tsx` (RTL `findByRole` 1 s, lazy chunk) before passing | `run-raw` could raise RTL `asyncUtilTimeout` like `verify` does (`--async-timeout`) |
 | D1 | high | `mcp/src/analyzer.mjs:42` + uncommitted `analyzer/src/raw.rs` | the live binary (`analyzer/target/release/vto`, rebuilt 06:05 from an **uncommitted** `raw.rs` that only accepts `w-*.jsonl`/`s-*.jsonl`) rejects the daemon map (`files.jsonl`, `meta.jsonl`, `t/<hash>.jsonl`): `raw data rejected: .vto/map: no w-*.jsonl / s-*.jsonl files`. It exits before reading stdin, and the daemon dies with an unhandled `Error: write EPIPE` that hides the real message | rename the daemon map files (`s-files.jsonl`, `t/s-<hash>.jsonl`) or keep `*.jsonl` accepted for producer `vto-daemon`; add `p.stdin.on('error', …)` and report `r.err`; add a daemon ↔ analyzer contract test |
 | D2 | low | daemon JSON | first run reports `"total":0` with `"ran":1992`, and `mapUpdated.files: 0` after recording the whole map | fill `total`; count recorded files |
-| G1 | info (fixed upstream during the run) | vm-guard `index.mjs` @ `792389a` | `Error: [vm-guard] configs with test.projects are not supported yet: wrap each project config instead.` | fixed in `2d7ddf9`; native `projects` support verified here (all modes, `verify`, `check`) |
-| G2 | claim | vm-guard | `vm` vs forks only **−40.8 %** total (dom −53.5 %, node **+9.0 %**: without jsdom vm contexts cost more than forks); claim −80 %+ does not hold here | README: the vm gain depends on environment setup cost; suggest `shared` (or forks) for pure-node projects; `check` could print the per-project comparison |
+| G1 | info (fixed upstream during the run) | vitest-guard `index.mjs` @ `792389a` | `Error: [vitest-guard] configs with test.projects are not supported yet: wrap each project config instead.` | fixed in `2d7ddf9`; native `projects` support verified here (all modes, `verify`, `check`) |
+| G2 | claim | vitest-guard | `vm` vs forks only **−40.8 %** total (dom −53.5 %, node **+9.0 %**: without jsdom vm contexts cost more than forks); claim −80 %+ does not hold here | README: the vm gain depends on environment setup cost; suggest `shared` (or forks) for pure-node projects; `check` could print the per-project comparison |
 
 Operational note: at ~03:52 I ran `pkill -f vitest` to stop my own matrix. On this shared machine that may also have
 killed other agents' Vitest processes running then. After that I only killed my own process groups by unique paths.

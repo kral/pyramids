@@ -155,7 +155,7 @@ export class RunnerMixin {
       run.lanesExpected = plan.length;
       const infos = await Promise.all(plan.map(([n]) => this.startLane(n)));
       const info = infos[0];
-      run.pool = plan.map(([n], i) => (plan.length > 1 ? `${n}:` : '') + (infos[i].vmGuard ? `vm-guard:${infos[i].vmGuard}` : infos[i].pool)).join('+');
+      run.pool = plan.map(([n], i) => (plan.length > 1 ? `${n}:` : '') + (infos[i].vitestGuard ? `vitest-guard:${infos[i].vitestGuard}` : infos[i].pool)).join('+');
       // snapshot of every changed tracked file at run start (= the version this run executes)
       const snap = new Map();
       for (const [f, c] of changedFiles(this)) if (c.cur) snap.set(f, c.cur.text != null ? c.cur : this.scanner.readText(f));

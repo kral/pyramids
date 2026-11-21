@@ -33,7 +33,7 @@ const srv = await createServer({
   root,
   onRequest: async (c, method, p) => {
     if (method === 'subscribe') { c.topics = Array.isArray(p.topics) && p.topics.length ? new Set(p.topics) : null; subs.add(c); c.once('close', () => subs.delete(c)); return { subscribed: c.topics ? [...c.topics] : 'all', activeRun: state.runId }; }
-    if (method === 'status') return { v: 'vto/1', mock: true, root, mode: 'daemon', warm: true, pool: 'vm-guard:vm', activeRun: state.runId ? { runId: state.runId, done: state.done, total: state.total } : undefined, stale: false };
+    if (method === 'status') return { v: 'vto/1', mock: true, root, mode: 'daemon', warm: true, pool: 'vitest-guard:vm', activeRun: state.runId ? { runId: state.runId, done: state.done, total: state.total } : undefined, stale: false };
     if (method === 'run_status') return { v: 'vto/1', runId: state.runId, status: state.status, done: state.done, total: state.total, failed: state.failed };
     if (method === 'next_failures') { const from = +(p.cursor || 0); return { v: 'vto/1', runId: state.runId, failures: state.failures.slice(from, from + (p.limit || 5)).map((f) => ({ id: f.id, error: f.message, group: f.group, at: f.frames.map((x) => `${x.file}:${x.line}`) })), cursor: String(Math.min(state.failures.length, from + (p.limit || 5))), done: state.status === 'done' }; }
     if (method === 'start_run' || method === 'rerun_failed') { setTimeout(() => play().catch(console.error), 10); return { v: 'vto/1', runId: `r${runSeq + 1}`, total: nTests, status: 'queued' }; }
@@ -69,7 +69,7 @@ async function play() {
   Object.assign(state, { runId, status: 'running', done: 0, failed: 0, total: nTests, failures: [] });
   const t0 = Date.now();
   const domFiles = Math.ceil(files * 0.75);
-  broadcast({ ev: 'run-start', runId, kind: 'affected', total: nTests, files, pool: 'vm-guard:vm', lane: 'main',
+  broadcast({ ev: 'run-start', runId, kind: 'affected', total: nTests, files, pool: 'vitest-guard:vm', lane: 'main',
     projects: { dom: { files: domFiles, tests: Math.min(nTests, domFiles * 10) }, node: { files: files - domFiles, tests: nTests - Math.min(nTests, domFiles * 10) } } });
   let i = 0, seq = 0;
   for (let f = 0; f < files && !cancel; f++) {

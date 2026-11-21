@@ -15,7 +15,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 /**
  * Pools a user can configure (U-6). "config" (default) = whatever the project's Vitest config says:
  * vto does not touch the pool. Everything else is an explicit choice in .vto/config.json, the
- * user-level config or VTO_POOL: vm / shared (vm-guard), auto (dom → vm, node → forks group lanes),
+ * user-level config or VTO_POOL: vm / shared (vitest-guard), auto (dom → vm, node → forks group lanes),
  * or a raw Vitest pool.
  */
 export const POOLS = new Set(['config', 'auto', 'vm', 'shared', 'forks', 'threads', 'vmThreads', 'vmForks']);
@@ -49,10 +49,10 @@ export class LanesMixin {
     if (name === 'main' && this.config.maxWorkers) opts.maxWorkers = this.config.maxWorkers;
     if (name === 'fix') opts.maxWorkers = 1;
     if (name === 'clean') { opts.instrument = false; opts.envProbe = false; }
-    if ((pool === 'vm' || pool === 'shared') && this.config.wrapVmGuard !== false) {
+    if ((pool === 'vm' || pool === 'shared') && this.config.wrapVitestGuard !== false) {
       const userConfig = this.config.configFile || findConfig(this.root);
-      const vmGuard = resolveVmGuard(this.root);
-      if (userConfig && vmGuard) opts.wrapVmGuard = { userConfig, vmGuard };
+      const vitestGuard = resolveVitestGuard(this.root);
+      if (userConfig && vitestGuard) opts.wrapVitestGuard = { userConfig, vitestGuard };
     }
     l = new Lane(name, { root: this.root, rawDir: path.join(this.dir, 'raw', name), opts, log: this.log, stateDir: this.sd });
     this.lanes.set(name, l);
@@ -106,7 +106,7 @@ export class LanesMixin {
     // a trigger that changed while no lane ran is detected by select() before this overwrites it
     st.triggers = t;
     st.setupFiles = info.setupFiles;
-    st.lane = { pool: info.pool, vmGuard: info.vmGuard, vitest: info.vitest, maxWorkers: info.maxWorkers };
+    st.lane = { pool: info.pool, vitestGuard: info.vitestGuard, vitest: info.vitest, maxWorkers: info.maxWorkers };
     this.store.filesDirty = true;
   }
   async restartLanes(reason) {
@@ -142,7 +142,7 @@ export class LanesMixin {
   poolName() {
     if (this.groupsEnabled()) return `dom:${this.groupPool('dom')}+node:${this.groupPool('node')}`;
     const l = this.store.state.lane;
-    const actual = l ? (l.vmGuard ? `vm-guard:${l.vmGuard}` : l.pool) : null;
+    const actual = l ? (l.vitestGuard ? `vitest-guard:${l.vitestGuard}` : l.pool) : null;
     if (this.config.pool === 'config') return actual ? `${actual} (project config)` : 'project config';
     return actual || this.config.pool;
   }
@@ -177,7 +177,7 @@ export class LanesMixin {
   }
 
 }
-function resolveVmGuard(root) {
-  for (const p of [path.join(root, 'node_modules', 'vm-guard', 'src', 'index.mjs'), path.resolve(here, '../../vm-guard/src/index.mjs')]) if (fs.existsSync(p)) return p;
+function resolveVitestGuard(root) {
+  for (const p of [path.join(root, 'node_modules', 'vitest-guard', 'src', 'index.mjs'), path.resolve(here, '../../vitest-guard/src/index.mjs')]) if (fs.existsSync(p)) return p;
   return null;
 }

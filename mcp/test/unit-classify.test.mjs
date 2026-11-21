@@ -16,7 +16,7 @@ test('static fallback and probe-based classification', () => {
   assert.deepEqual([cls.get(b).group, cls.get(b).source], ['dom', 'probe']);
   assert.deepEqual([cls.get(c).group, cls.get(c).source], ['node', 'static']);
   writeEnvJson(d, cls, (x) => path.basename(x));
-  const f = path.join(d, '.vm-guard', 'run', 'env.json');
+  const f = path.join(d, '.vitest-guard', 'run', 'env.json');
   const j = JSON.parse(fs.readFileSync(f, 'utf8'));
   assert.equal(j.format, 'vto-env/1');
   assert.equal(j.files['a.test.tsx'].group, 'node');
@@ -31,16 +31,16 @@ test('worker budget split by measured time, at least one each', () => {
   assert.deepEqual(splitWorkers(3, { dom: 1, node: 1000 }), { dom: 1, node: 2 });
 });
 
-test('vm_guard_status reads run logs from .vm-guard/run/logs/ and the older .vm-guard/run/', async () => {
-  const { vmGuardStatus } = await import('../src/analysis.mjs');
+test('vitest_guard_status reads run logs from .vitest-guard/run/logs/ and the older .vitest-guard/run/', async () => {
+  const { vitestGuardStatus } = await import('../src/analysis.mjs');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vto-vmg-'));
-  fs.mkdirSync(path.join(root, '.vm-guard', 'run', 'logs'), { recursive: true });
-  fs.writeFileSync(path.join(root, '.vm-guard', 'incompatible.json'), JSON.stringify({ vm: { 'test/a.test.ts': {} } }));
-  fs.writeFileSync(path.join(root, '.vm-guard', 'run', 'logs', 'w-1-0.jsonl'), '{"t":"start","file":"a","seq":1,"dirty":[{"kind":"x"}]}\n{"t":"start","file":"b","seq":2}\n');
-  fs.writeFileSync(path.join(root, '.vm-guard', 'run', 'w-2-0.jsonl'), '{"t":"start","file":"c","seq":1}\n');
-  fs.writeFileSync(path.join(root, '.vm-guard', 'run', 'env.json'), '{"format":"vto-env/1","files":{}}');
-  const eng = { root, store: { state: { lane: { vmGuard: 'vm', pool: 'vmThreads' } } }, envelope: (o) => o };
-  const r = vmGuardStatus(eng);
+  fs.mkdirSync(path.join(root, '.vitest-guard', 'run', 'logs'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.vitest-guard', 'incompatible.json'), JSON.stringify({ vm: { 'test/a.test.ts': {} } }));
+  fs.writeFileSync(path.join(root, '.vitest-guard', 'run', 'logs', 'w-1-0.jsonl'), '{"t":"start","file":"a","seq":1,"dirty":[{"kind":"x"}]}\n{"t":"start","file":"b","seq":2}\n');
+  fs.writeFileSync(path.join(root, '.vitest-guard', 'run', 'w-2-0.jsonl'), '{"t":"start","file":"c","seq":1}\n');
+  fs.writeFileSync(path.join(root, '.vitest-guard', 'run', 'env.json'), '{"format":"vto-env/1","files":{}}');
+  const eng = { root, store: { state: { lane: { vitestGuard: 'vm', pool: 'vmThreads' } } }, envelope: (o) => o };
+  const r = vitestGuardStatus(eng);
   assert.equal(r.filesLogged, 3);
   assert.equal(r.dirtyStarts, 1);
   assert.equal(r.quarantined.vmCount, 1);

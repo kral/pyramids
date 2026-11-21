@@ -6,4 +6,4 @@ overlap-report/
 .vto/
 .vto-tmp/
 verify-report/
-.vm-guard/run/
+.vitest-guard/run/

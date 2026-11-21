@@ -4,7 +4,7 @@
 #   push to main   full run with the collector → coverage map published as an artifact
 #   pull request   only the tests affected by the PR (falls back to the whole suite whenever the
 #                  map cannot answer: no map yet, stale map, config/lockfile change, exit code 3)
-#   nightly        whole suite in isolated forks + vm-guard verify (only if you use vm-guard)
+#   nightly        whole suite in isolated forks + vitest-guard verify (only if you use vitest-guard)
 #
 # Trust rule: the map is recorded only on the protected branch. A PR consumes the map, it never
 # produces one (FORMAT.md, "Map provenance").
@@ -83,7 +83,7 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: node "$VTO_HOME/docs/ci/run-affected.mjs" --map vto-map.jsonl --base "origin/$BASE_REF"
 
-  nightly:                                # the whole suite, isolated; vm-guard users also verify the fast mode
+  nightly:                                # the whole suite, isolated; vitest-guard users also verify the fast mode
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
@@ -93,8 +93,8 @@ jobs:
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - run: npx --no-install vitest run
-        env: { VM_GUARD_MODE: isolated }  # no effect unless vitest.config is wrapped with defineVmGuardConfig
-      # Only with vm-guard (exit 5 = false green, exit 4 = quarantine changed: commit it):
+        env: { VITEST_GUARD_MODE: isolated }  # no effect unless vitest.config is wrapped with defineVitestGuardConfig
+      # Only with vitest-guard (exit 5 = false green, exit 4 = quarantine changed: commit it):
       # - uses: actions/checkout@v4
       #   with: { repository: <OWNER>/<VTO_REPO>, ref: <VTO_SHA>, path: .vto-tool, persist-credentials: false }
       # - run: node "$VTO_HOME/bin/vto.mjs" guard verify --sample 500

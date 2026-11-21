@@ -1,6 +1,6 @@
-// `.vm-guard/run/env.json` (format "vto-env/1", contracts/env-1.schema.json) – the daemon's side.
+// `.vitest-guard/run/env.json` (format "vto-env/1", contracts/env-1.schema.json) – the daemon's side.
 //
-// The file has ONE owner: vm-guard's envstore (`updateEnv`: precedence miss > probe > static, sticky
+// The file has ONE owner: vitest-guard's envstore (`updateEnv`: precedence miss > probe > static, sticky
 // dom:true, lock, atomic write – REVIEW-2-architecture A-6/N4, REVIEW-2-security N9). The daemon hands
 // its classification to that function and never applies merge rules of its own.
 // envstore is loaded from vto's own installation (sibling package / dependency), not from the project.
@@ -18,9 +18,9 @@ export const ENV_FORMAT = 'vto-env/1';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 async function loadEnvStore() {
-  const cands = [path.resolve(here, '../../vm-guard/src/envstore.mjs')];
+  const cands = [path.resolve(here, '../../vitest-guard/src/envstore.mjs')];
   const req = createRequire(import.meta.url);
-  for (const spec of ['@kral/vm-guard/envstore', 'vm-guard/envstore']) { try { cands.push(req.resolve(spec)); } catch {} }
+  for (const spec of ['@kral/vitest-guard/envstore', 'vitest-guard/envstore']) { try { cands.push(req.resolve(spec)); } catch {} }
   for (const f of cands) {
     try { if (!fs.existsSync(f)) continue; const m = await import(pathToFileURL(f).href); if (typeof m.updateEnv === 'function') return m; } catch {}
   }
@@ -41,8 +41,8 @@ export function toEntries(cls, relOf) {
 export function writeEnvJson(root, cls, relOf, { log = () => {} } = {}) {
   const entries = toEntries(cls, relOf);
   try {
-    // N5: .vm-guard/run/ can come from the repository – refuse symlinked directories before anyone writes
-    new StateDir(root, '.vm-guard').dir('run');
+    // N5: .vitest-guard/run/ can come from the repository – refuse symlinked directories before anyone writes
+    new StateDir(root, '.vitest-guard').dir('run');
     if (store) return store.updateEnv(root, entries, { producer: 'vto-daemon' });
     return fallbackUpdate(root, entries);
   } catch (e) { log(`env.json not updated: ${e.message}`); return null; }
@@ -65,7 +65,7 @@ export function fallbackMerge(curFiles, entries, at = new Date().toISOString()) 
 }
 
 export function fallbackUpdate(root, entries) {
-  const sd = new StateDir(root, '.vm-guard');
+  const sd = new StateDir(root, '.vitest-guard');
   const dir = sd.dir('run');
   const file = path.join(dir, 'env.json');
   const lock = file + '.lock';

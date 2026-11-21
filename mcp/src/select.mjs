@@ -50,7 +50,7 @@ export function changedFiles(eng) {
 }
 
 const SKIP_DIRS = new Set(['node_modules', '.git', '.vto', '.hg', '.svn']);
-const OWN = /^(?:\.vto|\.git|node_modules)(?:\/|$)|(?:^|\/)node_modules\/|^\.vm-guard\/run\//;
+const OWN = /^(?:\.vto|\.git|node_modules)(?:\/|$)|(?:^|\/)node_modules\/|^\.vitest-guard\/run\//;
 
 /**
  * Every project file a test could pick up (root-relative keys): what git tracks or would add

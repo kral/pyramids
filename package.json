@@ -4,7 +4,7 @@
   "private": true,
   "license": "MIT OR Apache-2.0",
   "type": "module",
-  "description": "vto - faster Vitest runs: test impact analysis, safe fast pools (vm-guard), overlap reports, daemon + MCP server for AI agents",
+  "description": "vto - faster Vitest runs: test impact analysis, safe fast pools (vitest-guard), overlap reports, daemon + MCP server for AI agents",
   "bin": {
     "vto": "./bin/vto.mjs",
     "vitest-overlap": "./vitest-overlap.mjs"

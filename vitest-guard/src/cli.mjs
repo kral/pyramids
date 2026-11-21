@@ -1,0 +1,720 @@
+// vitest-guard CLI: check | verify | compare | calibrate | plan | run | hunt | scan | report
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { runVitest, signature, vitestBin, childCpuSeconds } from './runner.mjs';
+import { readRunLogs, clearRunLogs, predecessors, updateDurations, heapReport, selfTime, ensureStateDir } from './logs.mjs';
+import { buildGraph, planLanes, readVto } from './plan.mjs';
+import { scanFile } from './scan.mjs';
+import { readJson } from './index.mjs';
+import { validEdges, pickKnown, privateTmp } from './safety.mjs';
+import { findConfigFile, gitHead, configKey } from './verifystate.mjs';
+
+// contracts/DECISIONS.md D3: 0 ok | 1 test failures (incl. unexplained/flaky) | 2 usage or config error |
+// 4 quarantine/conflict state changed | 5 false green. (3 = "run all" belongs to selection tools.)
+export const EXIT = { OK: 0, FAIL: 1, USAGE: 2, NEW_QUARANTINE: 4, FALSE_GREEN: 5 };
+
+// flags that never take a value (so `vitest-guard --verbose check` does not swallow the command)
+const BOOLEAN_FLAGS = new Set(['verbose', 'help', 'version', 'prune', 'compare', 'commit-state', 'quarantine', 'diag', 'reset-modules', 'confirm', 'hunt', 'plan', 'heal', 'replan', 'clean', 'calibrate', 'write']);
+function parseArgs(argv) {
+  const o = { _: [] };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a.startsWith('--no-')) o[a.slice(5)] = false;
+    else if (a.startsWith('--')) {
+      const [k, v] = a.slice(2).split('=');
+      if (v !== undefined) o[k] = v;
+      else if (!BOOLEAN_FLAGS.has(k) && argv[i + 1] && !argv[i + 1].startsWith('--')) o[k] = argv[++i];
+      else o[k] = true;
+    }
+    else o._.push(a);
+  }
+  return o;
+}
+
+export function ctx(o) {
+  const root = path.resolve(o.root || process.cwd());
+  const dir = path.join(root, '.vitest-guard');
+  const config = o.config ? path.resolve(o.config) : findConfigFile(root) || undefined;
+  // A4: committed state = .vitest-guard/{incompatible,conflicts}.json only; everything volatile lives in .vitest-guard/run/
+  // (git-ignored), run logs in .vitest-guard/run/logs/. --commit-state keeps durations/pollution next to the
+  // committed files for teams that want stable plans across machines.
+  const stateDir = path.join(dir, 'run');
+  return { root, dir, stateDir, runDir: path.join(stateDir, 'logs'), commitState: !!o['commit-state'], config, mode: o.mode || (readJson(path.join(stateDir, 'auto.json'), {}).auto ? 'auto' : 'vm'), verbose: !!o.verbose, lanes: Number(o.lanes || Math.max(1, os.availableParallelism() - 1)), filters: o._[0] === 'hunt' ? [] : o._.slice(1) };
+}
+const COMMITTED = new Set(['incompatible.json', 'conflicts.json']);
+const OPT_IN = new Set(['durations.json', 'pollution.json']); // others (auto.json, modes.json, env.json, …) live in run/
+export const statePath = (c, n) => P(c, n);
+const P = (c, n) => (COMMITTED.has(n) || (c.commitState && OPT_IN.has(n)) ? path.join(c.dir, n) : path.join(c.stateDir, n));
+// reads fall back to the pre-A4 location (.vitest-guard/<name>) only for the two history files that older versions
+// kept there (N9: a committed file must not be able to stand in for run state such as modes.json)
+const load = (c, n, d) => { const v = readJson(P(c, n), undefined); return v !== undefined ? v : OPT_IN.has(n) ? readJson(path.join(c.dir, n), d) : d; };
+export const saveState = (c, n, v) => save(c, n, v);
+const save = (c, n, v) => {
+  const file = P(c, n), txt = JSON.stringify(v, null, 2) + '\n';
+  if (file.startsWith(c.stateDir)) ensureStateDir(c.stateDir); else fs.mkdirSync(c.dir, { recursive: true });
+  try { if (fs.readFileSync(file, 'utf8') === txt) return; } catch {} // unchanged content: do not touch the file
+  fs.writeFileSync(file, txt);
+};
+const say = (...a) => console.log('[vitest-guard]', ...a);
+
+// `vitest list` costs a full config load (~1 s CPU): cache it. Valid while the directories holding test
+// files (and their ancestors up to the root) keep their mtime - adding/removing/renaming a test file
+// changes it - and the config file and filters are unchanged.
+const mtime = (p) => { try { return Math.floor(fs.statSync(p).mtimeMs); } catch { return -1; } };
+function dirsOf(root, files) {
+  const dirs = new Set([root]);
+  for (const f of files) { let d = path.dirname(path.join(root, f)); while (d.startsWith(root) && !dirs.has(d)) { dirs.add(d); d = path.dirname(d); } }
+  return [...dirs];
+}
+/** [{ file, project }] from `vitest list` (authoritative: only what Vitest itself would run). */
+export function listSpecs(c) {
+  const cacheFile = P(c, 'files-cache.json');
+  const cached = readJson(cacheFile, null);
+  const cfg = c.config ? mtime(c.config) : 0;
+  if (cached && cached.v === 3 && cached.wrapped === true && cached.cfg === cfg && JSON.stringify(cached.filters) === JSON.stringify(c.filters) && Object.entries(cached.dirs).every(([d, m]) => mtime(d) === m)) { c.wrapped = cached.wrapped; return cached.specs; }
+  const specs = listSpecsUncached(c);
+  const files = [...new Set(specs.map((x) => x.file))];
+  if (c.wrapped) try { ensureStateDir(c.stateDir); fs.writeFileSync(cacheFile, JSON.stringify({ v: 3, wrapped: c.wrapped, cfg, filters: c.filters, dirs: Object.fromEntries(dirsOf(c.root, files).map((d) => [d, mtime(d)])), specs })); } catch {}
+  return specs;
+}
+export function listFiles(c) {
+  return [...new Set(listSpecs(c).map((x) => x.file))].sort();
+}
+function listSpecsUncached(c) {
+  const tmp = privateTmp();
+  const marker = tmp.file('wrapped');
+  const r = spawnSync(process.execPath, [vitestBin(c.root), 'list', '--filesOnly', '--json', ...(c.config ? ['--config', c.config] : []), ...c.filters], { cwd: c.root, env: { ...process.env, VITEST_GUARD_MODE: 'isolated', VITEST_GUARD_CLI: '1', VITEST_GUARD_WRAP_MARKER: marker }, encoding: 'utf8', maxBuffer: 64 << 20 });
+  c.wrapped = fs.existsSync(marker); // U-2: defineVitestGuardConfig leaves a line there when the config goes through it
+  tmp.cleanup();
+  // the JSON array starts on its own line; anything printed before it (config logs like '[vitest-guard] …') is skipped
+  const m = /^\[\s*$|^\[\]|^\[\{/m.exec(r.stdout);
+  const txt = m ? r.stdout.slice(m.index) : '';
+  // project names lose the ':isolated' suffix of quarantine siblings: lanes target the original project
+  try { return JSON.parse(txt).map((x) => ({ file: path.relative(c.root, x.file).split(path.sep).join('/'), project: (x.projectName || '').replace(/:isolated$/, '') })).sort((a, b) => a.file.localeCompare(b.file) || a.project.localeCompare(b.project)); } catch { throw new Error('cannot list test files:\n' + r.stdout + r.stderr); }
+}
+const projectOf = (c, file) => listSpecs(c).find((x) => x.file === file)?.project ?? '';
+
+// pollution.json: { residual: {file: kinds}  – survived the reset hooks: drives conflict edges,
+//                   mitigated: {file: kinds} – undone by the reset hooks: only used to order polluters last }
+function aggregatePollution(c, workers) {
+  const pol = load(c, 'pollution.json', {});
+  pol.residual ||= {}; pol.mitigated ||= {};
+  const add = (bucket, file, kinds) => { if (kinds.length) pol[bucket][file] = [...new Set([...(pol[bucket][file] || []), ...kinds])]; };
+  const keysOf = (dirty) => new Set((dirty || []).flatMap((d) => (d.kind === 'singleton' ? d.keys.map((k) => 'singleton:' + k) : [d.kind])));
+  for (const w of workers) {
+    let before = new Set();
+    for (const f of w.files) {
+      // a dirty start is blamed on the previous file only when it is NEW dirt (persisting dirt, e.g. an
+      // initialised singleton, would otherwise blame every later file)
+      const now = keysOf(f.dirty);
+      if (f.prev) add('residual', f.prev, [...now].filter((k) => !before.has(k)));
+      add('residual', f.file, (f.residual || []).filter((k) => !now.has(k)));
+      add('mitigated', f.file, (f.pollution || []).filter((k) => !now.has(k) && !(f.residual || []).includes(k)));
+      before = now;
+    }
+  }
+  save(c, 'pollution.json', pol);
+  return pol;
+}
+
+// ---------------- plan / run (shared mode) ----------------
+export async function cmdPlan(c, o, files = listFiles(c)) {
+  // F9: committed .vitest-guard/*.json only refer to files Vitest itself lists; anything else is dropped
+  const q = load(c, 'incompatible.json', {});
+  const history = validEdges(load(c, 'conflicts.json', { edges: [] }).edges, files);
+  const pollution = load(c, 'pollution.json', {});
+  const residual = pickKnown(pollution.residual, files);
+  const mitigated = pickKnown(pollution.mitigated, files);
+  let durations = pickKnown(load(c, 'durations.json', {}), files);
+  let vto = { modules: {}, durations: {} };
+  if (o['vto-raw']) { vto = readVto(path.resolve(o['vto-raw']), c.root); durations = { ...pickKnown(vto.durations, files), ...durations }; }
+  const mockEdges = o['reset-modules'] === false || (o['reset-modules'] !== true && load(c, 'settings.json', {}).resetModules === false);
+  const isolatedQ = Object.keys(pickKnown(q.shared, files));
+  // one plan per project: a lane is one Vitest process restricted to one project (its own environment/pool)
+  const specs = listSpecs(c).filter((x) => files.includes(x.file));
+  const byProject = new Map();
+  for (const x of specs.length ? specs : files.map((file) => ({ file, project: '' }))) { const a = byProject.get(x.project) || []; if (!a.includes(x.file)) a.push(x.file); byProject.set(x.project, a); }
+  const lanes = [], isolated = new Set(), edges = [], polluters = new Set();
+  for (const [project, pf] of byProject) {
+    const g = buildGraph({ root: c.root, files: pf, history, pollution: residual, orderOnly: Object.keys(mitigated), vto, mockEdges });
+    const plan = planLanes(g, { lanes: c.lanes, durations, isolated: isolatedQ.filter((f) => pf.includes(f)) });
+    for (const l of plan.lanes) lanes.push({ project, ...l });
+    plan.isolated.forEach((f) => isolated.add(f));
+    edges.push(...g.edges.map((e) => ({ project, ...e })));
+    g.polluters.forEach((f) => polluters.add(f));
+  }
+  const out = { version: 2, createdAt: new Date().toISOString(), lanes, isolated: [...isolated].sort(), edges, polluters: [...polluters].sort() };
+  save(c, 'plan.json', out);
+  say(`plan: ${lanes.length} lanes (${lanes.map((l) => `${l.project ? l.project + ': ' : ''}${l.files.length} files ~${l.estMs} ms`).join(', ')}), isolated ${out.isolated.length}, hard edges ${edges.length}`);
+  return out;
+}
+
+async function runLane(c, files, tag, project = null, mode = 'shared') {
+  const laneFile = path.join(c.runDir, `lane-${tag}.json`);
+  ensureStateDir(c.stateDir); fs.mkdirSync(c.runDir, { recursive: true });
+  fs.writeFileSync(laneFile, JSON.stringify({ project: project || null, files }));
+  return runVitest({ root: c.root, config: c.config, mode, laneFile, verbose: c.verbose, tag });
+}
+
+function merge(results) {
+  const files = new Map();
+  let code = 0;
+  for (const r of results) { for (const [k, v] of r.files) files.set(k, v); if (r.code) code = r.code; if (r.error) { code = code || 1; console.error(r.error + '\n' + r.log.slice(-3000)); } }
+  return { files, code };
+}
+
+export async function cmdRunPlanned(c, o, plan) {
+  plan ||= o.replan === false ? load(c, 'plan.json', null) || (await cmdPlan(c, o)) : await cmdPlan(c, o);
+  if (o.clean !== false) clearRunLogs(c.runDir);
+  const jobs = plan.lanes.map((l, i) => runLane(c, l.files, 'lane' + i, l.project));
+  if (plan.isolated.length) jobs.push(runVitest({ root: c.root, config: c.config, mode: 'isolated', files: plan.isolated, verbose: c.verbose, tag: 'isolated' }));
+  const r = merge(await Promise.all(jobs));
+  const workers = readRunLogs(c.runDir);
+  updateDurations(P(c, 'durations.json'), workers);
+  aggregatePollution(c, workers);
+  return r;
+}
+
+// ---------------- hunt ----------------
+export async function hunt(c, victim, preds, mode = 'shared') {
+  const project = projectOf(c, victim);
+  const allowed = new Set(listSpecs(c).filter((x) => x.project === project).map((x) => x.file));
+  preds = preds.filter((f) => allowed.has(f) && f !== victim); // F9: only files of the victim's project
+  const failsWith = async (list) => (await runLane(c, [...list, victim], 'hunt', project, mode)).files.get(victim)?.status !== 'passed';
+  if (!preds.length) return { found: false, reason: `no predecessors in the ${mode} worker` };
+  if (!(await failsWith(preds))) return { found: false, reason: 'did not reproduce with the recorded predecessor order' };
+  if (await failsWith([])) return { found: false, reason: `fails alone in a ${mode} worker (not order-dependent: ${mode}-incompatible)`, alone: true };
+  let cand = preds, runs = 2;
+  while (cand.length > 1) {
+    const half = Math.ceil(cand.length / 2);
+    const a = cand.slice(0, half), b = cand.slice(half);
+    runs++;
+    if (await failsWith(a)) { cand = a; continue; }
+    runs++;
+    if (await failsWith(b)) { cand = b; continue; }
+    return { found: true, polluters: cand, runs, note: 'needs a combination of files' };
+  }
+  return { found: true, polluters: cand, runs };
+}
+
+function addConflicts(c, victim, polluters, sig) {
+  const conf = load(c, 'conflicts.json', { version: 1, edges: [] });
+  let added = 0;
+  for (const p of polluters) if (!conf.edges.some((e) => e.a === p && e.b === victim)) { conf.edges.push({ a: p, b: victim, kind: 'history', signature: sig, seen: new Date().toISOString().slice(0, 10) }); added++; }
+  if (added) save(c, 'conflicts.json', conf);
+  return added;
+}
+
+// ---------------- check ----------------
+const isFast = (m) => m === 'vm' || m === 'shared';
+
+/**
+ * M7: why did `file` fail in the fast mode although it passes in forks?
+ *  - 'alone'  fails in the fast mode on its own, repeatedly       -> mode-incompatible: quarantine
+ *  - 'order'  passes alone, fails again after the files that ran before it in the same worker (replayed in the
+ *             recorded order)                                     -> deterministic, caused by `polluters`
+ *  - 'flaky'  passed on a retry under the same conditions (same mode, same predecessors)
+ * Only 'flaky' is flaky. A victim that merely passes when re-run WITHOUT its predecessors is not.
+ */
+async function explainFastFailures(c, o, candidates, { runMode, bucketOf, workers }) {
+  const verdict = new Map();
+  if (!candidates.length) return verdict;
+  if (o.confirm === false) { for (const f of candidates) verdict.set(f, { kind: 'alone', note: 'not confirmed (--no-confirm)' }); return verdict; }
+  const retries = Math.max(1, Number(o.retries ?? 2) || 2);
+  const viaHunt = o.hunt !== false;
+  // shared mode always bisects (as before); vm mode first separates files that fail on their own
+  let open = candidates.filter((f) => bucketOf(f) !== 'shared' || !viaHunt);
+  const hunted = candidates.filter((f) => !open.includes(f));
+  for (let i = 0; i < retries && open.length; i++) {
+    const again = await runVitest({ root: c.root, config: c.config, mode: runMode, files: open, env: { VITEST_GUARD_IGNORE_QUARANTINE: '1' }, verbose: c.verbose, tag: 'confirm' + i });
+    const passed = open.filter((f) => again.files.get(f)?.status === 'passed');
+    for (const f of passed) verdict.set(f, { kind: 'retry-pass', attempt: i + 1 });
+    open = open.filter((f) => !passed.includes(f));
+  }
+  for (const f of open) verdict.set(f, { kind: 'alone', note: `failed in ${retries + 1} ${bucketOf(f)} runs` });
+  for (const f of [...hunted, ...[...verdict].filter(([, v]) => v.kind === 'retry-pass').map(([f]) => f)]) {
+    const bucket = bucketOf(f);
+    if (!viaHunt) { verdict.set(f, { kind: 'flaky', note: `passed on a ${bucket} re-run (predecessors not replayed: --no-hunt)` }); continue; }
+    const h = await hunt(c, f, predecessors(workers, f), bucket);
+    if (h.found) verdict.set(f, { kind: 'order', polluters: h.polluters, runs: h.runs, note: h.note });
+    else if (h.alone) verdict.set(f, { kind: 'alone', note: h.reason });
+    else verdict.set(f, { kind: 'flaky', note: h.reason });
+  }
+  return verdict;
+}
+
+export async function cmdCheck(c, o) {
+  const mode = c.mode;
+  const auto = mode === 'auto';
+  if (auto && !load(c, 'modes.json', null)?.modes && o.calibrate !== false) {
+    // first check of a mode-'auto' config: measure forks/vm/shared per group before choosing modes
+    say("auto: no .vitest-guard/run/modes.json yet: calibrating (vitest-guard calibrate, 20 files per group; --no-calibrate skips)");
+    await cmdCompare(c, { ...o, sample: o['calibrate-sample'] ?? 20 });
+  }
+  const runMode = auto ? undefined : mode; // auto: the config's own per-group modes
+  // quarantine bucket of a file: the fast mode it ran in (auto: its group's mode, from .vitest-guard/run/auto.json)
+  const bucketOf = (f) => (auto ? load(c, 'auto.json', {}).groups?.[projectOf(c, f)] : mode);
+  clearRunLogs(c.runDir);
+  const q = load(c, 'incompatible.json', { version: 1, vm: {}, shared: {} });
+  for (const m of auto ? ['vm', 'shared'] : [mode]) q[m] ||= {};
+  let first;
+  if (mode === 'shared' && o.plan !== false) first = await cmdRunPlanned(c, { ...o, clean: false }, await cmdPlan(c, o));
+  else { first = await runVitest({ root: c.root, config: c.config, mode: runMode, files: c.filters, verbose: c.verbose, tag: 'check' }); const w = readRunLogs(c.runDir); updateDurations(P(c, 'durations.json'), w); if (mode === 'shared') aggregatePollution(c, w); }
+  if (first.error && !first.files.size) { console.error(first.error + '\n' + first.log.slice(-4000)); return EXIT.FAIL; }
+  const workers = readRunLogs(c.runDir);
+  const failing = [...first.files].filter(([, v]) => v.status !== 'passed').map(([k]) => k);
+  say(`${mode}${mode === 'shared' && o.plan !== false ? ' (planned)' : ''}: ${first.files.size} files, ${failing.length} failing ${failing.join(' ')}`);
+  if (o.prune) for (const m of auto ? ['vm', 'shared'] : [mode]) await prune(c, q, m);
+  if (!failing.length) {
+    if (first.code) { say(`Vitest exited with code ${first.code} although no file failed (unhandled error?):\n` + first.log.slice(-2000)); return report(c, workers, EXIT.FAIL); }
+    return report(c, workers, EXIT.OK);
+  }
+
+  const iso = await runVitest({ root: c.root, config: c.config, mode: 'isolated', files: failing, verbose: c.verbose, tag: 'isolated' });
+  // only files that pass completely in forks and are not quarantined yet need an explanation (M7)
+  const candidates = failing.filter((f) => iso.files.get(f)?.status === 'passed' && isFast(bucketOf(f)) && !q[bucketOf(f)]?.[f]);
+  const verdict = await explainFastFailures(c, o, candidates, { runMode, bucketOf, workers });
+  const genuine = [], newQ = [], conflicts = [], flaky = [], unexplained = [];
+  const today = new Date().toISOString().slice(0, 10);
+  for (const f of failing) {
+    const fr = first.files.get(f), ir = iso.files.get(f);
+    if (!ir) { genuine.push(f); continue; }
+    // per test: a test that passes isolated but not in the fast mode is a mode-specific failure
+    const modeOnly = [...ir.tests].filter(([t, st]) => st === 'passed' && fr.tests.get(t) !== 'passed').map(([t]) => t);
+    const fileLevel = ir.status === 'passed' && !modeOnly.length; // failed outside a test (collection, hook, setup) in the fast mode only
+    const real = ir.status !== 'passed';
+    if (real) genuine.push(f);
+    if (!modeOnly.length && !fileLevel) continue; // fails the same way in forks
+    const bucket = bucketOf(f);
+    if (!isFast(bucket)) { if (!real) unexplained.push(`${f} (failed in the ${mode} run, passes on its own in forks; its group already runs isolated)`); continue; }
+    if (q[bucket][f]) { if (!real) unexplained.push(`${f} (quarantined, but failed in the ${mode} run)`); continue; }
+    const v = verdict.get(f) || { kind: 'alone', note: 'some tests also fail isolated' };
+    const sig = signature(fr.message) + (modeOnly.length ? ` [${modeOnly.length} test(s): ${modeOnly.slice(0, 3).join(' | ')}]` : '');
+    if (v.kind === 'flaky') { flaky.push(f); say(`FLAKY (failed in ${bucket}, passed in forks and on a ${bucket} re-run under the same conditions: ${v.note}): ${f}`); continue; }
+    if (v.kind === 'order' && bucket === 'shared') { addConflicts(c, f, v.polluters, sig); conflicts.push(`${f} <- ${v.polluters.join(' + ')} (${v.runs} runs)`); continue; }
+    q[bucket][f] = { signature: sig, tests: modeOnly.slice(0, 20), firstSeen: today, pool: bucket === 'vm' ? 'vmThreads' : 'threads isolate:false',
+      ...(v.kind === 'order' ? { after: v.polluters.slice(0, 20), reason: 'order-dependent: fails only after the listed file(s) in the same worker' } : {}) };
+    newQ.push(f);
+    if (v.kind === 'order') say(`ORDER-DEPENDENT in ${bucket} (deterministic, not flaky): ${f} fails after ${v.polluters.join(' + ')} (state leaked through the worker realm)`);
+  }
+  if (newQ.length) save(c, 'incompatible.json', q);
+  for (const f of genuine) say(`FAIL (also isolated): ${f}`);
+  for (const f of newQ) say(`QUARANTINED (${bucketOf(f)}-only failure): ${f} :: ${q[bucketOf(f)][f].signature}`);
+  for (const s of conflicts) say(`CONFLICT recorded: ${s}`);
+  for (const s of unexplained) say(`UNEXPLAINED failure: ${s}`);
+  if (flaky.length) say(`${flaky.length} flaky file(s): not quarantined; exit 1 (a failure that was not explained is never reported as ok)`);
+  if (newQ.length || conflicts.length) say('quarantine/conflict state changed: commit .vitest-guard/incompatible.json / conflicts.json and re-run (exit 4)');
+  // D3: 1 (failures, incl. flaky/unexplained) wins over 4 (new quarantine); 0 only when nothing failed
+  return report(c, workers, genuine.length || flaky.length || unexplained.length ? EXIT.FAIL : newQ.length || conflicts.length ? EXIT.NEW_QUARANTINE : EXIT.FAIL /* a file failed and nothing explains it */);
+}
+
+function report(c, workers, code) {
+  const st = selfTime(workers);
+  if (st.files) say(`layer self-time: ${st.ms} ms over ${st.files} files (${st.perFileMs} ms/file; excludes the per-file fetch of the setup module itself)`);
+  const h = heapReport(workers, 5);
+  if (h.leakiest.length) say('leakiest files (avg heap delta MB): ' + h.leakiest.map((x) => `${x.file} ${x.deltaMB}`).join(', '));
+  const dirty = workers.flatMap((w) => w.files.filter((f) => f.dirty?.length).map((f) => `${f.prev} -> ${f.file}: ${f.dirty.map((d) => d.kind).join(', ')}`));
+  if (dirty.length) say(`${dirty.length} dirty file starts, e.g.:\n  ` + dirty.slice(0, 8).join('\n  '));
+  if (workers.volatile?.size) say('volatile node_modules state (ignored): ' + [...workers.volatile].join(', '));
+  return code;
+}
+
+// re-run quarantined files in the fast mode; the ones that pass now leave the quarantine
+async function prune(c, q, mode) {
+  const files = Object.keys(pickKnown(q[mode], listFiles(c)));
+  if (!files.length) return;
+  const r = await runVitest({ root: c.root, config: c.config, mode, files, env: { VITEST_GUARD_IGNORE_QUARANTINE: '1' }, verbose: c.verbose, tag: 'prune' });
+  const fixed = files.filter((f) => r.files.get(f)?.status === 'passed');
+  for (const f of fixed) { delete q[mode][f]; say(`UNQUARANTINED (passes in ${mode} now): ${f}`); }
+  if (fixed.length) save(c, 'incompatible.json', q);
+}
+
+// ---------------- verify ----------------
+// M6: a fast mode can be GREEN where forks are red when a test relies on state left by an earlier file of the same
+// worker (a matcher, a prototype extension, a singleton of an external package). Whether that happens depends on
+// the file order, so the fast side is run in several orders and each is compared with isolated forks:
+//   gate      what `vitest run` does (Vitest's sequencer, the configured workers, quarantine applied)
+//   forward   one worker per project, sorted file order
+//   reversed  one worker per project, reverse order   (forward + reversed put every pair of files in both orders)
+//   shuffle   one worker per project, seeded shuffle (--seed)
+//   planned   shared mode: the planner's lanes (`vitest-guard run`)
+const VERIFY_ORDERS = ['gate', 'forward', 'reversed', 'shuffle', 'planned'];
+const badNumber = (o, k) => o[k] !== undefined && o[k] !== 'all' && !(Number.isFinite(Number(o[k])) && Number(o[k]) >= 1);
+export async function cmdVerify(c, o) {
+  for (const k of ['sample', 'seed']) if (badNumber(o, k) && !(k === 'seed' && Number(o.seed) === 0)) { console.error(`[vitest-guard] verify: --${k} must be a positive number${k === 'sample' ? ' or "all"' : ''}, got ${JSON.stringify(String(o[k]))}\nsee --help`); return EXIT.USAGE; }
+  const all = listFiles(c);
+  const n = o.sample === 'all' || !o.sample ? all.length : Number(o.sample);
+  let seed = Number(o.seed || 1);
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  const sample = n >= all.length ? all : [...all].sort(() => rnd() - 0.5).slice(0, n).sort();
+  const complete = sample.length === all.length && !c.filters.length;
+  const mode = c.mode, auto = mode === 'auto';
+  const groups = auto ? load(c, 'auto.json', {}).groups || {} : null;
+  const modeOf = (project) => (auto ? groups[project] : mode);
+  const orders = o.orders ? String(o.orders).split(',').map((s) => s.trim()).filter(Boolean) : mode === 'vm' ? ['gate', 'reversed'] : ['gate', 'forward', 'reversed'];
+  // --no-plan: never run the planner's lanes (the 'planned' order); asking for exactly that is a contradiction
+  if (o.plan === false && orders.includes('planned')) {
+    if (o.orders) { const rest = orders.filter((x) => x !== 'planned'); if (!rest.length) { console.error('[vitest-guard] verify: --orders planned contradicts --no-plan\nsee --help'); return EXIT.USAGE; } say('verify: --no-plan: skipping the planned order'); orders.splice(0, orders.length, ...rest); }
+    else orders.splice(orders.indexOf('planned'), 1);
+  }
+  const bad = orders.filter((x) => !VERIFY_ORDERS.includes(x));
+  if (bad.length || !orders.length) { console.error(`[vitest-guard] verify: unknown --orders ${bad.join(',')} (known: ${VERIFY_ORDERS.join(', ')})\nsee --help`); return EXIT.USAGE; }
+  if (orders.includes('planned') && mode !== 'shared') { console.error('[vitest-guard] verify: --orders planned needs --mode shared\nsee --help'); return EXIT.USAGE; }
+
+  const q = load(c, 'incompatible.json', { version: 1, vm: {}, shared: {} });
+  for (const m of ['vm', 'shared']) q[m] = q[m] && typeof q[m] === 'object' ? q[m] : {};
+  const knownEdges = validEdges(load(c, 'conflicts.json', { edges: [] }).edges, all);
+  const specs = listSpecs(c).filter((x) => sample.includes(x.file));
+  const byProject = new Map();
+  for (const x of specs) { const a = byProject.get(x.project) || []; if (!a.includes(x.file)) a.push(x.file); byProject.set(x.project, a); }
+
+  clearRunLogs(c.runDir);
+  const runs = [];
+  for (const order of orders) {
+    if (order === 'gate') { runs.push({ order, r: await runVitest({ root: c.root, config: c.config, mode, files: complete ? [] : sample, verbose: c.verbose, tag: 'verify-gate' }) }); continue; }
+    if (order === 'planned') { runs.push({ order, r: await cmdRunPlanned(c, { ...o, clean: false }, await cmdPlan(c, o, sample)) }); continue; }
+    const parts = [];
+    let i = 0;
+    for (const [project, pf] of byProject) {
+      const m = modeOf(project);
+      if (!isFast(m)) continue; // this group runs isolated anyway
+      let files = pf.filter((f) => !q[m][f]).sort(); // quarantined files run in forks in the gate: nothing to compare
+      if (order === 'reversed') files.reverse();
+      if (order === 'shuffle') files = files.map((f) => [rnd(), f]).sort((a, b) => a[0] - b[0]).map((x) => x[1]);
+      if (files.length) parts.push(await runLane(c, files, `verify-${order}-${i++}`, project, m));
+    }
+    runs.push({ order, r: merge(parts), laneOnly: true });
+  }
+  const ref = await runVitest({ root: c.root, config: c.config, mode: 'isolated', files: sample, verbose: c.verbose, tag: 'verify-ref' });
+  if (ref.error && !ref.files.size) { console.error('[vitest-guard] verify: the isolated reference run produced no report\n' + ref.log.slice(-3000)); return EXIT.FAIL; }
+
+  const green = new Map(), red = new Map(); // "file > test" -> orders
+  const fileOf = new Map();
+  const note = (map, key, order) => { const a = map.get(key) || []; a.push(order); map.set(key, a); };
+  for (const { order, r, laneOnly } of runs) {
+    for (const [file, rr] of ref.files) {
+      const fz = r.files.get(file);
+      if (!fz && laneOnly) continue; // not part of this order (quarantined / isolated group)
+      for (const [t, st] of rr.tests) {
+        const fs2 = fz?.tests.get(t) ?? 'missing';
+        const key = `${file} > ${t}`;
+        fileOf.set(key, file);
+        if (st === 'failed' && fs2 === 'passed') note(green, key, order);
+        if (st === 'passed' && fs2 !== 'passed') note(red, key, order);
+      }
+    }
+  }
+  const victims = new Set(knownEdges.map((e) => e.b));
+  const falseGreen = [...green.keys()].sort();
+  // a recorded conflict (conflicts.json) explains a false red in a single-worker order: the planner keeps the pair apart
+  const knownRed = [...red].filter(([k, ord]) => !ord.includes('gate') && !ord.includes('planned') && victims.has(fileOf.get(k))).map(([k]) => k).sort();
+  const falseRed = [...red.keys()].filter((k) => !knownRed.includes(k)).sort();
+  const label = (map, k) => `${k}  [order: ${map.get(k).join(', ')}]`;
+  say(`verify ${mode} vs isolated forks on ${sample.length}${complete ? '' : ` of ${all.length}`} files, orders ${orders.join(' + ')}: false-green ${falseGreen.length}, false-red ${falseRed.length}${knownRed.length ? `, known conflicts ${knownRed.length}` : ''}`);
+  for (const t of falseGreen.slice(0, 30)) say('  FALSE GREEN (passes fast, fails isolated): ' + label(green, t));
+  for (const t of falseRed.slice(0, 30)) say('  false red (fails fast, passes isolated): ' + label(red, t));
+
+  // detect AND quarantine: a file with a false green must run in forks, where its real result shows;
+  // a file that fails only in some order is one re-ordering away from a red gate
+  const quarantined = [];
+  if (o.quarantine !== false) {
+    const today = new Date().toISOString().slice(0, 10);
+    const put = (file, info) => {
+      const m = modeOf(projectOf(c, file));
+      if (!isFast(m) || q[m][file]) return;
+      q[m][file] = { ...info, firstSeen: today, pool: m === 'vm' ? 'vmThreads' : 'threads isolate:false' };
+      quarantined.push(file);
+    };
+    for (const file of new Set(falseGreen.map((k) => fileOf.get(k)))) {
+      const tests = falseGreen.filter((k) => fileOf.get(k) === file);
+      put(file, { signature: `false green: passes in ${mode} (order ${[...new Set(tests.flatMap((k) => green.get(k)))].join(', ')}) but fails in isolated forks`, tests: tests.map((k) => k.slice(file.length + 3)).slice(0, 20), falseGreen: true });
+    }
+    for (const file of new Set(falseRed.filter((k) => !red.get(k).includes('gate')).map((k) => fileOf.get(k)))) {
+      const tests = falseRed.filter((k) => fileOf.get(k) === file);
+      put(file, { signature: `order-dependent: fails in ${mode} order ${[...new Set(tests.flatMap((k) => red.get(k)))].join(', ')}, passes in isolated forks`, tests: tests.map((k) => k.slice(file.length + 3)).slice(0, 20) });
+    }
+    if (quarantined.length) {
+      save(c, 'incompatible.json', q);
+      for (const f of quarantined) say(`QUARANTINED: ${f} :: ${(q.vm[f] || q.shared[f]).signature}`);
+      say('these files run in isolated forks from now on (commit .vitest-guard/incompatible.json). A false-green file FAILS there: that failure is real, fix the test.');
+    }
+  }
+  const gateRed = falseRed.filter((k) => red.get(k).includes('gate'));
+  if (gateRed.length) say(`${new Set(gateRed.map((k) => fileOf.get(k))).size} file(s) fail in the gate order but pass isolated: run \`vitest-guard check${mode === 'vm' ? '' : ' --mode ' + mode}\` (it tells flaky from ${mode}-incompatible and quarantines)`);
+  const record = { at: new Date().toISOString(), mode, head: gitHead(c.root), configKey: configKey(c.root, c.config), orders, sample: sample.length, of: all.length, complete, falseGreen, falseRed, knownRed, quarantined };
+  save(c, `verify-${mode}.json`, record);
+  if (auto && Object.values(groups).includes('shared')) save(c, 'verify-shared.json', record); // what the shared-mode warning of the config reads
+  if (!complete) say(`note: only ${sample.length} of ${all.length} files were compared; the shared-mode warning of \`vitest run\` stays until a full verify is clean`);
+  return falseGreen.length ? EXIT.FALSE_GREEN : falseRed.length || quarantined.length ? EXIT.NEW_QUARANTINE : EXIT.OK;
+}
+
+// ---------------- compare (G2) ----------------
+// The gain of each mode depends on what the project spends its time on: vm contexts save the per-file
+// environment setup (jsdom) and import cost, but a pure-node project can be SLOWER in vmThreads than in forks
+// (the real-world suite: dom -53.5 %, node +9.0 %). Measure per project instead of assuming.
+export async function cmdCompare(c, o) {
+  if (badNumber(o, 'sample')) { console.error(`[vitest-guard] compare: --sample must be a positive number or "all", got ${JSON.stringify(String(o.sample))}\nsee --help`); return EXIT.USAGE; }
+  clearRunLogs(c.runDir);
+  const specs = listSpecs(c);
+  const only = o.project ? String(o.project).split(',') : null;
+  const projects = [...new Set(specs.map((x) => x.project))].filter((p) => !only || only.includes(p));
+  const n = o.sample === 'all' ? Infinity : Number(o.sample || 30);
+  let seed = Number(o.seed || 1);
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  const rows = [];
+  for (const project of projects) {
+    const all = specs.filter((x) => x.project === project).map((x) => x.file);
+    const sample = all.length <= n ? all : [...all].sort(() => rnd() - 0.5).slice(0, n).sort();
+    const args = project ? ['--project', project] : [];
+    const res = {};
+    for (const mode of ['isolated', 'vm', 'shared']) {
+      const cpu0 = childCpuSeconds(), t0 = Date.now();
+      const r = await runVitest({ root: c.root, config: c.config, mode, files: sample, args, env: { VITEST_GUARD_DIAG: '0' }, verbose: c.verbose, tag: `compare-${mode}` });
+      const cpu1 = childCpuSeconds();
+      const tests = new Map();
+      for (const [file, fr] of r.files) for (const [t, st] of fr.tests) tests.set(file + ' > ' + t, st);
+      res[mode] = { cpu: cpu0 !== null && cpu1 !== null ? Math.round((cpu1 - cpu0) * 10) / 10 : null, wall: Math.round((Date.now() - t0) / 100) / 10, tests, failed: [...tests.values()].filter((x) => x === 'failed').length };
+    }
+    const ref = res.isolated.tests;
+    for (const mode of ['vm', 'shared']) {
+      let fg = 0, fr = 0;
+      for (const [t, st] of ref) { const m = res[mode].tests.get(t) ?? 'missing'; if (st === 'failed' && m === 'passed') fg++; if (st === 'passed' && m !== 'passed') fr++; }
+      Object.assign(res[mode], { falseGreen: fg, falseRed: fr });
+    }
+    const metric = (m) => res[m].cpu ?? res[m].wall;
+    const base = metric('isolated');
+    const ok = ['vm', 'shared'].filter((m) => !res[m].falseGreen && !res[m].falseRed);
+    const best = ok.sort((a, b) => metric(a) - metric(b))[0];
+    let rec = 'isolated (forks)', why = 'no fast mode matched isolated results';
+    if (best) {
+      const gain = 1 - metric(best) / base;
+      if (gain >= 0.1) { rec = best; why = `${Math.round(gain * 100)} % less ${res[best].cpu !== null ? 'CPU' : 'wall time'} than forks` + (best === 'shared' ? '; shared realms can hide failures: gate on it only after a clean `vitest-guard verify --mode shared`' + (ok.includes('vm') ? ' (safer: vm)' : '') : ''); }
+      else { why = `best fast mode (${best}) saves only ${Math.round(gain * 100)} %: not worth the shared-realm risk`; }
+    }
+    rows.push({ project: project || '(root)', files: sample.length, of: all.length, isolated: metric('isolated'), vm: metric('vm'), shared: metric('shared'), vmMismatch: res.vm.falseGreen + res.vm.falseRed, sharedMismatch: res.shared.falseGreen + res.shared.falseRed, recommend: rec, why });
+  }
+  const unit = childCpuSeconds() !== null ? 'CPU s' : 'wall s';
+  const pct = (a, b) => (b ? `${a - b > 0 ? '+' : ''}${Math.round(((a - b) / b) * 100)} %` : '');
+  if (Number.isFinite(n)) say(`note: a random sample can miss the few CPU-heavy files that decide the result (vm global access is slower in hot code); decide with --sample all`);
+  say(`mode comparison per project (${unit}, sample; mismatches = tests whose result differs from isolated forks):`);
+  for (const r of rows) say(`  ${r.project}: ${r.files}/${r.of} files | forks ${r.isolated} | vm ${r.vm} (${pct(r.vm, r.isolated)}${r.vmMismatch ? `, ${r.vmMismatch} mismatches` : ''}) | shared ${r.shared} (${pct(r.shared, r.isolated)}${r.sharedMismatch ? `, ${r.sharedMismatch} mismatches` : ''}) -> recommend ${r.recommend}: ${r.why}`);
+  save(c, 'compare.json', { at: new Date().toISOString(), unit, rows });
+  if (o.write !== false) {
+    // mode 'auto' reads these per project/group (overridable with autoModes in the config)
+    const modes = { ...(load(c, 'modes.json', {}).modes || {}) };
+    for (const r of rows) modes[r.project === '(root)' ? 'root' : r.project] = r.recommend.startsWith('isolated') ? 'isolated' : r.recommend;
+    save(c, 'modes.json', { at: new Date().toISOString(), sample: Number.isFinite(n) ? n : 'all', modes });
+    say(`modes for mode 'auto' -> .vitest-guard/run/modes.json: ${JSON.stringify(modes)}`);
+  }
+  return EXIT.OK;
+}
+
+export async function cmdHunt(c, o) {
+  const victim = o._[1];
+  if (!victim) { console.error('[vitest-guard] hunt: missing <victim> (a test file, e.g. vitest-guard hunt src/a.test.ts)\nsee --help'); return EXIT.USAGE; }
+  if (!listFiles(c).includes(victim)) { console.error(`[vitest-guard] hunt: ${JSON.stringify(String(victim).slice(0, 200))} is not a test file of this project (use the path as printed by vitest list, relative to the root, with /)\nsee --help`); return EXIT.USAGE; }
+  const workers = readRunLogs(c.runDir);
+  const preds = o.before ? o.before.split(',') : predecessors(workers, victim);
+  const h = await hunt(c, victim, preds, 'shared');
+  if (h.found) { addConflicts(c, victim, h.polluters, 'hunt'); say(`polluter of ${victim}: ${h.polluters.join(' + ')} (${h.runs} runs) -> conflicts.json`); return EXIT.NEW_QUARANTINE; }
+  say(`no polluter: ${h.reason}`);
+  return EXIT.OK;
+}
+
+export async function cmdScan(c, o) {
+  const files = listFiles(c);
+  const q = load(c, 'incompatible.json', { version: 1, vm: {}, shared: {} });
+  q.shared ||= {};
+  let n = 0, risky = 0;
+  for (const f of files) {
+    const s = scanFile(path.join(c.root, f));
+    if (!s.pollutes.length) continue;
+    risky++;
+    say(`${f}: ${s.pollutes.join(', ')}${s.traits.topLevel.length ? ' [line ' + s.traits.topLevel.map((t) => t.line).join(',') + ']' : ''}`);
+    if (o.quarantine && !q.shared[f]) { q.shared[f] = { signature: 'static: ' + s.pollutes.join(', '), firstSeen: new Date().toISOString().slice(0, 10), pool: 'threads isolate:false' }; n++; }
+  }
+  if (n) { save(c, 'incompatible.json', q); say(`${n} files quarantined for shared mode`); }
+  say(`scan: ${risky} of ${files.length} test files have shared-mode risks`);
+  return EXIT.OK;
+}
+
+// A4 migration: volatile files that older versions wrote next to the committed ones move into .vitest-guard/run/
+export function migrateState(c) {
+  let moved = 0;
+  let names = [];
+  try { names = fs.readdirSync(c.dir); } catch { return; }
+  for (const n of names) {
+    const volatile = ['plan.json', 'files-cache.json', 'settings.json', 'compare.json'].includes(n) || /^verify-.*\.json$/.test(n) || (!c.commitState && OPT_IN.has(n));
+    if (!volatile) continue;
+    ensureStateDir(c.stateDir);
+    const to = path.join(c.stateDir, n);
+    try { if (!fs.existsSync(to)) fs.renameSync(path.join(c.dir, n), to); else fs.rmSync(path.join(c.dir, n)); moved++; } catch {}
+  }
+  try { for (const n of fs.readdirSync(c.stateDir)) if (/^(w-.*\.jsonl|lane-.*\.json)$/.test(n)) fs.rmSync(path.join(c.stateDir, n)); } catch {}
+  if (moved) say(`moved ${moved} volatile file(s) from .vitest-guard/ to .vitest-guard/run/ (git-ignored); commit the removal. Only incompatible.json and conflicts.json${c.commitState ? ', durations.json and pollution.json' : ''} are meant to be committed.`);
+}
+
+const EXIT_HELP = `exit codes (contracts/DECISIONS.md D3):
+  0  ok
+  1  test failures (genuine, flaky or unexplained failures; a refuted claim)
+  2  usage or config error (bad arguments, config not wrapped with defineVitestGuardConfig, missing vitest)
+  3  run all (not returned by vitest-guard; reserved for the selection tools of vto)
+  4  new quarantine: .vitest-guard/incompatible.json / conflicts.json changed - commit it and re-run
+  5  false green: a test passes in the fast mode and fails in isolated forks (verify)`;
+const GLOBAL_OPTS = `global options:
+  --mode vm|shared|auto   fast mode to run (default: vm, or auto when the config uses mode 'auto'); isolated forks are the reference run
+  --config <file>         Vitest config to use (default: found in --root; must be wrapped with defineVitestGuardConfig)
+  --root <dir>            project root (default: current directory)
+  --verbose               stream Vitest's own output instead of collecting it
+  --no-diag               lean runs: no pollution diff / module-state scan (sets VITEST_GUARD_DIAG=0)
+  --no-reset-modules      shared mode without vi.resetModules() between files (sets resetModules:false in VITEST_GUARD_OPTS; the planner then adds vi.mock edges)
+  --commit-state          keep durations.json / pollution.json in .vitest-guard/ (committed) instead of .vitest-guard/run/
+  --version, --help       print version / help and exit 0 (also: vitest-guard help <command>, vitest-guard <command> --help)`;
+// name -> { usage, text, opts: [flags the command reads] }
+const COMMAND_HELP = {
+  check: { usage: 'vitest-guard check [filters...] [options]', opts: ['prune', 'retries', 'confirm', 'hunt', 'plan', 'compare', 'calibrate', 'calibrate-sample', 'lanes', 'vto-raw', 'sample', 'project', 'seed', 'write'],
+    text: `Run the suite in the fast mode; every failing file re-runs in isolated forks and is explained:
+  fails in forks too                       -> genuine failure (exit 1)
+  fails alone in the fast mode             -> quarantined in .vitest-guard/incompatible.json (exit 4)
+  fails only after other files (shared)    -> conflict edge in conflicts.json (exit 4); vm mode: quarantined with "after"
+  passes on a re-run, same conditions      -> FLAKY, not quarantined (exit 1)
+Mode 'shared' runs the planner's lanes. Mode 'auto' calibrates first when .vitest-guard/run/modes.json is missing.
+options:
+  [filters...]        Vitest file filters (substring of the path)
+  --prune             first re-run quarantined files in the fast mode and release the ones that pass now
+  --retries N         confirmation re-runs of a failing file (default 2)
+  --no-confirm        skip confirmation: every fast-only failure counts as mode-incompatible
+  --no-hunt           do not bisect predecessors; a pass on re-run is reported as flaky
+  --no-plan           shared mode: plain Vitest run instead of the planner's lanes
+  --lanes N           planner lanes (default: CPUs - 1)
+  --vto-raw <dir>     use vto raw records for the planner (module graph, durations)
+  --compare           run \`compare\` afterwards
+  --no-calibrate      auto mode: do not calibrate when modes.json is missing
+  --calibrate-sample N  files per group for that calibration (default 20)` },
+  verify: { usage: 'vitest-guard verify [filters...] [options]', opts: ['sample', 'seed', 'orders', 'quarantine', 'plan', 'lanes', 'vto-raw'],
+    text: `Compare per-test pass/fail of the fast mode with isolated forks, in several file orders; records the result
+(.vitest-guard/run/verify-<mode>.json) for the shared-mode warning of \`vitest run\`. Files with a false green (or an
+order-dependent failure) are quarantined unless --no-quarantine.
+options:
+  --sample N|all      files to compare (default all; N = seeded random sample, the result is then "incomplete")
+  --seed S            seed of the sample and of the shuffle order (default 1)
+  --orders a,b,...    gate, forward, reversed, shuffle, planned (default: vm gate,reversed; shared gate,forward,reversed;
+                      'planned' needs --mode shared)
+  --no-quarantine     report only, do not write incompatible.json
+  --no-plan           never run the planned order (error if --orders names only planned)
+exit: 5 false green wins over 4 (false red / new quarantine) over 0.` },
+  compare: { usage: 'vitest-guard compare [options]', opts: ['sample', 'project', 'seed', 'write'],
+    text: `Per project: CPU (wall time where /proc is unavailable) of isolated forks vs vm vs shared on a sample, plus result
+mismatches against forks, then a recommended mode. Writes .vitest-guard/run/compare.json and modes.json (for mode 'auto').
+options:
+  --sample N|all      files per project (default 30; a random sample can miss the few heavy files: use all to decide)
+  --seed S            sample seed (default 1)
+  --project a,b       only these projects
+  --no-write          do not write modes.json` },
+  calibrate: { usage: 'vitest-guard calibrate [options]', opts: ['sample', 'project', 'seed', 'write'],
+    text: `Quick \`compare\` (20 files per project by default) that writes .vitest-guard/run/modes.json for mode 'auto'.
+options: --sample N|all (default 20), --project a,b, --seed S, --no-write` },
+  plan: { usage: 'vitest-guard plan [options]', opts: ['lanes', 'vto-raw'],
+    text: `Build the conflict graph and the lanes for shared mode (one plan per project) -> .vitest-guard/run/plan.json.
+options: --lanes N (default CPUs - 1), --vto-raw <dir> (vto raw records)` },
+  run: { usage: 'vitest-guard run [options]', opts: ['heal', 'replan', 'clean', 'lanes', 'vto-raw', 'prune', 'retries', 'confirm', 'hunt', 'plan', 'compare', 'calibrate', 'calibrate-sample'],
+    text: `Planned shared-mode run: one shared worker per lane, quarantined files in forks. Always --mode shared.
+By default self-healing (same as \`check --mode shared\`): shared-only failures are bisected -> conflicts.json.
+options:
+  --no-heal           just run the plan and report failures (exit 1 if any), no bisecting
+  --no-replan         with --no-heal: reuse .vitest-guard/run/plan.json instead of re-planning
+  --lanes N, --vto-raw <dir>   as for plan; the check options (--retries, --no-hunt, ...) apply without --no-heal` },
+  hunt: { usage: 'vitest-guard hunt <victim> [--before a,b,c]', opts: ['before'],
+    text: `Bisect which earlier file of the same shared worker makes <victim> fail; records the edge in conflicts.json.
+<victim> is a test file path relative to the root. Uses the predecessors recorded in the last run logs.
+options: --before a,b,c   candidate predecessors instead of the recorded ones
+exit: 4 polluter found and recorded, 0 none found, 2 not a test file.` },
+  scan: { usage: 'vitest-guard scan [--quarantine]', opts: ['quarantine'],
+    text: `Static scan of the test files for shared-mode risks (top-level mutation of globals, prototypes, ...). Does not run tests.
+options: --quarantine   put the risky files into .vitest-guard/incompatible.json (shared)` },
+  report: { usage: 'vitest-guard report', opts: [],
+    text: `Summary of the last run logs (.vitest-guard/run/logs): layer self-time, leakiest files, dirty file starts, ignored volatile modules.` },
+};
+const HELP = `usage: vitest-guard <command> [options]   (vitest-guard <command> --help for details)
+commands (all but scan and report need a config wrapped with defineVitestGuardConfig):
+  check     run in the fast mode, re-run failures in isolated forks, quarantine mode-only failures
+  verify    compare the fast mode with isolated forks in several file orders (false green / false red)
+  compare   forks vs vm vs shared per project: CPU, mismatches, recommended mode
+  calibrate quick compare that writes modes.json for mode 'auto'
+  plan      conflict graph + lanes for shared mode -> .vitest-guard/run/plan.json
+  run       execute the plan (shared mode), self-healing
+  hunt      <victim>  bisect which earlier file pollutes it
+  scan      static scan for shared-mode risks
+  report    summary of the last run logs
+${GLOBAL_OPTS}
+${EXIT_HELP}`;
+export function helpFor(cmd) {
+  const h = COMMAND_HELP[cmd];
+  return h ? `usage: ${h.usage}\n\n${h.text}\n\n${GLOBAL_OPTS}\n${EXIT_HELP}` : null;
+}
+const KNOWN_FLAGS = new Set(['mode', 'config', 'root', 'verbose', 'diag', 'reset-modules', 'commit-state', 'help', 'version']);
+
+const NEEDS_WRAP = new Set(['check', 'verify', 'compare', 'calibrate', 'plan', 'run', 'hunt']);
+/** U-2: refuse to measure a config that does not go through defineVitestGuardConfig (VITEST_GUARD_MODE would do nothing). */
+export function requireWrapped(c) {
+  listSpecs(c);
+  if (c.wrapped) return null;
+  const rel = c.config ? path.relative(c.root, c.config) || c.config : null;
+  return `[vitest-guard] ${rel ? `${rel} is not wrapped with defineVitestGuardConfig` : `no Vitest config found in ${c.root}`}: VITEST_GUARD_MODE would have no effect, so every "mode" would run in your own pool ` +
+    `and the result (quarantine, mode comparison, modes.json) would be wrong. Nothing was run or written.
+  fix:  import { defineVitestGuardConfig } from '${PKG.name}';
+        export default defineVitestGuardConfig(defineConfig({ /* your config */ }));
+  or:   keep your config and pass a wrapped one:  vitest-guard ${'<command>'} --config vitest.guard.config.ts
+see --help`;
+}
+const PKG = (() => { try { return JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')); } catch { return { name: '@kral/vitest-guard', version: '0.0.0' }; } })();
+const COMMANDS = new Set(['check', 'verify', 'compare', 'calibrate', 'plan', 'run', 'hunt', 'scan', 'report']);
+
+export async function main(argv) {
+  const o = parseArgs(argv);
+  if (o.version || o._[0] === 'version') { console.log(`${PKG.name} ${PKG.version}`); return EXIT.OK; }
+  if (o._[0] === 'help' || (typeof o.help === 'string' && !o._[0])) { const t = o._[1] || (typeof o.help === 'string' ? o.help : ''); const h = helpFor(t); if (t && !h) { console.error(`[vitest-guard] unknown command ${JSON.stringify(t.slice(0, 40))}\nsee --help`); return EXIT.USAGE; } console.log(h || HELP); return EXIT.OK; }
+  if (o.help || !o._[0]) { console.log((o.help && helpFor(o._[0])) || HELP); return EXIT.OK; }
+  if (!COMMANDS.has(o._[0])) { console.error(`[vitest-guard] unknown command ${JSON.stringify(String(o._[0]).slice(0, 40))}\nsee --help`); return EXIT.USAGE; }
+  if (o.mode !== undefined && !['vm', 'shared', 'auto'].includes(o.mode)) { console.error(`[vitest-guard] --mode must be vm, shared or auto\nsee --help`); return EXIT.USAGE; }
+  if (o.config && !fs.existsSync(path.resolve(o.config))) { console.error(`[vitest-guard] --config ${o.config}: no such file\nsee --help`); return EXIT.USAGE; }
+  // a mistyped option would otherwise be ignored silently (e.g. --no-hnt)
+  const unknown = Object.keys(o).filter((k) => k !== '_' && !KNOWN_FLAGS.has(k) && !COMMAND_HELP[o._[0]].opts.includes(k));
+  if (unknown.length) console.error(`[vitest-guard] ${o._[0]}: ignoring unknown option${unknown.length > 1 ? 's' : ''} ${unknown.map((k) => '--' + k).join(', ')} (see ${o._[0]} --help)`);
+  process.env.VITEST_GUARD_CLI = '1';
+  if (o.diag === false) process.env.VITEST_GUARD_DIAG = '0'; // lean runs: no pollution diff / module-state scan
+  if (o['reset-modules'] === false) process.env.VITEST_GUARD_OPTS = JSON.stringify({ ...JSON.parse(process.env.VITEST_GUARD_OPTS || '{}'), resetModules: false }); // planner then adds transitive vi.mock edges
+  const c = ctx(o);
+  try { vitestBin(c.root); } catch (e) { console.error(`[vitest-guard] ${e.message}\nsee --help`); return EXIT.USAGE; }
+  migrateState(c);
+  if (NEEDS_WRAP.has(o._[0])) {
+    let err;
+    try { err = requireWrapped(c); } catch (e) { console.error(`[vitest-guard] ${e.message}`); return EXIT.USAGE; }
+    if (err) { console.error(err); return EXIT.USAGE; }
+  }
+  switch (o._[0]) {
+    case 'check': {
+      if (!o.mode && c.mode !== 'auto') {
+        // the config writes .vitest-guard/run/auto.json when it uses mode 'auto'; make sure it has been loaded once
+        try { listSpecs(c); } catch {}
+        if (readJson(path.join(c.stateDir, 'auto.json'), {}).auto) c.mode = 'auto';
+      } const code = await cmdCheck(c, o); if (o.compare) await cmdCompare(c, o); return code; }
+    case 'compare': return cmdCompare(c, o);
+    case 'calibrate': return cmdCompare(c, { ...o, sample: o.sample ?? 20 });
+    case 'verify': return cmdVerify(c, o);
+    case 'plan': await cmdPlan(c, o); return EXIT.OK;
+    case 'run': {
+      // planned shared run; self-healing unless --no-heal (shared-only failures are bisected -> conflicts.json)
+      c.mode = 'shared';
+      if (o.heal !== false) return cmdCheck(c, o);
+      const r = await cmdRunPlanned(c, o); const failed = [...r.files].filter(([, v]) => v.status !== 'passed').map(([k]) => k);
+      say(`planned shared run: ${r.files.size} files, ${failed.length} failed ${failed.join(' ')}`); return failed.length ? EXIT.FAIL : EXIT.OK;
+    }
+    case 'hunt': return cmdHunt(c, o);
+    case 'scan': return cmdScan(c, o);
+    case 'report': return report(c, readRunLogs(c.runDir), EXIT.OK);
+    default: return EXIT.USAGE;
+  }
+}

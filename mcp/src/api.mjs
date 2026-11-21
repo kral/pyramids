@@ -61,7 +61,7 @@ export const METHODS = {
   slow_tests: (e, p) => e.slowTests({ file: relInside(e, p.file), limit: num(p.limit, 10, 1, 50), cursor: str(p.cursor, 20) }),
   slow_imports: (e, p) => e.slowImports({ file: relInside(e, p.file), limit: num(p.limit, 10, 1, 50), cursor: str(p.cursor, 20) }),
   suggest_env: (e, p) => e.suggestEnv({ file: relInside(e, p.file), limit: num(p.limit, 10, 1, 100), cursor: str(p.cursor, 20) }),
-  vm_guard_status: (e) => e.vmGuardStatus({}),
+  vitest_guard_status: (e) => e.vitestGuardStatus({}),
   savings: (e, p) => e.savings({ since: /^\d+[dhm]$/.test(p.since || '') ? p.since : '30d' }),
   ci_summary: (e, p) => { const run = e.getRun(str(p.runId, 40)); return e.metrics.ciSummary({ ...run, pool: run.pool || e.poolName() }, e); },
   record_tokens: (e, p) => { e.metrics.recordTokens(str(p.tool, 60), num(p.tokens, 0, 0, 1e9), str(p.runId, 40)); return { ok: true }; },

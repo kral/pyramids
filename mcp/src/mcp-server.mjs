@@ -138,7 +138,7 @@ export async function startMcp({ root, daemon = true, transport } = {}) {
       return respond('coverage_of', await call('coverage', { file: a.file, live: a.live !== false, detail: a.detail, limit: a.limit, cursor: a.cursor }));
     });
   tool('tests_for_line', 'Tests covering one line (from the map, live during a run).', { file: relPath, line: z.number().int().min(1), ...page }, READ, async (a) => respond('tests_for_line', await call('tests_for', a)));
-  tool('vm_guard_status', 'vm-guard: mode, quarantined files, dirty-start warnings from the last run.', {}, READ, async () => respond('vm_guard_status', await call('vm_guard_status', {})));
+  tool('vitest_guard_status', 'vitest-guard: mode, quarantined files, dirty-start warnings from the last run.', {}, READ, async () => respond('vitest_guard_status', await call('vitest_guard_status', {})));
   tool('savings_report', 'Local savings vs classic full Vitest runs (time, CPU, tokens, time-to-first-failure); formulas in SAVINGS.md.',
     { since: z.string().regex(/^\d+[dhm]$/).optional() }, READ, async (a) => respond('savings_report', await call('savings', a)));
   // NB: no `verify` tool – mutation verification runs mutated code (SECURITY-REVIEW F13); CLI only.

@@ -3,7 +3,7 @@
 // `node .github/scripts/ci.mjs all` (= `npm run test:all`) runs them on a developer machine.
 //
 //   node .github/scripts/ci.mjs <step>… [--allow-skips]
-//   steps: install lint smoke analyzer collector mcp tui vm-guard verify oddpath | all
+//   steps: install lint smoke analyzer collector mcp tui vitest-guard verify oddpath | all
 //   (`all` = everything except `install`; run `install` once on a fresh clone)
 //
 // Rules enforced here (REVIEW-2 A-4 / U-9):
@@ -106,7 +106,7 @@ const testFiles = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) 
 const need = (p, hint) => { if (!fs.existsSync(path.join(REPO, p))) fail(`${p} is missing: ${hint}`); };
 
 // ------------------------------------------------------------------ steps
-const NPM_DIRS = ['.', 'collector/corpus', 'mcp', 'mcp/test/fixture', 'tui', 'vm-guard'];
+const NPM_DIRS = ['.', 'collector/corpus', 'mcp', 'mcp/test/fixture', 'tui', 'vitest-guard'];
 const STEPS = {
   /** `npm ci --ignore-scripts` in every package that has a lockfile (no install script ever runs) */
   install() {
@@ -165,11 +165,11 @@ const STEPS = {
     vitestTests(path.join(REPO, 'tui'), { VTO_LANG: '' });
   },
 
-  'vm-guard'() {
-    need('vm-guard/node_modules/vitest', 'npm --prefix vm-guard ci --ignore-scripts');
-    const pkg = JSON.parse(fs.readFileSync(path.join(REPO, 'vm-guard/package.json'), 'utf8'));
-    if (pkg.scripts?.['check:bundle']) node([path.join(REPO, 'vm-guard/scripts/bundle-setup.mjs'), '--check'], { cwd: path.join(REPO, 'vm-guard') });
-    nodeTests(path.join(REPO, 'vm-guard'), testFiles(path.join(REPO, 'vm-guard/test')), { VM_GUARD_TEST_NO_INTEGRATION: '' });
+  'vitest-guard'() {
+    need('vitest-guard/node_modules/vitest', 'npm --prefix vitest-guard ci --ignore-scripts');
+    const pkg = JSON.parse(fs.readFileSync(path.join(REPO, 'vitest-guard/package.json'), 'utf8'));
+    if (pkg.scripts?.['check:bundle']) node([path.join(REPO, 'vitest-guard/scripts/bundle-setup.mjs'), '--check'], { cwd: path.join(REPO, 'vitest-guard') });
+    nodeTests(path.join(REPO, 'vitest-guard'), testFiles(path.join(REPO, 'vitest-guard/test')), { VITEST_GUARD_TEST_NO_INTEGRATION: '' });
   },
 
   verify() {
@@ -191,7 +191,7 @@ const STEPS = {
       fs.mkdirSync(dst, { recursive: true });
       const skip = new Set(['node_modules', 'target', '.git', 'perf', 'bench']);
       fs.cpSync(REPO, dst, { recursive: true, filter: (src) => !skip.has(path.basename(src)) });
-      for (const nm of ['node_modules', 'collector/corpus/node_modules', 'mcp/node_modules', 'mcp/test/fixture/node_modules', 'tui/node_modules', 'vm-guard/node_modules']) {
+      for (const nm of ['node_modules', 'collector/corpus/node_modules', 'mcp/node_modules', 'mcp/test/fixture/node_modules', 'tui/node_modules', 'vitest-guard/node_modules']) {
         if (fs.existsSync(path.join(REPO, nm))) fs.symlinkSync(path.join(REPO, nm), path.join(dst, nm), 'junction');
       }
       const bin = analyzerBin();
@@ -214,7 +214,7 @@ const STEPS = {
 };
 
 const wanted = argv.filter((a) => !a.startsWith('--'));
-const order = ['lint', 'analyzer', 'collector', 'mcp', 'tui', 'vm-guard', 'verify', 'smoke', 'oddpath']; // smoke after tui: it needs tui/dist
+const order = ['lint', 'analyzer', 'collector', 'mcp', 'tui', 'vitest-guard', 'verify', 'smoke', 'oddpath']; // smoke after tui: it needs tui/dist
 const steps = wanted.flatMap((w) => (w === 'all' ? order : [w]));
 if (!steps.length || steps.some((s) => !Object.hasOwn(STEPS, s))) {
   process.stderr.write(`usage: node .github/scripts/ci.mjs <install|${order.join('|')}|all>… [--allow-skips]\n`);

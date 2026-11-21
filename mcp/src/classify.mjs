@@ -1,4 +1,4 @@
-// Environment classification of test files → lane groups (dom / node), shared with vm-guard `mode: 'auto'`.
+// Environment classification of test files → lane groups (dom / node), shared with vitest-guard `mode: 'auto'`.
 //
 // Source of truth, in order:
 //   1. measured: the env probe (collector-ext/setup-env-probe.mjs) recorded in the map: configured
@@ -9,7 +9,7 @@
 // configured, so semantics do not change. A file is `node` when its configured environment is node, or
 // when it never touched the DOM (`dom:false`) – the latter still runs in its configured environment.
 //
-// Handed to vm-guard's envstore, the one writer of `.vm-guard/run/env.json` (format "vto-env/1",
+// Handed to vitest-guard's envstore, the one writer of `.vitest-guard/run/env.json` (format "vto-env/1",
 // PROTOCOL.md §9, contracts/env-1.schema.json) – see src/env-json.mjs.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -39,7 +39,7 @@ export function classify(eng, files) {
   return out;
 }
 
-// env.json is written by src/env-json.mjs (vm-guard's envstore owns the merge rules)
+// env.json is written by src/env-json.mjs (vitest-guard's envstore owns the merge rules)
 export { writeEnvJson } from './env-json.mjs';
 
 /** Split a worker budget between groups proportionally to their measured test time (each ≥ 1). */

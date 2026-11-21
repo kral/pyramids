@@ -5,8 +5,8 @@ every file in `analyzer/src`). Vitest 5.1.1, Node 22.23, Linux, 2 shared cores.
 Reviewer wrote none of the product. No product code was changed; nothing was committed.
 
 **Answer: yes.** `vto affected` (CLI) and `vto-daemon run-affected` both returned a green result while a plain
-`vitest run` of the same tree failed, in 8 (CLI) and 9 (daemon) of 15 small, realistic scenarios. vm-guard `shared`
-mode stays green on tests that fail in forks, and `verify --sample all` does not see it. vm-guard `vm` mode and the
+`vitest run` of the same tree failed, in 8 (CLI) and 9 (daemon) of 15 small, realistic scenarios. vitest-guard `shared`
+mode stays green on tests that fail in forks, and `verify --sample all` does not see it. vitest-guard `vm` mode and the
 instrumenter held up well.
 
 All experiments live in `/home/claude/review2-correctness/`:
@@ -17,7 +17,7 @@ All experiments live in `/home/claude/review2-correctness/`:
 | `harness/aff.mjs` | per scenario: mutate → `vto affected --git HEAD --vitest` → run the printed filters → compare with a full `vitest run`. Output: `aff-results.json` |
 | `lab-d/`, `vto-pristine/`, `harness/dmn.mjs` | same scenarios through `vto-daemon run-affected --json` (stateless engine, pristine `.vto` restored per scenario) |
 | `harness/fuzz.mjs`, `fuzz/s{1,2,3}` | differential fuzz of the daemon map patching (finding N2) |
-| `lab-vmg/`, `lab-vmg2/` | vm-guard shared / vm labs |
+| `lab-vmg/`, `lab-vmg2/` | vitest-guard shared / vm labs |
 | `lab-sem/` | instrumentation semantics probes; collection-failure scenario |
 | `lab-ver/` | overlap report + `verify` on same-coverage tests |
 
@@ -37,8 +37,8 @@ Re-run everything for `affected`: `node harness/aff.mjs $PWD/lab $PWD/raw-lab` (
 | M3 | major | collector + `affected` | a test that failed during collection keeps its truncated coverage and is selected by it | `lab-sem` job test |
 | M4 | major | daemon store | `reads` are dropped from the map; misses become permanent because the file version advances | D5, D3, D2 run twice |
 | M5 | major | `affected --vitest` | tests that did not run at collection time (`runIf`/`skipIf`) can never be selected | S8b |
-| M6 | major | vm-guard shared | order-dependent false greens: green in `vitest run`, 3 failures in forks, `verify --sample all` reports 0 | `lab-vmg` |
-| M7 | major | vm-guard check | a deterministic vm-only failure is labelled FLAKY, exit 0, no quarantine | `lab-vmg2` |
+| M6 | major | vitest-guard shared | order-dependent false greens: green in `vitest run`, 3 failures in forks, `verify --sample all` reports 0 | `lab-vmg` |
+| M7 | major | vitest-guard check | a deterministic vm-only failure is labelled FLAKY, exit 0, no quarantine | `lab-vmg2` |
 | M8 | major | verify | "confirmed redundant" for a regression test that differs only by a minus sign | `lab-ver` |
 | M9 | major | entrypoint | `vitest-overlap.mjs` does not start (`SyntaxError`) | any invocation |
 | m1–m4 | minor | various | hidden git changes, `toString`-serialised functions, verify report gaps | below |
@@ -234,7 +234,7 @@ Fix: B1's file-level filters cover the `runIf` case. For completeness record the
 number of collected vs. recorded tests in `meta`, and make `affected` run all when the on-disk test-file list contains
 files unknown to the map.
 
-### M6. vm-guard `shared`: order-dependent false greens that `check` and `verify` do not see
+### M6. vitest-guard `shared`: order-dependent false greens that `check` and `verify` do not see
 
 Repro (`lab-vmg`, `mode: 'shared'`, `maxWorkers: 1`, 34 files): `a-setup-user.test.ts` calls
 `registry.extend('currency')` on an external CommonJS package, `expect.extend({ toBeEven })`, and adds
@@ -242,12 +242,12 @@ Repro (`lab-vmg`, `mode: 'shared'`, `maxWorkers: 1`, 34 files): `a-setup-user.te
 
 | command | result |
 |---|---|
-| `VM_GUARD_MODE=isolated npx vitest run` (forks) | **3 failed** (`b-singleton`, `c-matcher`, `d-proto`) |
-| `npx vitest run` with a cold Vitest cache (CI situation), 2 runs | 34 passed, exit 0, **no `[vm-guard]` warning** |
-| same with `VM_GUARD_DIAG=1` | 34 passed, no warning |
-| `vm-guard check --mode shared --no-plan` | `0 failing`, exit 0 |
-| `vm-guard verify --mode shared --sample all` | `false-green 0, false-red 0`, exit 0 |
-| `vm-guard check --mode shared` (planned) | 3 failing "also isolated", exit 1 |
+| `VITEST_GUARD_MODE=isolated npx vitest run` (forks) | **3 failed** (`b-singleton`, `c-matcher`, `d-proto`) |
+| `npx vitest run` with a cold Vitest cache (CI situation), 2 runs | 34 passed, exit 0, **no `[vitest-guard]` warning** |
+| same with `VITEST_GUARD_DIAG=1` | 34 passed, no warning |
+| `vitest-guard check --mode shared --no-plan` | `0 failing`, exit 0 |
+| `vitest-guard verify --mode shared --sample all` | `false-green 0, false-red 0`, exit 0 |
+| `vitest-guard check --mode shared` (planned) | 3 failing "also isolated", exit 1 |
 
 Why `verify` misses it: `cli.mjs:287-289` runs the fast side through the planner (`cmdRunPlanned`), whose order put
 the polluter last, so the three tests fail on both sides and "agree". The order CI actually uses (`vitest run`, Vitest's
@@ -263,14 +263,14 @@ is never compared again, because `check` re-runs failing files only.
 
 Fix: `verify` must run the fast side in the same order as the gate (and at least one shuffled order); state plainly in
 the README that `check` cannot detect false greens. Fingerprint `Object.getOwnPropertyNames` of the built-in
-prototypes and the matcher list; reset `expect.extend` additions per file. Recommend `vm-guard run` (planned order) or
+prototypes and the matcher list; reset `expect.extend` additions per file. Recommend `vitest-guard run` (planned order) or
 `vitest run` as the one supported gate command, not both. Keep a periodic full forks run.
 
-### M7. vm-guard `check`: a deterministic vm-only failure is reported as FLAKY with exit 0
+### M7. vitest-guard `check`: a deterministic vm-only failure is reported as FLAKY with exit 0
 
 Repro (`lab-vmg2`, `mode: 'vm'`): `a-platform.test.ts` sets `util.inspect.defaultOptions.depth = 0` (outer-realm
 state, not restored); `b-victim.test.ts` expects `util.inspect({a:{b:1}})` to be `'{ a: { b: 1 } }'`.
-`vm-guard check --mode vm`, twice: `vm: 8 files, 1 failing … FLAKY (failed in vm, passed isolated and on a vm
+`vitest-guard check --mode vm`, twice: `vm: 8 files, 1 failing … FLAKY (failed in vm, passed isolated and on a vm
 re-run): test/b-victim.test.ts`, **exit 0, no quarantine**. `npx vitest run` (vm) fails that test on every run, exit 1.
 `verify --mode vm --sample all` does report it (`false-red 1`, exit 2).
 
@@ -318,7 +318,7 @@ Fix: write `findBy… / waitFor`; add a smoke test that executes the entrypoint 
   becomes a silent miss. The daemon's main lane is always instrumented, so such tests fail there on every run.
   Fix: document; offer `/* vto-ignore */` for a function; M3's fix removes the silent part.
 - **m3.** `verify.json` mutant descriptions are Czech with `lang: en` (`"předčasný return na začátku funkce"`).
-- **m4.** `vm-guard verify --no-plan` still prints a plan and runs planned (`--no-plan` appears to be honoured by
+- **m4.** `vitest-guard verify --no-plan` still prints a plan and runs planned (`--no-plan` appears to be honoured by
   `check` only).
 
 ## Checked and found sound
@@ -344,7 +344,7 @@ Fix: write `findBy… / waitFor`; add a smoke test that executes the entrypoint 
 - **N3. Unknown files.** New files, files outside the map, config/lockfile/setup changes produce run-all (exit 3) in
   the CLI. `require()` of a project `.cjs` is caught through the CJS loader's `readFileSync`. `fs.globSync` and
   tinyglobby directory scans are recorded as directory reads.
-- **N4. vm-guard `vm`.** A `vi.spyOn(os, 'platform')` / `vi.spyOn(fs, 'existsSync')` left behind by one file was
+- **N4. vitest-guard `vm`.** A `vi.spyOn(os, 'platform')` / `vi.spyOn(fs, 'existsSync')` left behind by one file was
   detected (`patched builtins [node:fs.existsSync, node:os.platform]`) and did not change later files; results equal
   forks. External CommonJS singletons are per context in vm mode (the shared-mode leak of M6 does not exist there).
 - **N5. Overlap report wording.** `report.md` opens with "This is not a list of tests to delete", the greedy minimal
@@ -368,8 +368,8 @@ bench-project (all experiments ran on small purpose-built projects), Windows.
 - **`vto-daemon run-affected` for agent loops: usable as a fast first signal, not as the final check.** It handles
   test-file edits correctly, but shares B2–B4, drops `reads`, ignores new files, and forgets a missed edit after one
   run. Finish every task with a full uninstrumented run (`--full --clean`).
-- **vm-guard `vm`: go, with the gate being Vitest's own exit code.** Results matched forks in every probe. Do not use
-  `vm-guard check`'s exit code as the gate until M7 is fixed.
-- **vm-guard `shared` / `auto` (when it picks shared): no-go as the only gate.** A suite can be green in shared mode
+- **vitest-guard `vm`: go, with the gate being Vitest's own exit code.** Results matched forks in every probe. Do not use
+  `vitest-guard check`'s exit code as the gate until M7 is fixed.
+- **vitest-guard `shared` / `auto` (when it picks shared): no-go as the only gate.** A suite can be green in shared mode
   with tests that fail in isolation, without any warning, and `verify --sample all` can certify it. Use it for local
   speed and keep a scheduled forks run.

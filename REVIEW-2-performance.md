@@ -1,10 +1,10 @@
 # REVIEW-2: performance and scalability (independent)
 
 Date 2026-11-21. Code under test: commit **`e6598d9`**. The code paths I measured (`mcp/`, `collector/`,
-`vm-guard/src`, `verify/`, `tui/src`, `analyzer/src`) are byte-identical in `2c2def1`. Every measurement
+`vitest-guard/src`, `verify/`, `tui/src`, `analyzer/src`) are byte-identical in `2c2def1`. Every measurement
 finished before the parallel fix agents started editing the working tree (first edit to a measured file at
 08:50:57 UTC; my last kept run, verify-subset, ended at 08:49). The analyzer was built from `git archive HEAD`
-into `/home/claude/review2-perf/target`. vm-guard for the real-world suite runs was a copy of HEAD placed in the
+into `/home/claude/review2-perf/target`. vitest-guard for the real-world suite runs was a copy of HEAD placed in the
 lab copy. Nothing in the product was modified. `/path/to/real-suite` was not touched.
 
 All scripts, raw logs and profiles are in `/home/claude/review2-perf/` (`scripts/`, `logs/`, `prof/`).
@@ -47,7 +47,7 @@ All scripts, raw logs and profiles are in `/home/claude/review2-perf/` (`scripts
 | MCP tools | 3k / 10k / 30k | all scoped tools < 30 ms warm; `test_overlap` first call after any run 0.1 / 0.9 / **3.8 s**; `affected_tests` after an edit at 30k: 0.8 s (1.75 s cold) | ok up to 10k (P3, P4) |
 | TUI with mock | 10k / 30k events | 5.3k / 16k ev/s, render p50 7 / 8 ms, p95 11 / 11–16 ms, loop lag p99 19–23 / 20–30 ms, heap Δ 14–24 / 40–55 MB | fine, linear |
 | `.vto/` growth | 200 runs | runs/ capped (30 files); blobs +1 per edited version, **never collected**; metrics.jsonl +0.42 KB/run, daemon.log +0.14 KB/run, lane logs unbounded (**32 MB in 70 runs** in an error loop) | P5 |
-| vm-guard auto calibrated, the real-world suite | 1992 tests | **−30.5 %** (−27…−35) vs current, plus 78 s CPU one-time calibrate; 0 failures in all 6 runs | claim −34 % is at the optimistic end |
+| vitest-guard auto calibrated, the real-world suite | 1992 tests | **−30.5 %** (−27…−35) vs current, plus 78 s CPU one-time calibrate; 0 failures in all 6 runs | claim −34 % is at the optimistic end |
 | verify (schemata) | 16 ordered pairs, `--max-mutants 30` | 358 test×mutant runs in 6.5 s CPU (≈18 ms/run) | all 38 212 candidates: >600 s, run killed (P9) |
 
 ## Findings by severity
@@ -198,16 +198,16 @@ All scripts, raw logs and profiles are in `/home/claude/review2-perf/` (`scripts
 | `run_affected` ~2 s after a component edit, bench-project, vm (mcp/README) | 1.92 s wall / 1.76 s tree CPU median, n=100 (unprofiled); 2.02 / 1.93 s, n=100 (profiled); 80 tests, 0 run-all | **confirmed** |
 | collector +5.2 % CPU on the real-world suite node project (commit `e6598d9` message only, no data in the repo) | +5.8 % (4.1–7.1), n=3 paired | **consistent**; put the data in the repo |
 | collector overhead "not measurable" (mcp/README: 305 vs 308.5 s, forks, n=1, raw data in `/tmp/vto-work`) / "~3 %" | bench-project **vmThreads: +12.4 % (10.9–13.7)**, n=3 paired | **not supported for vm pools**: the forks denominator hides it. State the overhead per pool. |
-| vm-guard auto calibrated −34 % vs current on the real-world suite (vm-guard/README; data only in `/home/claude/vmguard-lab/auto-bench.tsv`, outside the repo) | current 175.9 (172.0–176.0) s, auto calibrated 122.2 (115.0–125.1) s → **−30.5 %**; calibrate 77.9 s one-time; 1992/1992 pass in all 6 runs | **partially**: real but ~4 pp lower; say "−30…−35 %", include the calibrate cost |
-| heavy −96 % vs forks (vm-guard/README) | not re-run (forks ≈ 480 s CPU per run did not fit the budget) | **not verified**; the evidence is outside the repo |
+| vitest-guard auto calibrated −34 % vs current on the real-world suite (vitest-guard/README; data only in `/home/claude/vmguard-lab/auto-bench.tsv`, outside the repo) | current 175.9 (172.0–176.0) s, auto calibrated 122.2 (115.0–125.1) s → **−30.5 %**; calibrate 77.9 s one-time; 1992/1992 pass in all 6 runs | **partially**: real but ~4 pp lower; say "−30…−35 %", include the calibrate cost |
+| heavy −96 % vs forks (vitest-guard/README) | not re-run (forks ≈ 480 s CPU per run did not fit the budget) | **not verified**; the evidence is outside the repo |
 | analyzer ≤ 1 s and ≤ 300 MB at 10k tests (ARCHITECTURE §1.2) | 10k × 1k modules: 0.94 s, 200 MB; **10k × 3k modules: 1.92 s, 343 MB**; adversarial 10k: 2.7 s, 307 MB | **met only for small source trees** |
 | TUI 10k: render p50 8–12 ms, loop lag p99 40–100 ms (tui/README) | p50 7.1 ms, p95 10–11 ms, lag p99 19–23 ms (load ~2) | consistent |
 | coverage events cost nothing (mcp/README, 3k) | true at 3k. 30k: 32 ms per event on the main thread | **does not scale** (P2) |
-| vm-guard layer overhead +2–4 % (README, ARCHITECTURE "met") | not re-measured. the real-world suite validation already found dom +5.9 % | the README should cite the range |
+| vitest-guard layer overhead +2–4 % (README, ARCHITECTURE "met") | not re-measured. the real-world suite validation already found dom +5.9 % | the README should cite the range |
 
 **Claims without measurement data in the repo:**
 - every mcp/README table (raw data in `/tmp/vto-work`);
-- vm-guard auto and heavy numbers (`vmguard-lab`);
+- vitest-guard auto and heavy numbers (`vmguard-lab`);
 - the commit-message +5.2 %.
 
 Recommendation: commit a `perf/data/` with the TSV/JSON behind each README number.
@@ -242,5 +242,5 @@ node scripts/soak.mjs $PWD/bp 100 logs/soak2.jsonl --offset 1000  # daemon soak 
 node --expose-gc scripts/store-bench.mjs syn/n30000-m3000-sparse $PWD/sr 100 logs/store.jsonl
 node scripts/cov-bench.mjs $PWD/sm-n30000-m3000-sparse 1500
 node scripts/mcp-time.mjs $PWD/sm-n30000-m3000-sparse logs/mcp.jsonl x --no-daemon --reps 3
-scripts/long.sh                                           # collector overhead + vm-guard auto (≈ 25 min)
+scripts/long.sh                                           # collector overhead + vitest-guard auto (≈ 25 min)
 ```

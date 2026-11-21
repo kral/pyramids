@@ -13,7 +13,7 @@ Effort: **S** ≤ 2 days, **M** 3–8 days, **L** 2–4 weeks (one engineer who 
 
 ## 0. Verdict
 
-The pieces work on Linux and the measured wins are real (selection: −88 … −98 % CPU per edit; vm-guard: −41 … −87 %
+The pieces work on Linux and the measured wins are real (selection: −88 … −98 % CPU per edit; vitest-guard: −41 … −87 %
 CPU per full run). The project is not close to a 1.0 that a company can roll out on Windows, for four reasons:
 
 1. **Two silent-wrong-answer bugs were found by reading the code and both reproduce** (§0.1). A tool whose
@@ -39,11 +39,11 @@ every other item on the plan cheaper.
 | N1 | **critical** | **Project root reached through a symlink (or any spelling that differs from the real path) → silent recall miss.** `fileload.modules` loses every non-instrumented module (JSON, CSS, barrels), and vto's own setup files get instrumented and recorded as project sources. | **[R]** `work/fx` (real path) vs `work/fxlink → fx2`: after editing `src/data.json` so that `test/data.test.ts` fails, `vto-daemon affected --root …/fx` answers `count 1`, the same with `--root …/fxlink` answers `{"count":0,"runAll":false}`. Cause: `collector/setup-v2.mjs:181` `if (!f.startsWith(ROOT) …) continue;` compares Vite's real-path module ids against `VTO_ROOT`, which is only `path.resolve`d (`mcp/src/engine.mjs:30`, `collector/run-raw.mjs:31`). The same string compare decides the setup-file exclusion (`collector/plugin.mjs:294`). The documented MCP config passes `--root ${CLAUDE_PROJECT_DIR}` (`mcp/examples/mcp.json`), so the root spelling is whatever the client gives. **[U]** On Windows the same mechanism is triggered by drive-letter case (`c:\` from an IDE terminal vs `C:\` from `realpath.native`), junctions, `subst` drives and 8.3 names: line 181 is case-sensitive even on win32 (the `rel()` helper two lines above folds case, which hides the problem in the paths that do get written). |
 | N2 | high | **An uninstrumented ("clean") run marks every passing test dirty**, so the next `affected` selects the whole suite. The agent loop recommends a clean run before finishing. | **[R]** fixture, no edits: `affected` → 1 of 9; `vto-daemon run --full --clean`; `affected` → **9 of 9**. Cause: `mcp/src/engine.mjs:376` `if (!isMain) this.fixLaneResults(run, done)` treats the `clean` lane like the `fix` lane, and `fixLaneResults` sets `dirtyTests[id] = 1` for every passed id (`engine.mjs:468`). |
 | N3 | high | **`vto affected --git` loses block-level precision for every changed file when Git converts line endings** (`core.autocrlf=true`, the Git for Windows default). | **[R]** `work/crlf/lf` vs `work/crlf/crlf`, same edit: LF checkout selects 1 of 2 tests; CRLF checkout prints `base content differs from the recorded hash (stale map) → every test file importing it` and selects 2 of 2. The collector hashes the text Vite loaded (`collector/plugin.mjs:259`), the analyzer hashes the git blob (`analyzer/src/main.rs:503-513`). Reproduced on Linux with a hand-written raw dir carrying the hash of the CRLF working file; the collector itself was not run on Windows. Fail-safe, but on the primary target platform it turns the CLI path into `vitest related`. The daemon is not affected: it uses a third hash, sha1 of BOM/CRLF-normalised text (`mcp/src/platform.mjs:58`). |
-| N4 | high | **`.vm-guard/run/env.json` has two writers with different rules; the daemon erases vm-guard's sticky "DOM miss" evidence.** | **[C]** vm-guard ranks entries `miss` > `probe` > `static` and never lets `dom:true` go back to `false` (`vm-guard/src/auto.mjs:65,81-84`). The daemon overwrites any entry with its own probe result and drops `miss`, `by`, `via` (`mcp/src/classify.mjs:48-52`). The comment at `auto.mjs:63-64` assumes the other producer preserves it. Both do unlocked read-modify-write; the atomic rename prevents torn files, not lost updates. The two static classifiers also differ (`classify.mjs:18-25` vs `auto.mjs:31-51`), as do the DOM environment sets (`'browser'` only in the daemon) and the default node-group pool (`forks` in `engine.mjs:81`, `shared` in `auto.mjs:165`). |
+| N4 | high | **`.vitest-guard/run/env.json` has two writers with different rules; the daemon erases vitest-guard's sticky "DOM miss" evidence.** | **[C]** vitest-guard ranks entries `miss` > `probe` > `static` and never lets `dom:true` go back to `false` (`vitest-guard/src/auto.mjs:65,81-84`). The daemon overwrites any entry with its own probe result and drops `miss`, `by`, `via` (`mcp/src/classify.mjs:48-52`). The comment at `auto.mjs:63-64` assumes the other producer preserves it. Both do unlocked read-modify-write; the atomic rename prevents torn files, not lost updates. The two static classifiers also differ (`classify.mjs:18-25` vs `auto.mjs:31-51`), as do the DOM environment sets (`'browser'` only in the daemon) and the default node-group pool (`forks` in `engine.mjs:81`, `shared` in `auto.mjs:165`). |
 | N5 | med | **Stale-lock race in `engine.lock`.** A process that saw a stale lock unlinks whatever is there on its second pass, including a lock a competitor just created. | **[C]** `mcp/src/engine.mjs:61-72`: `unlinkSync` at :69 is unconditional. Two MCP calls starting stateless engines after a crash can both own `.vto/`. Liveness is PID-only, so PID reuse (frequent on Windows) gives a false `E_LOCKED` until the file is deleted by hand. |
 | N6 | med | **The daemon map is keyed by exact-case absolute paths; the case-folding helper is dead code.** | **[C]** `pathKey`/`isCaseInsensitiveFs` (`mcp/src/platform.mjs:26-49`) are unit-tested but `pathKey` has no caller; `isCaseInsensitiveFs` is used only for the endpoint key (`ipc.mjs:46`). `store.mjs:78` writes absolute `file` paths, `state.files` is keyed by them. Consequences: a client that spells a path differently (VS Code reports lower-case drive letters) gets "no coverage"; `.vto/` cannot move between checkouts, so the SAVINGS.md advice to keep `.vto/` in the CI cache only works when the agent work directory is identical (Azure Pipelines agents use `_work/1/s`, `_work/2/s`, …). |
-| N7 | med | **Node version floors are wrong.** `collector/setup-v2.mjs:14` calls `process.getBuiltinModule` unguarded at module top level (Node ≥ 22.3 / 20.16) while the root package declares `node >=20`; vm-guard uses `path.matchesGlob` (`auto.mjs:24`, `safety.mjs:37`; Node ≥ 22.5, experimental) and declares `>=22`. | **[C]** Loud failure, but in the user's test run. |
-| N8 | med | **vm-guard cannot run its own tests from a clean clone**: no `devDependencies`, no lockfile, `vitest` is only a peer. Its end-to-end tests then report `SKIP vitest not installed`, which would be a false green in CI. | **[R]** copy in `work/vm-guard`: 19 tests → 6 pass, 9 fail (`Cannot find package 'vitest' imported from src/sequencer.mjs`), 4 skipped. The committed `setup.bundle.mjs` is fresh (rebuilt and compared), but no CI job checks that. |
+| N7 | med | **Node version floors are wrong.** `collector/setup-v2.mjs:14` calls `process.getBuiltinModule` unguarded at module top level (Node ≥ 22.3 / 20.16) while the root package declares `node >=20`; vitest-guard uses `path.matchesGlob` (`auto.mjs:24`, `safety.mjs:37`; Node ≥ 22.5, experimental) and declares `>=22`. | **[C]** Loud failure, but in the user's test run. |
+| N8 | med | **vitest-guard cannot run its own tests from a clean clone**: no `devDependencies`, no lockfile, `vitest` is only a peer. Its end-to-end tests then report `SKIP vitest not installed`, which would be a false green in CI. | **[R]** copy in `work/vitest-guard`: 19 tests → 6 pass, 9 fail (`Cannot find package 'vitest' imported from src/sequencer.mjs`), 4 skipped. The committed `setup.bundle.mjs` is fresh (rebuilt and compared), but no CI job checks that. |
 | N9 | low | `fs` read tracking does not resolve `..` (`setup-v2.mjs:125` removes only `/./`), so `readFileSync('tests/../src/x.css')` records a path that never matches a diff. `store.load()` parses every map line without `try` (`store.mjs:52,63`): one truncated line stops every engine start. `FORMAT.md` says `file.hash` is SHA-1; the code writes the first 16 hex of SHA-256 (`setup-v2.mjs:66`), and no reader uses the field. `verify/signals-setup.mjs:15` writes `s-<pid>-<tid>.jsonl`, the prefix FORMAT.md reserves for stored maps. Analyzer `paths::normalize` collapses a UNC root `\\srv\share\p` to `/srv/share/p` (`paths.rs:22-49`), which `git -C` then cannot open → permanent run-all for projects on a share **[U]**. | **[C]** |
 
 ### 0.2 What happened to the findings of ARCHITECTURE.md
@@ -70,7 +70,7 @@ The git history starts after that review (`8ee1310`, 12 commits), so this is jud
 | ADR-2 WASM default, `vto serve`, Rust as the only raw reader | not done; JS readers went from 1 to 4 |
 | ADR-7 build stateless first | done (`Engine` runs stateless or in the daemon); the measurement confirmed the prediction (§6) |
 | ADR-8 token budgets, redaction, versioned schemas | done |
-| vm-guard `projects` support, fs readers, file granularity, run-all sentinel, `.vm-guard` volatility | done (VALIDATION A1–A4, G1) |
+| vitest-guard `projects` support, fs readers, file granularity, run-all sentinel, `.vitest-guard` volatility | done (VALIDATION A1–A4, G1) |
 
 ---
 
@@ -116,7 +116,7 @@ Only I and S entries are listed; plain public API use is summarised at the end.
 | K22 | overwriting `t.result.state = 'pass'`, `errors = undefined` | `setup-verify.mjs:72` | I | reporters or exit code see failures, or real failures are masked |
 | K23 | chai wrapping, as K16 | `signals-setup.mjs:51-62` | S | silent |
 
-**vm-guard/**
+**vitest-guard/**
 
 | # | dependency | where | class | on change |
 |---|---|---|---|---|
@@ -139,7 +139,7 @@ Only I and S entries are listed; plain public API use is summarised at the end.
 | K35 | measuring "classic" output: `Object.create(vitest.logger, {outputStream, errorStream, console})`, a `Proxy` around `vitest`, `new Reporter({isTTY:false}).onInit(proxy)`, pushing into `vitest.reporters` at run time, exports `DefaultReporter`/`MinimalReporter`/`VerboseReporter`, and the claim that Vitest selects `minimal` for agents | `lane.mjs:209-239` | I | half-loud (`send error`) or silently wrong savings numbers |
 | K36 | `project.createSpecification(file, { testNames })`, `runTestSpecifications(specs, allTestsRun)`, `clearSpecificationsCache`, `globTestSpecifications`, `getRootProject`, `cancelCurrentRun('keyboard-input')`, `vitest.state.getUnhandledErrors()` | `lane.mjs:252-272,288` | S (typed "advanced" API) | loud (TypeError) or silent filter loss if `testNames` semantics change |
 | K37 | `onTestCaseResult` fires right after each test, not at module end; `onUserConsoleLog` carries `taskId` and may arrive after the result | `lane.mjs:83-113`; PROTOCOL.md §6 ("measured") | S (behaviour) | silent: time-to-first-failure degrades to file granularity; console lines unattributed |
-| K38 | `project.config.provide.vmGuard` read back to detect a wrapped config; generated wrapper config calling the user's config function with `{mode:'test', command:'serve'}` | `lane.mjs:58-71,144,163` | S | silent: wrong pool label, vm-guard not applied |
+| K38 | `project.config.provide.vitestGuard` read back to detect a wrapped config; generated wrapper config calling the user's config function with `{mode:'test', command:'serve'}` | `lane.mjs:58-71,144,163` | S | silent: wrong pool label, vitest-guard not applied |
 | K39 | env probe: `__vitest_worker__.environment.name`, `Symbol.for('expect-global')` **without** fallback | `src/collector-ext/setup-env-probe.mjs:17,42` | I | silent: no env record → static classification only |
 | K40 | config-file name list as the definition of "is a Vitest project" | `engine.mjs:1035-1046`; `tui/src/sources/protocol.ts:124-136` | S | loud |
 
@@ -207,8 +207,8 @@ data can be trusted for.
 | `cacheIsolation` | run instrumented, then plain, assert the plain run sees no `__vto_reg` | set a vto-only `cacheDir` / disable `fsModuleCache` for vto runs (perf/RESULTS.md row 16 measured its effect as 0 %) |
 | `warmInvalidation` | edit a module between two warm runs, assert the second run sees the new value | daemon falls back to a cold lane per run (measured cost: 0.1–0.8 s, §6) |
 | `eagerResults` | a slow two-test file: first failure arrives before the module ends | protocol field `failureGranularity: "file"` |
-| `sharedBatchOrder` | three files in a planned order under `isolate:false, maxWorkers:1` log their order | vm-guard `shared` refuses planned lanes, runs `vm` |
-| `realmLayout` | `instanceof` across realms, builtin identity | vm-guard quarantines to forks |
+| `sharedBatchOrder` | three files in a planned order under `isolate:false, maxWorkers:1` log their order | vitest-guard `shared` refuses planned lanes, runs `vm` |
+| `realmLayout` | `instanceof` across realms, builtin identity | vitest-guard quarantines to forks |
 | `repeats` | a test with scheduled repeats reports the attempt indexes | verify disabled |
 
 Rule: a capability that protects correctness fails **closed** (refuse, or widen to run-all with the reason in
@@ -231,7 +231,7 @@ Not a full Cartesian product. Run the cheap suite everywhere and the expensive o
 | Vitest `beta`/`next` · Vite latest · Node 24 (nightly, may fail, opens an issue) | cheap | cheap | – |
 
 *cheap* = probe suite + contract tests (§2.4) + collector corpus (90 cases) + unit tests of every package.
-*full* = cheap + mcp integration tests on the fixture + vm-guard end-to-end (`vm`, `shared`, `auto`) + fault
+*full* = cheap + mcp integration tests on the fixture + vitest-guard end-to-end (`vm`, `shared`, `auto`) + fault
 injection n = 60 on the analyzer fixture + **path-identity cases**: root through a symlink/junction, root with a
 lower-case drive letter, root containing a space and a non-ASCII (NFC and NFD) segment, CRLF checkout.
 
@@ -250,18 +250,18 @@ matrix row says so.
 
 | contract | version field | spec | writers | readers | contract tests |
 |---|---|---|---|---|---|
-| **raw records** (`w-*.jsonl`) | `meta.version: 2` and `meta.formatVersion: "2.1"` | `FORMAT.md` (v1 text, then v2, addendum A, 2.1, addendum B, addendum C, in historical order; the first line still names `collector/setup.ts` and `w-<pid>-<threadId>.jsonl`) | `collector/setup-v2.mjs` (file, fileload, test), `run-raw.mjs` (meta), `setup.ts` (v1 script/test), `mcp/…/setup-env-probe.mjs` (`{"t":"env"}`, **not in FORMAT.md**, in `env-*.jsonl`), `verify/signals-setup.mjs` (`{"t":"sig"}`, in `s-*.jsonl`) | Rust `raw.rs`; JS `mcp/src/store.mjs` `readRaw`; JS `verify/verify.mjs:73-100`; JS `vm-guard/src/cli.mjs` `readVto` and `auto.mjs:88-99`; JS `analyzer/faultinject/run.mjs` | Rust: fixture `tests/fixtures/v2` only; no test that the collector's output today matches any reader |
+| **raw records** (`w-*.jsonl`) | `meta.version: 2` and `meta.formatVersion: "2.1"` | `FORMAT.md` (v1 text, then v2, addendum A, 2.1, addendum B, addendum C, in historical order; the first line still names `collector/setup.ts` and `w-<pid>-<threadId>.jsonl`) | `collector/setup-v2.mjs` (file, fileload, test), `run-raw.mjs` (meta), `setup.ts` (v1 script/test), `mcp/…/setup-env-probe.mjs` (`{"t":"env"}`, **not in FORMAT.md**, in `env-*.jsonl`), `verify/signals-setup.mjs` (`{"t":"sig"}`, in `s-*.jsonl`) | Rust `raw.rs`; JS `mcp/src/store.mjs` `readRaw`; JS `verify/verify.mjs:73-100`; JS `vitest-guard/src/cli.mjs` `readVto` and `auto.mjs:88-99`; JS `analyzer/faultinject/run.mjs` | Rust: fixture `tests/fixtures/v2` only; no test that the collector's output today matches any reader |
 | **stored map, file form** (`vto pack`) | `version: 2`, `stored: true`, `pathBase: "root"` | FORMAT.md addendum B | Rust `store.rs` (block columns zeroed, kinds collapsed to `"b"`) | Rust `raw.rs` (does not parse `stored`/`pathBase`; works because relative paths happen to resolve); `verify.mjs:99` | one Rust round-trip test |
 | **stored map, directory form** (`.vto/map/s-*.jsonl`) | `version: 2`, `producer: "vto-daemon"` | header comment of `store.mjs` | `mcp/src/store.mjs` (absolute paths, no hashes, `env` records inline) | `store.mjs`, Rust `raw.rs` | `mcp/test/contract-analyzer.test.mjs` (good: written after bug D1) |
 | **daemon state** (`.vto/state.json`, `blobs/`, `runs/*.jsonl`, `metrics.jsonl`, tasks, `config.json`) | `state.version: 1`; the rest none | none | `store.mjs`, `engine.mjs`, `metrics.mjs` | same; `tui/src/sources/file.ts` reads `runs/*.jsonl` | unit tests; a version mismatch **silently discards the map** (`store.mjs:48`) |
-| **`vto-env/1`** (`.vm-guard/run/env.json`) | `format` | `mcp/PROTOCOL.md` §9, although the file lives in vm-guard's directory | `mcp/src/classify.mjs`, `vm-guard/src/auto.mjs` | both | none across the two packages; rules differ (N4); extension fields `miss`, `by`, `via` are not in the spec |
+| **`vto-env/1`** (`.vitest-guard/run/env.json`) | `format` | `mcp/PROTOCOL.md` §9, although the file lives in vitest-guard's directory | `mcp/src/classify.mjs`, `vitest-guard/src/auto.mjs` | both | none across the two packages; rules differ (N4); extension fields `miss`, `by`, `via` are not in the spec |
 | **`vto-ipc/1`** | integer `protocol` in `hello`; `v: "vto/1"` on results | `mcp/PROTOCOL.md` (prose and tables) | `mcp/src/ipc.mjs`, `daemon.mjs`, `api.mjs` (hand validation), `engine.mjs` (event shapes inline in ~15 `publish` calls) | `mcp/src/client.mjs`; `tui/src/sources/protocol.ts`, `ipc.ts`, `events.ts`; `mcp/dev/mock-events.mjs`; `tui/src/mock/daemon.ts` | `tui/test/platform.test.ts:149-164` compares `projectKey` with mcp's, `tui/test/e2e.test.ts:75` runs against mcp's mock; both are **skipped when the sibling directory is missing** |
 | **MCP tools** `vto/1` | `TOOLSET_VERSION`, server `version: '0.1.0'` hard-coded (`mcp-server.mjs:52`) | `mcp/README.md` table | zod shapes in `mcp-server.mjs` | agents | token-budget tests in `integration.test.mjs`; the zod shapes duplicate `api.mjs` validators with different limits (page limit 50 vs 200) |
 | **report.json** | none | `report.rs:1`: "schema of the Node version" | Rust `report.rs` | `verify/verify.mjs`, `mcp/src/analysis.mjs` | `tests/cli.rs` checks headings and language only |
 | **`vto affected --json` / `--vitest` / exit codes** | none | `main.rs` usage text, FORMAT.md addendum C | Rust | `mcp/src/analyzer.mjs`, shell users | contract test above |
 | **`vto-ci/1`** | `v` | `mcp/SAVINGS.md` §4 | `metrics.mjs` | CI scripts | none |
-| **vm-guard state** (`incompatible.json`, `conflicts.json`, `run/*.json`) | none | README | vm-guard | vm-guard; analyzer ignore rules (`affected.rs` defaults); `mcp` `vm_guard_status` | `vm-guard/test/state.test.mjs` |
-| **`VTO_*` / `VM_GUARD_*` environment variables** (≈20: `VTO_RAW_DIR`, `VTO_ROOT`, `VTO_RUN_ID`, `VTO_ENGINE`, `VTO_SIGNALS`, `VTO_READS`, `VTO_ASYNC_TIMEOUT`, `VTO_EXCLUDE_URLS`, `VTO_LANE_OPTS`, `VTO_POOL`, `VTO_BIN`, `VTO_ANALYZER`, `VM_GUARD_MODE`, `VM_GUARD_LANE_FILE`, …) | none | scattered | all | all | none. `VTO_BIN` (`vitest-overlap.mjs:55`) and `VTO_ANALYZER` (`mcp/src/platform.mjs:93`) name the same thing; the two analyzer resolvers have different search rules |
+| **vitest-guard state** (`incompatible.json`, `conflicts.json`, `run/*.json`) | none | README | vitest-guard | vitest-guard; analyzer ignore rules (`affected.rs` defaults); `mcp` `vitest_guard_status` | `vitest-guard/test/state.test.mjs` |
+| **`VTO_*` / `VITEST_GUARD_*` environment variables** (≈20: `VTO_RAW_DIR`, `VTO_ROOT`, `VTO_RUN_ID`, `VTO_ENGINE`, `VTO_SIGNALS`, `VTO_READS`, `VTO_ASYNC_TIMEOUT`, `VTO_EXCLUDE_URLS`, `VTO_LANE_OPTS`, `VTO_POOL`, `VTO_BIN`, `VTO_ANALYZER`, `VITEST_GUARD_MODE`, `VITEST_GUARD_LANE_FILE`, …) | none | scattered | all | all | none. `VTO_BIN` (`vitest-overlap.mjs:55`) and `VTO_ANALYZER` (`mcp/src/platform.mjs:93`) name the same thing; the two analyzer resolvers have different search rules |
 
 ### 2.2 What is wrong with the current shape
 
@@ -320,12 +320,12 @@ Contract tests, all in the cheap CI suite:
 
 Reduce the number of implementations rather than testing more of them:
 
-- One JS reader, `@kral/vto-raw` (≈150 lines), used by the daemon store, verify, vm-guard and fault injection.
+- One JS reader, `@kral/vto-raw` (≈150 lines), used by the daemon store, verify, vitest-guard and fault injection.
 - One stored-map form. `vto pack` writes what the daemon reads; the daemon stores root-relative paths (fixes N6).
 - One content-hash definition: **SHA-256 of the UTF-8 text after BOM removal and CRLF→LF**, used by the
   collector, the analyzer's base-blob check and the daemon (fixes N3; drop the unused 16-hex `hash`).
 - One version field: `meta.format: "vto-raw/2.1"`; readers refuse a higher major and warn on a higher minor.
-- One owner of `env.json`: vm-guard (it is in vm-guard's directory and vm-guard works without vto). The daemon
+- One owner of `env.json`: vitest-guard (it is in vitest-guard's directory and vitest-guard works without vto). The daemon
   hands it probe records through an exported `mergeEnvEvidence()` and never writes the file itself (fixes N4).
 - One git driver, the hardened one, and one module that turns "what changed" into hunks.
 - One client library `@kral/vto-ipc-client` (discovery, auth, framing) used by mcp, the CLI and the tui; delete the
@@ -342,7 +342,7 @@ Reduce the number of implementations rather than testing more of them:
 | analyzer (Rust) | ≈ 5,550 lines | `affected.rs` 822, `analysis.rs` 702, `v1.rs` 627, `main.rs` 602, `raw.rs` 575, `report.rs` 528 | 39 unit + 11 security + 1 CLI; **0 in `raw.rs`, `report.rs`, `main.rs`, `model.rs`** | compiler; no `clippy`/`fmt` gate, no MSRV |
 | collector | ≈ 1,000 lines `.mjs` + 115 `.ts` | `plugin.mjs` 334, `setup-v2.mjs` 238 | corpus of 90 cases (good), `selftest.mjs`; **no unit test of the setup logic** (hook timing, leaky/tainted, fs wrapping) | none |
 | verify | ≈ 1,570 lines | `verify.mjs` 519 (script, top-level code, not importable), `mutate.mjs` 359 | none in the repo (evaluation lives in `/home/claude/verify-fixture`) | none |
-| vm-guard | ≈ 2,080 lines + 728 generated | `cli.mjs` 449, `setup.mjs` 382, `index.mjs` 264 | 19 `node:test` cases, not runnable from a clean clone (N8) | hand-written `index.d.ts` (38 lines), no check that it matches |
+| vitest-guard | ≈ 2,080 lines + 728 generated | `cli.mjs` 449, `setup.mjs` 382, `index.mjs` 264 | 19 `node:test` cases, not runnable from a clean clone (N8) | hand-written `index.d.ts` (38 lines), no check that it matches |
 | mcp | ≈ 3,510 lines | **`engine.mjs` 1,050 lines / 58 KB, one class, 55 methods**; `store.mjs` 434, `lane.mjs` 298 | 26 unit tests (pass), integration + contract tests on a fixture | none |
 | tui | ≈ 3,240 lines TS | `model.ts` 300, `scenario.ts` 261, `App.tsx` 258 | 66 tests (pass), snapshot + pty e2e | `strict` TypeScript |
 
@@ -370,7 +370,7 @@ engine/
 
 ### 3.2 Error handling
 
-- **Empty `catch {}`**: 11 in `collector/setup-v2.mjs` (238 lines), 46 in `mcp/src` (3,510), 84 in `vm-guard/src`
+- **Empty `catch {}`**: 11 in `collector/setup-v2.mjs` (238 lines), 46 in `mcp/src` (3,510), 84 in `vitest-guard/src`
   (2,809 including the bundle), 6 in `tui/src`. Many are correct (best-effort cleanup). The dangerous ones are
   the feature probes, where the catch hides the loss of a safety property: `setup-v2.mjs:154` (K5),
   `:174-184` (K1), `:170`, `setup-env-probe.mjs:42`. These must set a capability flag, not swallow.
@@ -401,7 +401,7 @@ engine/
   `run.fixBusy` guards re-entry but is not released if `lane.run` never resolves (a killed lane rejects, so this
   holds today; it depends on `lane-client.mjs:31-38`).
 - **Locks**: `engine.lock` (N5), `start.lock` (30 s staleness), no lock on `env.json` (N4), none on
-  `.vm-guard/run/*` when vm-guard CLI and a daemon lane run together.
+  `.vitest-guard/run/*` when vitest-guard CLI and a daemon lane run together.
 - **Process cleanup**: POSIX uses process groups, Windows `taskkill /T /F` (`platform.mjs:64-72`). Unverified on
   Windows **[U]**: a daemon killed from Task Manager leaves detached lanes; nothing reaps them on next start
   because the lock check only looks at the daemon PID.
@@ -412,7 +412,7 @@ engine/
 
 ### 3.4 Testability and dead code
 
-- `verify.mjs` and `vm-guard/src/cli.mjs` execute at import; nothing in them can be unit-tested without
+- `verify.mjs` and `vitest-guard/src/cli.mjs` execute at import; nothing in them can be unit-tested without
   spawning. `engine.mjs` can only be tested through a real Vitest run on a fixture (the integration test takes
   the place of unit tests), which is why N2 and N5 have no test.
 - Hard-coded developer paths in tests: `/home/claude/demo/node_modules`
@@ -426,13 +426,13 @@ engine/
 
 ### 3.5 Conventions that differ between packages
 
-| topic | collector / verify / root | vm-guard | mcp | tui | analyzer |
+| topic | collector / verify / root | vitest-guard | mcp | tui | analyzer |
 |---|---|---|---|---|---|
 | language | `.mjs` (+ one `.ts` setup file) | `.mjs` + hand `.d.ts` | `.mjs` | TypeScript, built to `dist/` | Rust 2024 |
 | test runner | custom scripts | `node:test` | `node:test` | Vitest | `cargo test` |
 | deps pinning | caret | none declared | exact | caret | caret + lockfile |
 | Node floor | 20 | 22 | 20 | 22 | – |
-| arg parsing | 4 hand-written parsers (`vitest-overlap.mjs`, `run-raw.mjs`, `verify.mjs`, `vto-daemon.mjs`) + vm-guard's + Rust's | | | | |
+| arg parsing | 4 hand-written parsers (`vitest-overlap.mjs`, `run-raw.mjs`, `verify.mjs`, `vto-daemon.mjs`) + vitest-guard's + Rust's | | | | |
 | user-facing language | English, Czech remnants | English + `README.cs.md` (434 lines) | English + `README.cs.md` (148) | i18n table | i18n table |
 | analyzer lookup | `VTO_BIN`, sibling build, `PATH` | – | `VTO_ANALYZER`, npm package, sibling build; never `PATH` | – | – |
 | formatting / lint | none | none | none | `tsc` only | none enforced |
@@ -442,12 +442,12 @@ There is no linter, no formatter and no `.editorconfig` in the repository.
 ### 3.6 JS or TS
 
 Keep plain `.mjs` for everything that is **loaded inside the user's Vitest** (setup files, the Vite plugin, the
-vm-guard setup bundle): these are copied into the project and must run without a build step or a loader. For
+vitest-guard setup bundle): these are copied into the project and must run without a build step or a loader. For
 them add `// @ts-check`, JSDoc types imported from `contracts/`, and `tsc --noEmit --checkJs` in CI.
 
 Move **mcp** to TypeScript. It is the package with the most internal state, it already needs the protocol types
 the tui wrote by hand, and the tui proves the build step is acceptable. The engine split of §3.1 is the natural
-moment. vm-guard's Node-side code (`index`, `cli`, `plan`) gains less; `checkJs` is enough and removes the
+moment. vitest-guard's Node-side code (`index`, `cli`, `plan`) gains less; `checkJs` is enough and removes the
 hand-maintained `index.d.ts`.
 
 One oxlint config at the root with the restricted-syntax rule of §1.2, plus `cargo fmt --check` and
@@ -476,9 +476,9 @@ One oxlint config at the root with the restricted-syntax rule of §1.2, plus `ca
 |---|---|
 | layout | six sibling directories, each its own package or no package (`collector/`, `verify/` belong to the root package) |
 | versions | everything `0.1.0`, everything `private: true`; nothing publishable |
-| Node / Vitest ranges | Node `>=20` (root, mcp), `>=22` (vm-guard, tui); Vitest `>=4` optional peer (root), `>=5.1 <6` (vm-guard), none (mcp, which needs 5.1 APIs) |
+| Node / Vitest ranges | Node `>=20` (root, mcp), `>=22` (vitest-guard, tui); Vitest `>=4` optional peer (root), `>=5.1 <6` (vitest-guard), none (mcp, which needs 5.1 APIs) |
 | install today | clone the repo, `cargo build --release`, point the MCP config at an absolute path (`mcp/README.md` uses `C:/tools/vto/mcp/bin/vto-mcp.mjs`); tui needs `npm run build` first (`bin/vto-ui.mjs` imports `../dist`) |
-| CI | `.github/workflows/vto-ci.yml`: analyzer build + `cargo test` on 5 targets, mcp tests on 3 OS with Node 22. `mcp/README.md` states it "has not run yet". **Not covered**: collector corpus and selftest, vm-guard, verify, tui, any second Node or Vitest version, lint, the bundle freshness check. Actions are pinned by major tag, `dtolnay/rust-toolchain@stable` floats, the Rust toolchain is unpinned. The `macos-13` (Intel) runner label should be checked; GitHub has been retiring Intel macOS images |
+| CI | `.github/workflows/vto-ci.yml`: analyzer build + `cargo test` on 5 targets, mcp tests on 3 OS with Node 22. `mcp/README.md` states it "has not run yet". **Not covered**: collector corpus and selftest, vitest-guard, verify, tui, any second Node or Vitest version, lint, the bundle freshness check. Actions are pinned by major tag, `dtolnay/rust-toolchain@stable` floats, the Rust toolchain is unpinned. The `macos-13` (Intel) runner label should be checked; GitHub has been retiring Intel macOS images |
 | release | none: no workflow, no changelog, no tags |
 | licence | none; `pack-analyzer.mjs:22` writes `"license": "UNLICENSED"` into the binary packages |
 | SBOM / provenance | none; the binary package records a sha256 that the resolver checks (`mcp/src/analyzer.mjs:25-27`), which protects against a corrupted install, not against a replaced package (the hash sits next to the binary) |
@@ -525,15 +525,15 @@ packages/
   raw/                       // the one JS reader (private, bundled)
   vto/                       // published: CLI (one `vto` bin with subcommands), collector, daemon, MCP server
   vto-tui/                   // published or folded into vto as `vto ui` (it adds react + ink to the install)
-  vm-guard/                  // published, independent semver, no dependency on vto
+  vitest-guard/                  // published, independent semver, no dependency on vto
   analyzer-wasm/, analyzer-<os>-<arch>/   // generated by the release workflow
 crates/vto-analyzer/
 ```
 
 - Two public version lines: `vto` (JS + analyzer packages always released together, same version) and
-  `vm-guard`. Changesets or release-please.
+  `vitest-guard`. Changesets or release-please.
 - One user-facing binary. Today there are `vitest-overlap`, `vto` (Rust), `vto-daemon`, `vto-mcp`, `vto-ui`,
-  `vm-guard`, and the docs call the TUI `vto ui`, which does not exist as a command.
+  `vitest-guard`, and the docs call the TUI `vto ui`, which does not exist as a command.
 - Release workflow: tag → matrix build → tests → `npm publish --provenance` through npm trusted publishing
   (OIDC, no long-lived token) → GitHub artifact attestations for the binaries → SBOMs attached to the release
   (CycloneDX from `npm sbom` and `cargo cyclonedx`) → Authenticode signature for `vto.exe` if native Windows
@@ -610,8 +610,8 @@ Ordered by (code and coupling removed) ÷ (value lost). Every number is from the
 |---|---|---|---|---|
 | S1 | **Remove the V8 engine (`--engine v8`) from the product.** Keep `v1.rs` only if the differential oracle is actually built; otherwise delete. | +14.5 ms/test, ≈10× slower than v2 **[D]** (ARCHITECTURE ADR-1). Unsupported in vm pools (`run-raw.mjs:120`), which are the pools vto recommends. Stores the transformed source of every covered file in raw data (`run-raw.mjs:138`, SECURITY F11). The oracle it was kept for (REVIEW-1 §7.1) does not exist | `v1.rs` 627 + `sourcemap.rs` 300 + `flatten.rs` 167 + `setup.ts` 115 lines ≈ 20 % of the analyzer; `base64` dep; K17; the v1 half of FORMAT.md; the `mixed v1 and v2` paths in `raw.rs` | a fallback nobody can use with the recommended setup |
 | S2 | **Take `verify` out of 1.0** (separate experimental package or branch). | On the real repo, 7 of 10 "confirmed redundant" verdicts were wrong **[D]** (VALIDATION §5); it was unusable out of the box (bug V1). Best pipeline on the team's own labelled fixture: P 0.81 / R 0.52 **[D]** (ARCHITECTURE §1.2). It holds the deepest internals (K18–K23), still rewrites results, has no tests in the repo, and still prints Czech | ≈ 1,570 lines, 6 touch points, the duplicate signals file, the `sig` record kind | a research result that does not yet transfer to data-driven tests |
-| S3 | **Remove the daemon's own `dom`/`node` group lanes; let vm-guard `auto` do the split inside one Vitest.** | All-jsdom suite: two lanes **+16 % CPU** on a full run and **+188 % CPU** (5.3 s → 11.6 s) on an edit **[D]** (`mcp/README.md` "One lane vs two lanes"). Mixed suite: −44 % wall, but against one lane with the same worker count only −14 % wall / −5 % CPU, edit "within noise" **[D]**. vm-guard `auto` already implements classification and per-group pools as Vitest projects and measured −32 % CPU on the same repo **[D]** (commit `793fc2a`) | `classify.mjs`, `planGroups`, `ensureGroupWorkers`, `laneGroup`, merged-lane bookkeeping in `execute`/`onLaneMessage`/`mergeDone`, K33, the second static classifier, the second `env.json` writer (N4), the `<project>:<group>` naming in the protocol | nothing measured |
-| S4 | **Make the stateless engine the default; start the daemon only when a client subscribes** (TUI, IDE). | "Warm daemon vs stateless: no CPU saving with the forks pool (±5 %, noise)"; with vm-guard "warm vs cold differs by only 0.1–0.8 s wall" **[D]** (`mcp/README.md`). The daemon's real value is streaming: first failure after 1.3 s vs 9.2 s for an edit run, 40.8 s vs 56.7 s mid-suite **[D]** | for agents: no background process, no IPC, no lock contention, no K34 (stale warm module graph is the one daemon failure that gives a wrong answer); the Windows process-tree questions disappear from the default path | 0.1–0.8 s per call |
+| S3 | **Remove the daemon's own `dom`/`node` group lanes; let vitest-guard `auto` do the split inside one Vitest.** | All-jsdom suite: two lanes **+16 % CPU** on a full run and **+188 % CPU** (5.3 s → 11.6 s) on an edit **[D]** (`mcp/README.md` "One lane vs two lanes"). Mixed suite: −44 % wall, but against one lane with the same worker count only −14 % wall / −5 % CPU, edit "within noise" **[D]**. vitest-guard `auto` already implements classification and per-group pools as Vitest projects and measured −32 % CPU on the same repo **[D]** (commit `793fc2a`) | `classify.mjs`, `planGroups`, `ensureGroupWorkers`, `laneGroup`, merged-lane bookkeeping in `execute`/`onLaneMessage`/`mergeDone`, K33, the second static classifier, the second `env.json` writer (N4), the `<project>:<group>` naming in the protocol | nothing measured |
+| S4 | **Make the stateless engine the default; start the daemon only when a client subscribes** (TUI, IDE). | "Warm daemon vs stateless: no CPU saving with the forks pool (±5 %, noise)"; with vitest-guard "warm vs cold differs by only 0.1–0.8 s wall" **[D]** (`mcp/README.md`). The daemon's real value is streaming: first failure after 1.3 s vs 9.2 s for an edit run, 40.8 s vs 56.7 s mid-suite **[D]** | for agents: no background process, no IPC, no lock contention, no K34 (stale warm module graph is the one daemon failure that gives a wrong answer); the Windows process-tree questions disappear from the default path | 0.1–0.8 s per call |
 | S5 | **Drop the `clean` lane as a warm process; drop or postpone the task queue** (`enqueue_task`, `list_tasks`, `claim_task`, `complete_task`). | The clean lane caused N2. A cold uninstrumented run costs the same 0.1–0.8 s. The task queue has no measurement and no user; orchestrating sub-agents is the agent framework's job | a lane, ~60 lines of engine, four IPC methods, four MCP tools, the `task` event | none measured |
 | S6 | **Classic-reporter measurement off by default** (`measureClassic`), on only for an explicit calibration run. | It instantiates three Vitest reporters behind a logger clone and a `Proxy` on every run (K35) to feed the savings report. Passing runs: vto 88 tokens vs Vitest's own agent reporter 126 **[D]**; the token saving exists only for failing runs (789 vs 2,721) | K35 from the default path, unmeasured per-run overhead | sales numbers become "measured on calibration runs", which is what SAVINGS.md already says they are |
 | S7 | **One collector-overhead claim.** | `mcp/README.md`: "no measurable CPU" (305 vs 308.5 s). VALIDATION: **+9.8 %** full suite, +11.4 % / +11.7 % per project; after the marker work the node project went +7.1 % → +5.2 % **[D]** (commit `e6598d9`). The docs contradict each other | – | – |
@@ -620,7 +620,7 @@ Ordered by (code and coupling removed) ÷ (value lost). Every number is from the
 | S10 | Legacy-map migration, `VTO_PLUGIN`, `VTO_HEAP_LOG`, `samples/demo-raw`, `file.hash`, `formatVersion`, `pathKey` (use it or delete it) | §3.4 | small | none |
 
 **Keep**: the v2 collector and instrumenter with its corpus; `affected` with file granularity and fs reads;
-vm-guard `vm`/`shared`/`auto` with quarantine (best evidence in the repo); the MCP server with token budgets and
+vitest-guard `vm`/`shared`/`auto` with quarantine (best evidence in the repo); the MCP server with token budgets and
 redaction; the streaming protocol and the TUI; the fix lane (it is the visible feature of "fix while it runs",
 but it needs a memory number and should be opt-in until it has one); the overlap report, repositioned.
 
@@ -648,10 +648,10 @@ Dependency-ordered. An item lists what it needs before it can start.
 | A1 | Canonical root everywhere (`realpathSync.native`, drive-letter case, NFC) + fail-closed check "an instrumented module id starts with ROOT" in the collector; regression tests with a symlinked root and a differently-cased root (N1) | – | S |
 | A2 | `clean` runs must not touch `dirtyTests`/`failing` (N2); test | – | S |
 | A3 | One content hash, BOM/CRLF-normalised, in collector, analyzer, daemon (N3); test with a CRLF checkout | – | S |
-| A4 | `env.json`: one merge function owned by vm-guard, daemon calls it (N4); or S3 makes this moot | – | S |
+| A4 | `env.json`: one merge function owned by vitest-guard, daemon calls it (N4); or S3 makes this moot | – | S |
 | A5 | Lock: compare-and-delete on stale takeover, store process start time next to the PID (N5); guarded map load (N9) | – | S |
 | A6 | Correct `engines` (Node ≥ 22.12 everywhere, or guard the two APIs) and peer ranges `vitest >=5.1 <6` (N7) | – | S |
-| A7 | **Make CI real**: npm workspace + one lockfile; jobs for every package on Linux/Windows/macOS; vm-guard gets `devDependencies`; skipped-because-missing counts as failure; bundle freshness; `cargo fmt`/`clippy`; oxlint. Fix what Windows and macOS then show | A6 | M (+ unknown fallout, budget M more) |
+| A7 | **Make CI real**: npm workspace + one lockfile; jobs for every package on Linux/Windows/macOS; vitest-guard gets `devDependencies`; skipped-because-missing counts as failure; bundle freshness; `cargo fmt`/`clippy`; oxlint. Fix what Windows and macOS then show | A6 | M (+ unknown fallout, budget M more) |
 
 ### Phase B — decide scope, then build the structure once
 
@@ -687,7 +687,7 @@ with tpfs; Czech documentation.
 `A7 → B1 → B3 → B4 → C5` is the long pole: about 8–10 working weeks for one engineer **[E]**, with B2, B5, B6
 and C1–C4 fitting alongside for a second person or adding about 6 weeks in sequence. C3 is calendar-bound and
 should start today. Phase A alone (≈ 2 weeks including the first Windows fallout) is enough to start a
-**read-only pilot of vm-guard** with colleagues: it has the strongest evidence, the fewest couplings, needs no
+**read-only pilot of vitest-guard** with colleagues: it has the strongest evidence, the fewest couplings, needs no
 map and no analyzer binary, and none of N1–N3 touch it.
 
 ### Go / no-go for 1.0
@@ -713,9 +713,9 @@ map and no analyzer binary, and none of N1–N3 touch it.
 | 1 | P0 | Root path identity is not canonical: a symlinked (or differently spelled) root makes `affected` miss a failing test with `runAll:false` — reproduced | N1 |
 | 2 | P0 | A clean (uninstrumented) run marks every passing test dirty; the next affected run is a full run — reproduced | N2 |
 | 3 | P0 | Vitest coupling grew from 25 to 44 touch points; 11 fail silently with a wrong answer; the config-mutation block exists three times; no adapter, no probes | §1 |
-| 4 | P0 | CI has never run, covers 2 of 6 packages; vm-guard cannot run its tests from a clean clone; nothing has run on Windows or macOS | §4.1, N8 |
+| 4 | P0 | CI has never run, covers 2 of 6 packages; vitest-guard cannot run its tests from a clean clone; nothing has run on Windows or macOS | §4.1, N8 |
 | 5 | P1 | Three content-hash definitions; with Git line-ending conversion `vto affected --git` degrades to importer-level selection for every changed file — reproduced | N3 |
-| 6 | P1 | `env.json` has two writers with different rules; the daemon erases vm-guard's sticky evidence; two different static classifiers | N4 |
+| 6 | P1 | `env.json` has two writers with different rules; the daemon erases vitest-guard's sticky evidence; two different static classifiers | N4 |
 | 7 | P1 | Contracts have no single source of truth: 5 raw readers with 3 file-selection rules, 2 stored-map forms, 2 version fields, undocumented `env`/`sig` records, selection semantics split between Rust and JS, two git drivers | §2 |
 | 8 | P1 | `engine.mjs` is a 1,050-line, 55-method class with an untyped 40-field run object; lock takeover race; up to five warm Vitest processes with no memory budget | §3.1, §3.3, N5 |
 | 9 | P1 | Daemon map is absolute-path and case-exact; the folding helper is unused; `.vto/` cannot move between checkouts or CI agents | N6 |

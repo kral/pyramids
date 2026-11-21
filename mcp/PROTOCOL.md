@@ -104,7 +104,7 @@ chain joined by ` > `). Filters are typed objects – there is no way to pass Vi
 | `slow_tests` | `file`, `limit`, `cursor` | `{withoutUniqueCoverage, totalMs, tests[]{id,ms,blocks}}` |
 | `slow_imports` | `file` (test file → its unused imports), `limit`, `cursor` | `{modules[]{module,loadMsTotal,loadedBy,exercisedBy}, unusedImports?}` |
 | `suggest_env` | `file` prefix, `limit`, `cursor` | `{candidates[]{file,env,tests}, probedFiles}` |
-| `vm_guard_status` | – | `{enabled, mode, pool, quarantined{…}, conflicts, lastRun, dirtyStarts}` |
+| `vitest_guard_status` | – | `{enabled, mode, pool, quarantined{…}, conflicts, lastRun, dirtyStarts}` |
 | `savings` | `since` (`30d`, `12h`, `90m`) | aggregate, see SAVINGS.md |
 | `record_tokens` | `tool`, `tokens`, `runId` | `{ok}` (MCP server bookkeeping) |
 | `subscribe` | `topics` (array of `run`, `test`, `coverage` and/or event names; default all), `replay` (default true: replays the active run's log), `coverageCap` (ids per line, 1–50, default 3) | `{subscribed, activeRun}` |
@@ -128,7 +128,7 @@ Topics: `run` = `run-start`, `failure`, `progress`, `fix-rerun`, `run-end`, `tas
 carry `"replay": true`. All strings are redacted and stripped of control/bidi characters.
 
 ```jsonc
-{"ev":"run-start","runId":"r12","kind":"affected|full|tests|failed","total":412,"files":38,"pool":"vm-guard:vm","lane":"main|fix|clean",
+{"ev":"run-start","runId":"r12","kind":"affected|full|tests|failed","total":412,"files":38,"pool":"vitest-guard:vm","lane":"main|fix|clean",
  "projects":{"dom":{"files":30,"tests":350},"node":{"files":8,"tests":62}}}
 {"ev":"file-start","runId":"r12","file":"src/Button.test.tsx","project":""}
 {"ev":"test","runId":"r12","id":"src/Button.test.tsx:42 > Button > disabled","state":"pass|fail|skip","ms":12}
@@ -177,7 +177,7 @@ Notes against MCP.md (additive, same names):
 ← {"id":2,"result":{"subscribed":["run","coverage"],"activeRun":null}}
 → {"id":3,"method":"start_run","params":{"kind":"affected"}}
 ← {"id":3,"result":{"v":"vto/1","runId":"r7","total":64,"files":6,"kind":"affected","runAll":false,"reasons":[],"status":"queued","stale":false,"mapAgeS":12}}
-← {"ev":"run-start","runId":"r7","kind":"affected","total":64,"files":6,"pool":"vm-guard:vm"}
+← {"ev":"run-start","runId":"r7","kind":"affected","total":64,"files":6,"pool":"vitest-guard:vm"}
 ← {"ev":"failure","runId":"r7","seq":1,…}
 ← {"ev":"coverage","runId":"r7","file":"src/Button.tsx",…,"complete":false}
 ← {"ev":"run-end","runId":"r7","passed":63,"failed":1,"skipped":0,"ms":2310}
@@ -194,9 +194,9 @@ It takes the endpoint slot of `<dir>` (stop a real daemon for that root first), 
 `hello`, `subscribe`, `status`, `run_status`, `next_failures`, `start_run`, `cancel_run`, `coverage`,
 `stop`, and emits every event type above (incl. grouped failures, `fix-rerun` and `coverage`).
 
-## 9. Environment classification file `.vm-guard/run/env.json` (format `vto-env/1`)
+## 9. Environment classification file `.vitest-guard/run/env.json` (format `vto-env/1`)
 
-Written by the daemon after every instrumented run (and before a group-lane run); read by vm-guard
+Written by the daemon after every instrumented run (and before a group-lane run); read by vitest-guard
 `mode: 'auto'`. Paths are relative to the project root with forward slashes. Entries of other producers
 are kept; a measured entry is never replaced by a static one.
 
@@ -222,7 +222,7 @@ are kept; a measured entry is never replaced by a static one.
 - `group` = `node` when the configured environment is not a DOM environment or the file never touched the DOM.
 
 **Daemon lanes.** With `pool: "auto"` (default) the daemon keeps two warm main lanes, `dom` (default pool
-vm-guard `vm`; configs with `test.projects` get `vmThreads` per project) and `node` (default `forks`), runs
+vitest-guard `vm`; configs with `test.projects` get `vmThreads` per project) and `node` (default `forks`), runs
 them **in parallel** inside one run (one `runId`, merged events; `run-start.lane` is `main`, `pool` is
 `dom:…+node:…`, `run-start.projects` keys are `<project>:<group>` or the group name for the root project,
 the same strings as `file-start.project`; the run summary has `laneMs` per lane). Routing: a file goes to

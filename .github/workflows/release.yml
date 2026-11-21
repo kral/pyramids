@@ -84,7 +84,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out
-          for dir in . vm-guard mcp tui; do npm pack "./$dir" --pack-destination out --ignore-scripts; done
+          for dir in . vitest-guard mcp tui; do npm pack "./$dir" --pack-destination out --ignore-scripts; done
           ls -l out
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with: { name: npm-tarballs, path: out/, retention-days: 7, if-no-files-found: error }

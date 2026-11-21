@@ -26,8 +26,8 @@ const cases = [
   ['vto hook claude --help', [...VTO, 'hook', 'claude', '--help'], /vto hook claude/],
   ['verify --help', ['verify/verify.mjs', '--help'], /vto verify/],
   ['verify --version', ['verify/verify.mjs', '--version'], /^vto verify \d/],
-  ['vm-guard --help', ['vm-guard/bin/vm-guard.mjs', '--help'], /vm-guard/],
-  ['vm-guard --version', ['vm-guard/bin/vm-guard.mjs', '--version'], /\d+\.\d+\.\d+/],
+  ['vitest-guard --help', ['vitest-guard/bin/vitest-guard.mjs', '--help'], /vitest-guard/],
+  ['vitest-guard --version', ['vitest-guard/bin/vitest-guard.mjs', '--version'], /\d+\.\d+\.\d+/],
   ['vto-daemon --help', ['mcp/bin/vto-daemon.mjs', '--help'], /vto-daemon|daemon/],
 ];
 // entry points that need a build / an install: checked when present, required with VTO_REQUIRE_INTEGRATION=1
@@ -35,7 +35,7 @@ const optional = [
   ['vto-ui --help', 'tui/dist/cli.js', ['tui/bin/vto-ui.mjs', '--help'], /vto ui/],
   ['vto-ui --version', 'tui/dist/cli.js', ['tui/bin/vto-ui.mjs', '--version'], /^vto-ui \d/],
   ['vto ui --help (through the dispatcher)', 'tui/dist/cli.js', [...VTO, 'ui', '--help'], /Event source/],
-  ['vto guard --help (through the dispatcher)', 'vm-guard/bin/vm-guard.mjs', [...VTO, 'guard', '--help'], /commands/],
+  ['vto guard --help (through the dispatcher)', 'vitest-guard/bin/vitest-guard.mjs', [...VTO, 'guard', '--help'], /commands/],
 ];
 const strict = process.env.VTO_REQUIRE_INTEGRATION === '1';
 let failed = 0, ran = 0;

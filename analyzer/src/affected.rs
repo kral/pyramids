@@ -206,14 +206,14 @@ pub struct AffectedOpts {
     pub fs_readers: Vec<String>,
 }
 
-/// `.vm-guard/` holds volatile run state (durations, pollution, plans, caches) – ignored, except the
+/// `.vitest-guard/` holds volatile run state (durations, pollution, plans, caches) – ignored, except the
 /// two files that change which tests can run together.
 pub const DEFAULT_IGNORE: &[&str] = &[
     "*.md",
     "docs/**",
-    ".vm-guard/**",
-    "!.vm-guard/incompatible.json",
-    "!.vm-guard/conflicts.json",
+    ".vitest-guard/**",
+    "!.vitest-guard/incompatible.json",
+    "!.vitest-guard/conflicts.json",
 ];
 
 /// gitignore-like evaluation of an ordered rule list (last match wins, `!` negates).
@@ -263,8 +263,8 @@ pub const DEFAULT_RUN_ALL: &[&str] = &[
     ".gitattributes",
     ".gitmodules",
     ".vto/**",
-    ".vm-guard/incompatible.json",
-    ".vm-guard/conflicts.json",
+    ".vitest-guard/incompatible.json",
+    ".vitest-guard/conflicts.json",
     "**/__mocks__/**",
     "vitest.*",
     ".nvmrc",
@@ -920,16 +920,16 @@ new file mode 100644
     }
 
     #[test]
-    fn vm_guard_state_is_ignored_except_incompatible() {
+    fn vitest_guard_state_is_ignored_except_incompatible() {
         let o = AffectedOpts::default();
-        assert!(is_ignored(&o.ignore, ".vm-guard/durations.json"));
-        assert!(is_ignored(&o.ignore, ".vm-guard/run/x.json"));
-        assert!(!is_ignored(&o.ignore, ".vm-guard/incompatible.json"));
-        assert!(!is_ignored(&o.ignore, ".vm-guard/conflicts.json"));
+        assert!(is_ignored(&o.ignore, ".vitest-guard/durations.json"));
+        assert!(is_ignored(&o.ignore, ".vitest-guard/run/x.json"));
+        assert!(!is_ignored(&o.ignore, ".vitest-guard/incompatible.json"));
+        assert!(!is_ignored(&o.ignore, ".vitest-guard/conflicts.json"));
         let m = model();
-        let d = parse_diff("--- a/.vm-guard/durations.json\n+++ b/.vm-guard/durations.json\n@@ -1 +1 @@\n-a\n+b\n--- a/.vm-guard/incompatible.json\n+++ b/.vm-guard/incompatible.json\n@@ -1 +1 @@\n-a\n+b\n");
+        let d = parse_diff("--- a/.vitest-guard/durations.json\n+++ b/.vitest-guard/durations.json\n@@ -1 +1 @@\n-a\n+b\n--- a/.vitest-guard/incompatible.json\n+++ b/.vitest-guard/incompatible.json\n@@ -1 +1 @@\n-a\n+b\n");
         let a = affected(&m, &d, &o);
-        assert_eq!(a.ignored, vec![".vm-guard/durations.json"]);
+        assert_eq!(a.ignored, vec![".vitest-guard/durations.json"]);
         assert_eq!(a.run_all.len(), 1);
     }
 

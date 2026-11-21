@@ -1,6 +1,6 @@
 # vto contracts â€“ binding decisions (WP1, 2026-11-21)
 
-These rules apply to every package (analyzer, collector, daemon/MCP, vm-guard, TUI, verify).
+These rules apply to every package (analyzer, collector, daemon/MCP, vitest-guard, TUI, verify).
 Schemas and fixtures that pin them live next to this file (`raw-2.schema.json`,
 `map-2.schema.json`, `fixtures/`). Where existing data differs, the "compatibility" line of
 each section says what a reader must still accept.
@@ -106,11 +106,11 @@ Fixture: `contracts/fixtures/path-identity.json` (`a`, `b`, `caseInsensitive` â†
 | code | name | meaning | who can return it |
 |---|---|---|---|
 | 0 | ok | the command did what was asked; for selection: the printed selection is complete (may be empty) | all |
-| 1 | test failures | tests ran and at least one failed (genuine failures; includes FLAKY that was not explained) | `vto run*`, `vto-daemon run*`, `vm-guard run/check`, `verify` (a refuted claim) |
+| 1 | test failures | tests ran and at least one failed (genuine failures; includes FLAKY that was not explained) | `vto run*`, `vto-daemon run*`, `vitest-guard run/check`, `verify` (a refuted claim) |
 | 2 | usage / config error | bad arguments, missing or unreadable input (**a mistyped map path is 2, not 3**), unsupported format version, broken config, internal precondition | all |
 | 3 | run all | the tool cannot give a safe selection: run the whole suite. Only for *valid* input that cannot answer (stale / inconsistent map, unknown files, config change, git error) | `vto affected`, `vto-daemon affected/run-affected` |
-| 4 | new quarantine | the run changed the quarantine / conflict state (`incompatible.json`, `conflicts.json`): commit it and re-run | `vm-guard check/hunt/verify` (false red) |
-| 5 | false green | a test passed in the fast mode and fails isolated: the fast mode's green cannot be trusted | `vm-guard verify`, `vto verify` gates |
+| 4 | new quarantine | the run changed the quarantine / conflict state (`incompatible.json`, `conflicts.json`): commit it and re-run | `vitest-guard check/hunt/verify` (false red) |
+| 5 | false green | a test passed in the fast mode and fails isolated: the fast mode's green cannot be trusted | `vitest-guard verify`, `vto verify` gates |
 
 Rules:
 - Precedence when several apply: **5 > 1 > 4 > 3 > 2 > 0** is *not* used; a tool returns the
@@ -122,7 +122,7 @@ Rules:
   "failed, run all".
 - `--help` and `--version` exit 0 and print to stdout. Usage errors print the message plus one
   line "see --help" to stderr (not the whole usage text).
-- Legacy codes to remove: vm-guard `2 = NEW_QUARANTINE`, `3 = FALSE_GREEN`, `64 = USAGE`;
+- Legacy codes to remove: vitest-guard `2 = NEW_QUARANTINE`, `3 = FALSE_GREEN`, `64 = USAGE`;
   `vto-daemon` `usage(64)`.
 
 Machine-readable outputs carry the same information (`"runAll": true`, `"exit": 3`) so that an

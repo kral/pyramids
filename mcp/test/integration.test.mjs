@@ -128,7 +128,7 @@ test('daemon: failures stream before run end, fix loop re-runs a fixed test duri
 
 // token budget per tool (MCP.md: summaries ≤ ~300 tokens; hard cap per response 8000 chars)
 const BUDGET = { affected_tests: 300, run_affected: 450, run_tests: 450, why_failed: 600, daemon_status: 300, start_run: 150, next_failures: 450, run_status: 450,
-  test_overlap: 600, next_task: 450, list_tasks: 300, complete_task: 150, enqueue_task: 450, slow_tests: 450, slow_imports: 450, suggest_env: 300, coverage_of: 400, tests_for_line: 400, vm_guard_status: 250, savings_report: 600 };
+  test_overlap: 600, next_task: 450, list_tasks: 300, complete_task: 150, enqueue_task: 450, slow_tests: 450, slow_imports: 450, suggest_env: 300, coverage_of: 400, tests_for_line: 400, vitest_guard_status: 250, savings_report: 600 };
 
 test('MCP over stdio: every tool answers within its token budget', { skip, timeout: 180000 }, async () => {
   const root = copyFixture();
@@ -137,7 +137,7 @@ test('MCP over stdio: every tool answers within its token budget', { skip, timeo
   await client.connect(transport);
   try {
     const names = (await client.listTools()).tools.map((t) => t.name);
-    for (const t of ['affected_tests', 'run_affected', 'run_tests', 'why_failed', 'daemon_status', 'start_run', 'next_failures', 'run_status', 'cancel_run', 'rerun_failed', 'test_overlap', 'slow_tests', 'slow_imports', 'suggest_env', 'coverage_of', 'tests_for_line', 'vm_guard_status', 'savings_report'])
+    for (const t of ['affected_tests', 'run_affected', 'run_tests', 'why_failed', 'daemon_status', 'start_run', 'next_failures', 'run_status', 'cancel_run', 'rerun_failed', 'test_overlap', 'slow_tests', 'slow_imports', 'suggest_env', 'coverage_of', 'tests_for_line', 'vitest_guard_status', 'savings_report'])
       assert.ok(names.includes(t), t);
     assert.ok(!names.includes('verify'));
     const call = async (name, args = {}) => {
@@ -167,7 +167,7 @@ test('MCP over stdio: every tool answers within its token budget', { skip, timeo
     await call('slow_tests', {});
     await call('slow_imports', {});
     await call('suggest_env', {});
-    await call('vm_guard_status');
+    await call('vitest_guard_status');
     const q = await call('enqueue_task', { runId: r.runId, group: r.failures[0].group });
     assert.ok(q.task.taskId);
     await call('list_tasks');

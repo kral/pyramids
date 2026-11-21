@@ -3,7 +3,7 @@
 #
 #   lint       node --check on every script, repo hygiene (samples, pinned actions, docs)
 #   analyzer   cargo test + release build on 5 targets, packed as @kral/vto-analyzer-* artifacts
-#   test       all packages (collector, daemon/MCP, TUI, vm-guard, verify) + CLI smoke test on
+#   test       all packages (collector, daemon/MCP, TUI, vitest-guard, verify) + CLI smoke test on
 #              Linux / macOS / Windows with Node 22.22.2 (declared minimum: jsdom 31 needs ^22.22.2 || >=24.15), 22 and 24
 #   odd-path   the same checkout under "Můj projekt ěš/" (space + diacritics) on 3 OS
 #
@@ -111,9 +111,9 @@ jobs:
       - name: daemon + MCP
         if: ${{ !cancelled() }}
         run: node .github/scripts/ci.mjs mcp
-      - name: vm-guard
+      - name: vitest-guard
         if: ${{ !cancelled() }}
-        run: node .github/scripts/ci.mjs vm-guard
+        run: node .github/scripts/ci.mjs vitest-guard
       - name: verify
         if: ${{ !cancelled() }}
         run: node .github/scripts/ci.mjs verify
