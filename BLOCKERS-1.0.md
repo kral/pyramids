@@ -78,10 +78,11 @@ Owner = the work package that fixes it (WP1–WP5 below). Status is tracked in t
 | P-6 | run where no worker starts reports green (`ran 0, failed 0`) | WP3 (+WP4 for vitest-guard runner) |
 | P-8 | perf claims without data in repo → commit `perf/data/` with raw measurements; collector overhead under vm pools is +12 %, not ~3 % | WP5 (docs) |
 
-## Windows: native crash under a non-ASCII path (open)
+## Windows: native crash under a non-ASCII path (fixed)
 
-`collector/test/collector.test.mjs` exits with `0xC0000409` (STATUS_STACK_BUFFER_OVERRUN) about 0.4 s after start when the
-repository lives in a directory with diacritics (`Můj projekt ěš`, CI job "path with a space and diacritics (windows-2025)").
-The same file passes in the normal Windows path. No subtest starts, so the crash is at module load; the suspect is a
-native addon (oxc-parser binding) loaded from a non-ASCII path. Next step: reproduce with a bare
-`node -e "import('oxc-parser')"` from that directory, then report upstream or fall back to the wasm build.
+`collector/test/collector.test.mjs` aborted with `0xC0000409` when the repository lived in a directory with diacritics.
+Cause: `fs.cpSync(dir, dst, { recursive: true })` without options takes Node's native implementation, which aborts the
+process on Windows for a non-ASCII source path (no stderr). The test passes a `filter` now, which keeps the JS
+implementation. Product code copies no directories with `cpSync`; keep it that way, or pass a `filter`.
+The same job also exposed `vto verify --root` given as a Windows 8.3 short name (`RUNNER~1`): it is canonicalized with
+`realpathSync.native` now, as the collector records `meta.root`.
