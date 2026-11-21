@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 // Regression tests for SECURITY-REVIEW F8 (PoC 8), F9 (PoC 9), F12 and the projects support (ARCHITECTURE #10).
 // Integration tests spawn real Vitest (devDependency); see test/helpers.mjs for the opt-out.
 import { test } from 'node:test';
@@ -8,7 +9,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { validateTestPaths, privateTmp, readOwnedFile, validEdges, pickKnown } from '../src/safety.mjs';
 
-const here = path.dirname(new URL(import.meta.url).pathname);
+const here = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 import { integration, vitestDir } from './helpers.mjs'; // no silent skip: fails without vitest unless VM_GUARD_TEST_NO_INTEGRATION=1
 

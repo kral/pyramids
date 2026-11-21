@@ -1,4 +1,5 @@
 // Self-test for plugin.mjs instrumentation: tricky TS/TSX syntax must stay valid and keep semantics.
+import { fileURLToPath } from 'node:url';
 // node collector/selftest.mjs
 import { instrument } from './plugin.mjs';
 import { parseSync } from 'oxc-parser';
@@ -103,7 +104,7 @@ console.log('semantics + unicode ok');
   const { tmpdir, homedir } = await import('node:os');
   const { spawnSync } = await import('node:child_process');
   const path = (await import('node:path')).default;
-  const runner = new URL('./run-raw.mjs', import.meta.url).pathname;
+  const runner = fileURLToPath(new URL('./run-raw.mjs', import.meta.url));
   const proj = mkdtempSync(path.join(tmpdir(), 'vto-sec-'));
   mkdirSync(path.join(proj, 'src'));
   writeFileSync(path.join(proj, 'src', 'app.ts'), 'export const x = 1;\n');

@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 // mode 'auto': classification, generated dom/node projects, stored modes, probe + self-healing of misclassified files.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -7,7 +8,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { staticGroup, classifyFiles, listTestFiles, readEnvEvidence } from '../src/auto.mjs';
 
-const here = path.dirname(new URL(import.meta.url).pathname);
+const here = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 import { integration, vitestDir } from './helpers.mjs'; // no silent skip: fails without vitest unless VM_GUARD_TEST_NO_INTEGRATION=1
 

