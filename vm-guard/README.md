@@ -25,13 +25,18 @@ fails 308–311 (see `vi.mock` below).
 RTL 16, jsdom 31, happy-dom 21, MSW 3, i18next 27, TanStack Query 5, better-sqlite3, Node 22, 2 shared cores.
 Mitigations exist **only** for risks that reproduced or that the Vitest docs and source confirm.
 
+## Documentation
+
+Full documentation (getting started, modes, CLI, configuration, internals, CI, troubleshooting, security,
+limitations): [../docs/vm-guard/index.md](../docs/vm-guard/index.md).
+
 ## Quick start
 
 ```ts
 // vitest.config.ts
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
-import { defineVmGuardConfig } from 'vm-guard';
+import { defineVmGuardConfig } from '@kral/vm-guard';
 
 export default defineVmGuardConfig(
   defineConfig({ plugins: [react()], test: { environment: 'jsdom', setupFiles: ['./test/setup.ts'] } }),
@@ -40,7 +45,7 @@ export default defineVmGuardConfig(
 ```
 
 `defineVmGuardConfig`:
-- puts `vm-guard/setup` **first** in `setupFiles` (one bundled module; every setup module costs a fetch and an
+- puts `@kral/vm-guard/setup` **first** in `setupFiles` (one bundled module; every setup module costs a fetch and an
   evaluation per test file in vm pools);
 - sets the pool. `vm` → `vmThreads` plus a sane `vmMemoryLimit`. `shared` → `threads` + `isolate:false`;
 - quarantine: files in `.vm-guard/incompatible.json` (for the mode) run in a sibling `forks` project. Without a
@@ -140,7 +145,7 @@ and picks a mode per group:
 | `resetModules` | `true` | shared: `vi.resetModules()` after every file. **Required for `vi.mock` correctness** |
 | `integrity` | `true` | shared: integrity check of `expect` / matchers / `vi` at file start (see Security) |
 | `diag` | CLI only | pollution diff at file end, residual after reset, node_modules export-state scan (costs CPU) |
-| `setup` | `'file'` | `'import'`: your first setup file starts with `import 'vm-guard/setup'` (one module less per file) |
+| `setup` | `'file'` | `'import'`: your first setup file starts with `import '@kral/vm-guard/setup'` (one module less per file) |
 | `alwaysProjects` | `false` | create `projects` even without a quarantine |
 | `sharedPool` | `'threads'` | `'forks'` for shared mode |
 | `ignoreModules` | `['stylis/…']` | node_modules paths whose exports hold parser scratch state (not reported as leaks) |
@@ -166,7 +171,7 @@ node <path-to-vto>/vm-guard/bin/vm-guard.mjs calibrate [--sample N]
   timeouts under load) and not quarantined (`--no-confirm` skips this). `--prune`
   releases quarantined files that pass in the fast mode again.
 - **verify**: runs a sample both fast and isolated and compares every test. A *false green* (passes fast, fails
-  isolated) exits with 3. Real example: the realm shims make vm more tolerant than forks + jsdom.
+  isolated) exits with 5. Real example: the realm shims make vm more tolerant than forks + jsdom.
 - **plan / run**: the shared-mode planner (below). `run` is self-healing.
 - **hunt**: bisects the files that ran before the victim in the same worker (order from the run log).
 - **scan**: static scan for shared-mode risks. `--quarantine` quarantines them directly.
@@ -176,8 +181,10 @@ node <path-to-vto>/vm-guard/bin/vm-guard.mjs calibrate [--sample N]
   result differs from forks, and recommends a mode per project: the fastest mode without mismatches, or forks when
   it saves less than 10 %. Results go to `.vm-guard/run/compare.json`.
 
-Exit codes: `0` ok, `1` real failures (also fail isolated), `2` new quarantine or conflict (commit
-`.vm-guard/incompatible.json` / `conflicts.json`), `3` false green in `verify`, `64` usage error.
+Exit codes (contracts/DECISIONS.md D3): `0` ok, `1` test failures (genuine, flaky or unexplained), `2` usage or config
+error (e.g. config not wrapped), `4` quarantine/conflict state changed (commit `.vm-guard/incompatible.json` /
+`conflicts.json` and re-run), `5` false green in `verify`. (`3` = run all belongs to vto's selection tools and is
+not returned.) `vm-guard --help` and `vm-guard <command> --help` list every option.
 
 Files:
 - **commit** only `.vm-guard/incompatible.json` and `.vm-guard/conflicts.json` (protect them with CODEOWNERS). They
@@ -365,10 +372,10 @@ of them pass with a longer timeout; they are load-induced.
    pure-node ones).
 1. `VM_GUARD_MODE=vm node <path-to-vto>/vm-guard/bin/vm-guard.mjs verify --sample all` locally; review false greens and false reds.
 2. `node <path-to-vto>/vm-guard/bin/vm-guard.mjs check --mode vm` and commit `.vm-guard/incompatible.json`.
-3. PR pipeline: plain `vitest run` with `defineVmGuardConfig` (vm + quarantine in forks). Exit 2 from `check` on a
+3. PR pipeline: plain `vitest run` with `defineVmGuardConfig` (vm + quarantine in forks). Exit 4 from `check` on a
    PR means someone added a vm-incompatible test.
 4. Nightly: `VM_GUARD_MODE=isolated vitest run` (whole suite isolated), plus `node <path-to-vto>/vm-guard/bin/vm-guard.mjs verify --sample 500`
-   (exit 3 = false green), plus `node <path-to-vto>/vm-guard/bin/vm-guard.mjs check --prune`. Security gates always run isolated.
+   (exit 5 = false green), plus `node <path-to-vto>/vm-guard/bin/vm-guard.mjs check --prune`. Security gates always run isolated.
 5. Shared mode for local and pre-push runs: `node <path-to-vto>/vm-guard/bin/vm-guard.mjs scan`, then `node <path-to-vto>/vm-guard/bin/vm-guard.mjs run`. Promote it to CI once a
    nightly `verify --mode shared --sample all` has stayed clean for a while.
 

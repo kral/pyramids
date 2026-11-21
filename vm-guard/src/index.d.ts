@@ -1,7 +1,11 @@
 import type { ViteUserConfig } from 'vitest/config';
 export interface VmGuardOptions {
-  /** 'vm' = pool vmThreads (default), 'shared' = threads + isolate:false. Env VM_GUARD_MODE=vm|shared|isolated|off overrides. */
-  mode?: 'vm' | 'shared' | 'auto';
+  /**
+   * 'vm' = pool vmThreads (default), 'shared' = threads + isolate:false, 'auto' = per group/project (see autoModes),
+   * 'isolated' = plain forks with isolation (guard layer only, no speed-up).
+   * Env VM_GUARD_MODE=vm|shared|auto|isolated|off overrides; 'off' returns your config untouched (env only, not a config value).
+   */
+  mode?: 'vm' | 'shared' | 'auto' | 'isolated';
   /** mode 'auto': per group/project mode override, e.g. { dom: 'vm', node: 'shared' } ('vm' | 'shared' | 'isolated') */
   autoModes?: Record<string, 'vm' | 'shared' | 'isolated'>;
   /** mode 'auto' with user projects: keep explicit project pools */
@@ -17,12 +21,31 @@ export interface VmGuardOptions {
   onDirty?: 'warn' | 'error' | 'silent';
   /** duplicate React check: true = throw (default), 'warn', false */
   react?: boolean | 'warn';
-  realm?: boolean; probes?: boolean; restoreEnv?: boolean; reset?: boolean; log?: boolean;
+  /** realm shims (default true) */
+  /** extra packages (besides the built-in list: react-dom, @testing-library/react, @tanstack/react-query, ...) whose own `react` copy the duplicate-React check compares with the root's */
+  reactPackages?: string[];
+  /** realm shims in vm mode (default true) */
+  realm?: boolean;
+  /** shared mode: probes that detect leaked state between files (default true) */
+  probes?: boolean;
+  /** restore process.env after each file (default true) */
+  restoreEnv?: boolean;
+  /** reset hooks between files (default true) */
+  reset?: boolean;
+  /** write run logs to .vm-guard/run/logs (default true) */
+  log?: boolean;
+  /** shared mode: integrity check of the assertion API (expect/matchers) between files (default true) */
+  integrity?: boolean;
+  /** shared mode: add the tail setup file that marks the end of the setup files (default true; needs setupFiles to run in list order) */
+  tail?: boolean;
+  /** shared mode: print a warning when no clean `vm-guard verify --mode shared` is recorded for this commit/config (default true). Also VM_GUARD_VERIFY_WARNING=0. */
+  verifyWarning?: boolean;
   /** shared mode: vi.resetModules() after every file (default true). Without it a module that a cached
    *  importer loaded first keeps that binding: vi.mock of a transitively imported module silently stops applying. */
   resetModules?: boolean;
   /** diagnostics (pollution diff at file end, residual after reset, node_modules export-state scan); default: on only under the vm-guard CLI (VM_GUARD_DIAG=1) */
   diag?: boolean; moduleState?: boolean; detectPollution?: boolean;
+  /** process event names (e.g. 'SIGINT') whose added listeners are not reported as a leak */
   ignoreListeners?: string[];
   /** node_modules paths (e.g. 'stylis/dist/umd/stylis.js') whose exported state is scratch state; also learned automatically after 3 consecutive changes */
   ignoreModules?: string[];
@@ -36,3 +59,13 @@ export declare function defineVmGuardConfig(config: ViteUserConfig, options?: Vm
 export declare function autoMemoryLimit(maxWorkers: number, o?: { totalmem?: number; heapLimit?: number }): number;
 export declare function readQuarantine(root: string, mode: string, file?: string): string[];
 export declare const SETUP_FILE: string;
+/** last setup file in shared mode (marks the end of the setup files) */
+export declare const SETUP_TAIL_FILE: string;
+/** Path of a vm-guard setup file as Vitest of the project at `root` can load it (a copy in node_modules/.vm-guard/ when installed through a symlink). */
+export declare function setupFileFor(root: string, file?: string): string;
+export declare const DEFAULT_INCLUDE: string[];
+export declare const DEFAULT_EXCLUDE: string[];
+/** Raw quarantine file { version, vm, shared } (unvalidated). */
+export declare function readQuarantineFile(root: string, file?: string): Record<string, unknown>;
+export declare function readJson<T>(file: string, fallback: T): T;
+export declare const VmGuardSequencer: unknown;

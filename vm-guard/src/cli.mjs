@@ -15,12 +15,19 @@ import { findConfigFile, gitHead, configKey } from './verifystate.mjs';
 // 4 quarantine/conflict state changed | 5 false green. (3 = "run all" belongs to selection tools.)
 export const EXIT = { OK: 0, FAIL: 1, USAGE: 2, NEW_QUARANTINE: 4, FALSE_GREEN: 5 };
 
+// flags that never take a value (so `vm-guard --verbose check` does not swallow the command)
+const BOOLEAN_FLAGS = new Set(['verbose', 'help', 'version', 'prune', 'compare', 'commit-state', 'quarantine', 'diag', 'reset-modules', 'confirm', 'hunt', 'plan', 'heal', 'replan', 'clean', 'calibrate', 'write']);
 function parseArgs(argv) {
   const o = { _: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a.startsWith('--no-')) o[a.slice(5)] = false;
-    else if (a.startsWith('--')) { const [k, v] = a.slice(2).split('='); if (v !== undefined) o[k] = v; else if (argv[i + 1] && !argv[i + 1].startsWith('--')) o[k] = argv[++i]; else o[k] = true; }
+    else if (a.startsWith('--')) {
+      const [k, v] = a.slice(2).split('=');
+      if (v !== undefined) o[k] = v;
+      else if (!BOOLEAN_FLAGS.has(k) && argv[i + 1] && !argv[i + 1].startsWith('--')) o[k] = argv[++i];
+      else o[k] = true;
+    }
     else o._.push(a);
   }
   return o;
@@ -334,7 +341,9 @@ async function prune(c, q, mode) {
 //   shuffle   one worker per project, seeded shuffle (--seed)
 //   planned   shared mode: the planner's lanes (`vm-guard run`)
 const VERIFY_ORDERS = ['gate', 'forward', 'reversed', 'shuffle', 'planned'];
+const badNumber = (o, k) => o[k] !== undefined && o[k] !== 'all' && !(Number.isFinite(Number(o[k])) && Number(o[k]) >= 1);
 export async function cmdVerify(c, o) {
+  for (const k of ['sample', 'seed']) if (badNumber(o, k) && !(k === 'seed' && Number(o.seed) === 0)) { console.error(`[vm-guard] verify: --${k} must be a positive number${k === 'sample' ? ' or "all"' : ''}, got ${JSON.stringify(String(o[k]))}\nsee --help`); return EXIT.USAGE; }
   const all = listFiles(c);
   const n = o.sample === 'all' || !o.sample ? all.length : Number(o.sample);
   let seed = Number(o.seed || 1);
@@ -345,6 +354,11 @@ export async function cmdVerify(c, o) {
   const groups = auto ? load(c, 'auto.json', {}).groups || {} : null;
   const modeOf = (project) => (auto ? groups[project] : mode);
   const orders = o.orders ? String(o.orders).split(',').map((s) => s.trim()).filter(Boolean) : mode === 'vm' ? ['gate', 'reversed'] : ['gate', 'forward', 'reversed'];
+  // --no-plan: never run the planner's lanes (the 'planned' order); asking for exactly that is a contradiction
+  if (o.plan === false && orders.includes('planned')) {
+    if (o.orders) { const rest = orders.filter((x) => x !== 'planned'); if (!rest.length) { console.error('[vm-guard] verify: --orders planned contradicts --no-plan\nsee --help'); return EXIT.USAGE; } say('verify: --no-plan: skipping the planned order'); orders.splice(0, orders.length, ...rest); }
+    else orders.splice(orders.indexOf('planned'), 1);
+  }
   const bad = orders.filter((x) => !VERIFY_ORDERS.includes(x));
   if (bad.length || !orders.length) { console.error(`[vm-guard] verify: unknown --orders ${bad.join(',')} (known: ${VERIFY_ORDERS.join(', ')})\nsee --help`); return EXIT.USAGE; }
   if (orders.includes('planned') && mode !== 'shared') { console.error('[vm-guard] verify: --orders planned needs --mode shared\nsee --help'); return EXIT.USAGE; }
@@ -441,6 +455,7 @@ export async function cmdVerify(c, o) {
 // environment setup (jsdom) and import cost, but a pure-node project can be SLOWER in vmThreads than in forks
 // (the real-world suite: dom -53.5 %, node +9.0 %). Measure per project instead of assuming.
 export async function cmdCompare(c, o) {
+  if (badNumber(o, 'sample')) { console.error(`[vm-guard] compare: --sample must be a positive number or "all", got ${JSON.stringify(String(o.sample))}\nsee --help`); return EXIT.USAGE; }
   clearRunLogs(c.runDir);
   const specs = listSpecs(c);
   const only = o.project ? String(o.project).split(',') : null;
@@ -498,7 +513,8 @@ export async function cmdCompare(c, o) {
 
 export async function cmdHunt(c, o) {
   const victim = o._[1];
-  if (!listFiles(c).includes(victim)) { say(`hunt: ${JSON.stringify(String(victim))} is not a test file of this project`); return EXIT.USAGE; }
+  if (!victim) { console.error('[vm-guard] hunt: missing <victim> (a test file, e.g. vm-guard hunt src/a.test.ts)\nsee --help'); return EXIT.USAGE; }
+  if (!listFiles(c).includes(victim)) { console.error(`[vm-guard] hunt: ${JSON.stringify(String(victim).slice(0, 200))} is not a test file of this project (use the path as printed by vitest list, relative to the root, with /)\nsee --help`); return EXIT.USAGE; }
   const workers = readRunLogs(c.runDir);
   const preds = o.before ? o.before.split(',') : predecessors(workers, victim);
   const h = await hunt(c, victim, preds, 'shared');
@@ -540,26 +556,105 @@ export function migrateState(c) {
   if (moved) say(`moved ${moved} volatile file(s) from .vm-guard/ to .vm-guard/run/ (git-ignored); commit the removal. Only incompatible.json and conflicts.json${c.commitState ? ', durations.json and pollution.json' : ''} are meant to be committed.`);
 }
 
-const HELP = `usage: vm-guard <command> [--mode vm|shared] [--config file] [--root dir] [--verbose]
-commands (all of them need a config wrapped with defineVmGuardConfig):
-  check     run in the fast mode; failing files re-run in isolated forks, then explained:
-            fails on its own in the fast mode / only after another file -> .vm-guard/incompatible.json (shared: conflicts.json);
-            passes on a re-run under the same conditions -> FLAKY (exit 1)
-            [--prune] [--retries N=2] [--no-confirm] [--no-hunt] [--no-plan] [--compare] [--commit-state]
-  verify    compare per-test pass/fail of the fast mode with isolated forks, in several file orders
-            [--sample N|all] [--seed s] [--orders gate,forward,reversed,shuffle,planned] [--no-quarantine]
-            files with a false green are quarantined; the result is recorded for the shared-mode warning of \`vitest run\`
-  compare   per project: CPU of forks vs vm vs shared on a sample + mismatches -> recommended mode
-            [--sample N|all] [--project a,b] [--no-write]
-  calibrate quick compare (20 files/project) that writes .vm-guard/run/modes.json for mode 'auto'  [--sample N]
-  plan      conflict graph + lanes -> .vm-guard/run/plan.json   [--lanes N] [--vto-raw dir]
-  run       execute the plan (one shared worker per lane, isolated bucket in forks)  [--no-heal]
-  hunt      <victim> [--before a,b,c]  bisect the files that ran before it in the same shared worker
-  scan      static scan for shared-mode risks  [--quarantine]
+const EXIT_HELP = `exit codes (contracts/DECISIONS.md D3):
+  0  ok
+  1  test failures (genuine, flaky or unexplained failures; a refuted claim)
+  2  usage or config error (bad arguments, config not wrapped with defineVmGuardConfig, missing vitest)
+  3  run all (not returned by vm-guard; reserved for the selection tools of vto)
+  4  new quarantine: .vm-guard/incompatible.json / conflicts.json changed - commit it and re-run
+  5  false green: a test passes in the fast mode and fails in isolated forks (verify)`;
+const GLOBAL_OPTS = `global options:
+  --mode vm|shared|auto   fast mode to run (default: vm, or auto when the config uses mode 'auto'); isolated forks are the reference run
+  --config <file>         Vitest config to use (default: found in --root; must be wrapped with defineVmGuardConfig)
+  --root <dir>            project root (default: current directory)
+  --verbose               stream Vitest's own output instead of collecting it
+  --no-diag               lean runs: no pollution diff / module-state scan (sets VM_GUARD_DIAG=0)
+  --no-reset-modules      shared mode without vi.resetModules() between files (sets resetModules:false in VM_GUARD_OPTS; the planner then adds vi.mock edges)
+  --commit-state          keep durations.json / pollution.json in .vm-guard/ (committed) instead of .vm-guard/run/
+  --version, --help       print version / help and exit 0 (also: vm-guard help <command>, vm-guard <command> --help)`;
+// name -> { usage, text, opts: [flags the command reads] }
+const COMMAND_HELP = {
+  check: { usage: 'vm-guard check [filters...] [options]', opts: ['prune', 'retries', 'confirm', 'hunt', 'plan', 'compare', 'calibrate', 'calibrate-sample', 'lanes', 'vto-raw', 'sample', 'project', 'seed', 'write'],
+    text: `Run the suite in the fast mode; every failing file re-runs in isolated forks and is explained:
+  fails in forks too                       -> genuine failure (exit 1)
+  fails alone in the fast mode             -> quarantined in .vm-guard/incompatible.json (exit 4)
+  fails only after other files (shared)    -> conflict edge in conflicts.json (exit 4); vm mode: quarantined with "after"
+  passes on a re-run, same conditions      -> FLAKY, not quarantined (exit 1)
+Mode 'shared' runs the planner's lanes. Mode 'auto' calibrates first when .vm-guard/run/modes.json is missing.
+options:
+  [filters...]        Vitest file filters (substring of the path)
+  --prune             first re-run quarantined files in the fast mode and release the ones that pass now
+  --retries N         confirmation re-runs of a failing file (default 2)
+  --no-confirm        skip confirmation: every fast-only failure counts as mode-incompatible
+  --no-hunt           do not bisect predecessors; a pass on re-run is reported as flaky
+  --no-plan           shared mode: plain Vitest run instead of the planner's lanes
+  --lanes N           planner lanes (default: CPUs - 1)
+  --vto-raw <dir>     use vto raw records for the planner (module graph, durations)
+  --compare           run \`compare\` afterwards
+  --no-calibrate      auto mode: do not calibrate when modes.json is missing
+  --calibrate-sample N  files per group for that calibration (default 20)` },
+  verify: { usage: 'vm-guard verify [filters...] [options]', opts: ['sample', 'seed', 'orders', 'quarantine', 'plan', 'lanes', 'vto-raw'],
+    text: `Compare per-test pass/fail of the fast mode with isolated forks, in several file orders; records the result
+(.vm-guard/run/verify-<mode>.json) for the shared-mode warning of \`vitest run\`. Files with a false green (or an
+order-dependent failure) are quarantined unless --no-quarantine.
+options:
+  --sample N|all      files to compare (default all; N = seeded random sample, the result is then "incomplete")
+  --seed S            seed of the sample and of the shuffle order (default 1)
+  --orders a,b,...    gate, forward, reversed, shuffle, planned (default: vm gate,reversed; shared gate,forward,reversed;
+                      'planned' needs --mode shared)
+  --no-quarantine     report only, do not write incompatible.json
+  --no-plan           never run the planned order (error if --orders names only planned)
+exit: 5 false green wins over 4 (false red / new quarantine) over 0.` },
+  compare: { usage: 'vm-guard compare [options]', opts: ['sample', 'project', 'seed', 'write'],
+    text: `Per project: CPU (wall time where /proc is unavailable) of isolated forks vs vm vs shared on a sample, plus result
+mismatches against forks, then a recommended mode. Writes .vm-guard/run/compare.json and modes.json (for mode 'auto').
+options:
+  --sample N|all      files per project (default 30; a random sample can miss the few heavy files: use all to decide)
+  --seed S            sample seed (default 1)
+  --project a,b       only these projects
+  --no-write          do not write modes.json` },
+  calibrate: { usage: 'vm-guard calibrate [options]', opts: ['sample', 'project', 'seed', 'write'],
+    text: `Quick \`compare\` (20 files per project by default) that writes .vm-guard/run/modes.json for mode 'auto'.
+options: --sample N|all (default 20), --project a,b, --seed S, --no-write` },
+  plan: { usage: 'vm-guard plan [options]', opts: ['lanes', 'vto-raw'],
+    text: `Build the conflict graph and the lanes for shared mode (one plan per project) -> .vm-guard/run/plan.json.
+options: --lanes N (default CPUs - 1), --vto-raw <dir> (vto raw records)` },
+  run: { usage: 'vm-guard run [options]', opts: ['heal', 'replan', 'clean', 'lanes', 'vto-raw', 'prune', 'retries', 'confirm', 'hunt', 'plan', 'compare', 'calibrate', 'calibrate-sample'],
+    text: `Planned shared-mode run: one shared worker per lane, quarantined files in forks. Always --mode shared.
+By default self-healing (same as \`check --mode shared\`): shared-only failures are bisected -> conflicts.json.
+options:
+  --no-heal           just run the plan and report failures (exit 1 if any), no bisecting
+  --no-replan         with --no-heal: reuse .vm-guard/run/plan.json instead of re-planning
+  --lanes N, --vto-raw <dir>   as for plan; the check options (--retries, --no-hunt, ...) apply without --no-heal` },
+  hunt: { usage: 'vm-guard hunt <victim> [--before a,b,c]', opts: ['before'],
+    text: `Bisect which earlier file of the same shared worker makes <victim> fail; records the edge in conflicts.json.
+<victim> is a test file path relative to the root. Uses the predecessors recorded in the last run logs.
+options: --before a,b,c   candidate predecessors instead of the recorded ones
+exit: 4 polluter found and recorded, 0 none found, 2 not a test file.` },
+  scan: { usage: 'vm-guard scan [--quarantine]', opts: ['quarantine'],
+    text: `Static scan of the test files for shared-mode risks (top-level mutation of globals, prototypes, ...). Does not run tests.
+options: --quarantine   put the risky files into .vm-guard/incompatible.json (shared)` },
+  report: { usage: 'vm-guard report', opts: [],
+    text: `Summary of the last run logs (.vm-guard/run/logs): layer self-time, leakiest files, dirty file starts, ignored volatile modules.` },
+};
+const HELP = `usage: vm-guard <command> [options]   (vm-guard <command> --help for details)
+commands (all but scan and report need a config wrapped with defineVmGuardConfig):
+  check     run in the fast mode, re-run failures in isolated forks, quarantine mode-only failures
+  verify    compare the fast mode with isolated forks in several file orders (false green / false red)
+  compare   forks vs vm vs shared per project: CPU, mismatches, recommended mode
+  calibrate quick compare that writes modes.json for mode 'auto'
+  plan      conflict graph + lanes for shared mode -> .vm-guard/run/plan.json
+  run       execute the plan (shared mode), self-healing
+  hunt      <victim>  bisect which earlier file pollutes it
+  scan      static scan for shared-mode risks
   report    summary of the last run logs
-options: --version, --help
-exit codes: 0 ok | 1 test failures (also flaky / unexplained) | 2 usage or config error (e.g. config not wrapped)
-            4 quarantine or conflict state changed: commit it and re-run | 5 false green (verify)`;
+${GLOBAL_OPTS}
+${EXIT_HELP}`;
+export function helpFor(cmd) {
+  const h = COMMAND_HELP[cmd];
+  return h ? `usage: ${h.usage}\n\n${h.text}\n\n${GLOBAL_OPTS}\n${EXIT_HELP}` : null;
+}
+const KNOWN_FLAGS = new Set(['mode', 'config', 'root', 'verbose', 'diag', 'reset-modules', 'commit-state', 'help', 'version']);
 
 const NEEDS_WRAP = new Set(['check', 'verify', 'compare', 'calibrate', 'plan', 'run', 'hunt']);
 /** U-2: refuse to measure a config that does not go through defineVmGuardConfig (VM_GUARD_MODE would do nothing). */
@@ -580,10 +675,14 @@ const COMMANDS = new Set(['check', 'verify', 'compare', 'calibrate', 'plan', 'ru
 export async function main(argv) {
   const o = parseArgs(argv);
   if (o.version || o._[0] === 'version') { console.log(`${PKG.name} ${PKG.version}`); return EXIT.OK; }
-  if (o.help || !o._[0] || o._[0] === 'help') { console.log(HELP); return EXIT.OK; }
+  if (o._[0] === 'help' || (typeof o.help === 'string' && !o._[0])) { const t = o._[1] || (typeof o.help === 'string' ? o.help : ''); const h = helpFor(t); if (t && !h) { console.error(`[vm-guard] unknown command ${JSON.stringify(t.slice(0, 40))}\nsee --help`); return EXIT.USAGE; } console.log(h || HELP); return EXIT.OK; }
+  if (o.help || !o._[0]) { console.log((o.help && helpFor(o._[0])) || HELP); return EXIT.OK; }
   if (!COMMANDS.has(o._[0])) { console.error(`[vm-guard] unknown command ${JSON.stringify(String(o._[0]).slice(0, 40))}\nsee --help`); return EXIT.USAGE; }
   if (o.mode !== undefined && !['vm', 'shared', 'auto'].includes(o.mode)) { console.error(`[vm-guard] --mode must be vm, shared or auto\nsee --help`); return EXIT.USAGE; }
   if (o.config && !fs.existsSync(path.resolve(o.config))) { console.error(`[vm-guard] --config ${o.config}: no such file\nsee --help`); return EXIT.USAGE; }
+  // a mistyped option would otherwise be ignored silently (e.g. --no-hnt)
+  const unknown = Object.keys(o).filter((k) => k !== '_' && !KNOWN_FLAGS.has(k) && !COMMAND_HELP[o._[0]].opts.includes(k));
+  if (unknown.length) console.error(`[vm-guard] ${o._[0]}: ignoring unknown option${unknown.length > 1 ? 's' : ''} ${unknown.map((k) => '--' + k).join(', ')} (see ${o._[0]} --help)`);
   process.env.VM_GUARD_CLI = '1';
   if (o.diag === false) process.env.VM_GUARD_DIAG = '0'; // lean runs: no pollution diff / module-state scan
   if (o['reset-modules'] === false) process.env.VM_GUARD_OPTS = JSON.stringify({ ...JSON.parse(process.env.VM_GUARD_OPTS || '{}'), resetModules: false }); // planner then adds transitive vi.mock edges

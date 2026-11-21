@@ -21,7 +21,7 @@ test('D3: exit codes follow contracts/DECISIONS.md; --help/--version exit 0 with
   assert.deepEqual(EXIT, { OK: 0, FAIL: 1, USAGE: 2, NEW_QUARANTINE: 4, FALSE_GREEN: 5 });
   const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'vmg-empty-')); // no vitest here at all
   const v = cli(empty, ['--version']); assert.equal(v.code, 0); assert.match(v.stdout, /^@kral\/vm-guard \d+\.\d+\.\d+/);
-  const h = cli(empty, ['--help']); assert.equal(h.code, 0); assert.match(h.stdout, /exit codes: 0 ok \| 1 test failures/); assert.match(h.stdout, /compare/); assert.match(h.stdout, /calibrate/);
+  const h = cli(empty, ['--help']); assert.equal(h.code, 0); assert.match(h.stdout, /exit codes \(contracts\/DECISIONS.md D3\):\n  0  ok\n  1  test failures/); assert.match(h.stdout, /compare/); assert.match(h.stdout, /calibrate/);
   const u = cli(empty, ['frobnicate']); assert.equal(u.code, 2); assert.match(u.stderr, /unknown command/); assert.match(u.stderr, /see --help/); assert.ok(u.stderr.split('\n').length < 5, 'not the whole usage text');
   const n = cli(empty, ['check']); assert.equal(n.code, 2); assert.match(n.stderr, /vitest is not installed/);
   assert.equal(cli(empty, ['check', '--mode', 'turbo']).code, 2);

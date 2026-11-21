@@ -28,13 +28,17 @@ Všechno níže je ověřené reprodukcemi v laboratoři `vmguard-lab` (React 19
 MSW 3, i18next 27, TanStack Query 5, better-sqlite3, Node 22, 2 sdílená jádra). Opravy existují **jen** pro
 rizika, která se reprodukovala nebo je potvrzuje dokumentace/zdroják Vitestu.
 
+## Dokumentace
+
+Úplná dokumentace (anglicky): [../docs/vm-guard/index.md](../docs/vm-guard/index.md).
+
 ## Rychlý start
 
 ```ts
 // vitest.config.ts
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
-import { defineVmGuardConfig } from 'vm-guard';
+import { defineVmGuardConfig } from '@kral/vm-guard';
 
 export default defineVmGuardConfig(
   defineConfig({ plugins: [react()], test: { environment: 'jsdom', setupFiles: ['./test/setup.ts'] } }),
@@ -43,7 +47,7 @@ export default defineVmGuardConfig(
 ```
 
 `defineVmGuardConfig` udělá:
-- vloží `vm-guard/setup` jako **první** setup file (před vaše),
+- vloží `@kral/vm-guard/setup` jako **první** setup file (před vaše),
 - `mode: 'vm'` → `pool: 'vmThreads'` a rozumný `vmMemoryLimit` (viz Paměť); `mode: 'shared'` → `threads` + `isolate: false`,
 - rozdělí běh do `projects`: soubory z `.vm-guard/incompatible.json` (pro daný režim) běží v izolovaných `forks`,
   ostatní v rychlém režimu. Projekty mají `extends: true` a nemění Vite konfiguraci, takže sdílejí jeden Vite server,
@@ -121,7 +125,7 @@ a pro každou zvolí režim:
 | `restoreEnv` / `reset` | `true` | obnova `process.env` / resety shared režimu |
 | `resetModules` | `true` | shared: `vi.resetModules()` po každém souboru. **Nutné pro správnost `vi.mock`** (viz níže), izoluje i `src` stav. `node_modules` zůstávají v cache |
 | `diag` | jen pod CLI | diagnostika (znečištění na konci souboru, residual po resetu, sken stavu `node_modules`), stojí CPU |
-| `setup` | `'file'` | `'import'`: první setup soubor sám začíná `import 'vm-guard/setup'` (o modul méně na soubor) |
+| `setup` | `'file'` | `'import'`: první setup soubor sám začíná `import '@kral/vm-guard/setup'` (o modul méně na soubor) |
 | `alwaysProjects` | `false` | `projects` i bez karantény (jinak se nepoužívají, stojí ~4 % CPU) |
 | `sharedPool` | `'threads'` | `'forks'` pro shared režim |
 | `integrity` | `true` | shared: kontrola integrity `expect`/matcherů/`vi` na začátku souboru (F12) |
@@ -163,7 +167,7 @@ node <path-to-vto>/vm-guard/bin/vm-guard.mjs calibrate [--sample N]
   hranu do `.vm-guard/conflicts.json` místo karantény (plánovač je příště rozdělí). Před zařazením do karantény se soubor pustí v rychlém režimu ještě jednou. Když projde, hlásí se jako FLAKY (typicky timeouty pod zátěží) a do karantény nejde (`--no-confirm` krok vypne). `--prune` vrací z karantény
   soubory, které už v rychlém režimu procházejí.
 - **verify**: na vzorku pustí rychlý režim i izolované `forks` a porovná stav **každého testu**. *False green*
-  (projde rychle, padá izolovaně) znamená exit 3. Takový případ reálně nastává, viz „Co vrstva nepokryje“.
+  (projde rychle, padá izolovaně) znamená exit 5. Takový případ reálně nastává, viz „Co vrstva nepokryje“.
 - **plan / run**: plánovač pro `shared` režim (viz níže). `run` je samoopravný: shared-only selhání bisektuje a zapamatuje si je.
 - **hunt**: bisekce souborů, které běžely před obětí ve stejném workeru (pořadí bere z běhového logu).
 - **scan**: statická analýza rizik pro `shared` režim, `--quarantine` riziková místa rovnou zakaranténuje (bez plánovače).
@@ -173,8 +177,9 @@ node <path-to-vto>/vm-guard/bin/vm-guard.mjs calibrate [--sample N]
   než forks. Pak doporučí režim per projekt: nejrychlejší bez rozdílů, nebo forks, když ušetří méně než 10 %.
   Výsledek je v `.vm-guard/run/compare.json`.
 
-Exit kódy: `0` OK, `1` skutečné selhání (padá i izolovaně), `2` nová karanténa/konflikt (commitněte `.vm-guard/*.json`),
-`3` false green ve `verify`, `64` špatné použití.
+Exit kódy (contracts/DECISIONS.md D3): `0` OK, `1` selhání testů (skutečné, flaky i nevysvětlené), `2` špatné použití/konfigurace,
+`4` změnila se karanténa/konflikty (commitněte `.vm-guard/*.json` a spusťte znovu), `5` false green ve `verify`.
+`vm-guard --help` a `vm-guard <příkaz> --help` vypíší všechny volby.
 
 Soubory:
 - **commitovat** jen `.vm-guard/incompatible.json` a `.vm-guard/conflicts.json` (CODEOWNERS). Přepisují se jen
@@ -404,10 +409,10 @@ Paměť (`mem/`, 120 souborů, 1 worker, vmThreads): výchozí limit nikdy nerec
 1. **Ověření**: `VM_GUARD_MODE=vm node <path-to-vto>/vm-guard/bin/vm-guard.mjs verify --sample all` lokálně, projít false green / false red.
 2. **check → karanténa**: `node <path-to-vto>/vm-guard/bin/vm-guard.mjs check --mode vm` a commit `.vm-guard/incompatible.json`.
    Opakovat, dokud exit není 0/1. Karanténní soubory poběží ve forks automaticky.
-3. **PR pipeline**: běžný `vitest run` s `defineVmGuardConfig` (vm + karanténa ve forks). Exit 2 z `check`
+3. **PR pipeline**: běžný `vitest run` s `defineVmGuardConfig` (vm + karanténa ve forks). Exit 4 z `check`
    na PR = někdo přidal vm-nekompatibilní test, commitnout aktualizaci karantény.
 4. **Nightly forks**: `VM_GUARD_MODE=isolated vitest run` (celá sada izolovaně) + `node <path-to-vto>/vm-guard/bin/vm-guard.mjs verify --sample 500`
-   (exit 3 = false green) + `node <path-to-vto>/vm-guard/bin/vm-guard.mjs check --prune` (uvolní opravené soubory).
+   (exit 5 = false green) + `node <path-to-vto>/vm-guard/bin/vm-guard.mjs check --prune` (uvolní opravené soubory).
 5. **Shared až potom**, volitelně pro lokální/pre-push běhy: `node <path-to-vto>/vm-guard/bin/vm-guard.mjs scan`, pak `node <path-to-vto>/vm-guard/bin/vm-guard.mjs run`
    (plán + samooprava). Commitovat `conflicts.json`. Nightly
    `verify --mode shared`.

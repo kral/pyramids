@@ -232,7 +232,7 @@ function buildConfig(userConfig, g) {
 
   const provideBase = {
     root, runDir: path.join(root, '.vm-guard', 'run', 'logs'), stateDir: path.join(root, '.vm-guard', 'run'),
-    onDirty: g.onDirty || 'warn', react: g.react ?? true, realm: g.realm ?? true, probes: g.probes ?? true,
+    onDirty: g.onDirty || 'warn', react: g.react ?? true, reactPackages: g.reactPackages || [], realm: g.realm ?? true, probes: g.probes ?? true,
     restoreEnv: g.restoreEnv ?? true, reset: g.reset ?? true, resetModules: g.resetModules ?? true, // shared mode: required for vi.mock correctness (cached importers keep the first binding)
     moduleState: g.moduleState, detectPollution: g.detectPollution, diag: g.diag, ignoreListeners: g.ignoreListeners || [], ignoreModules: g.ignoreModules || [], log: g.log ?? true,
     integrity: g.integrity ?? true,
