@@ -1,0 +1,432 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vto.invalid/contracts/raw-2.schema.json",
+  "title": "vto raw record (format 2.x) – one line of w-*.jsonl",
+  "description": "One JSON object per line. Writers: collector/setup-v2.mjs (file, fileload, test), collector/run-raw.mjs (meta). Readers: analyzer/src/raw.rs and every JS reader. Producers are validated strictly (no unknown fields); readers MUST ignore unknown fields and unknown `t`. Prose: FORMAT.md. Decisions: contracts/DECISIONS.md.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/meta"
+    },
+    {
+      "$ref": "#/$defs/file"
+    },
+    {
+      "$ref": "#/$defs/fileload"
+    },
+    {
+      "$ref": "#/$defs/test"
+    },
+    {
+      "$ref": "#/$defs/other"
+    }
+  ],
+  "$defs": {
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Root-relative path with '/' separators, NFC (DECISIONS D2); absolute only for files outside meta.root."
+    },
+    "sha256": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "commit": {
+      "type": "string",
+      "minLength": 40,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+    },
+    "hitMap": {
+      "type": "object",
+      "description": "file path → sorted block ids (indices into that file's `blocks`)",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "block": {
+      "type": "array",
+      "description": "[startLine (1-based), startCol (0-based), endLine, endCol, kind]; the array index is the block id. Stored maps write 0 for both columns and kind \"b\".",
+      "prefixItems": [
+        {
+          "type": "integer",
+          "minimum": 1
+        },
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "integer",
+          "minimum": 1
+        },
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "enum": [
+            "s",
+            "b",
+            "f"
+          ]
+        }
+      ],
+      "items": false,
+      "minItems": 5,
+      "maxItems": 5
+    },
+    "dirtyEntry": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/path"
+        },
+        {
+          "type": "object",
+          "required": [
+            "path"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "$ref": "#/$defs/path"
+            },
+            "sha256": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/sha256"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "contentHash (DECISIONS D1) of the file at record time; null = the file was deleted"
+            }
+          }
+        }
+      ]
+    },
+    "module": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/path"
+        },
+        {
+          "type": "object",
+          "required": [
+            "file"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "file": {
+              "$ref": "#/$defs/path"
+            },
+            "loadMs": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        }
+      ]
+    },
+    "read": {
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "path of a file or directory; \"\" or \".\" = the root itself"
+        },
+        {
+          "type": "object",
+          "required": [
+            "path"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "meta": {
+      "type": "object",
+      "required": [
+        "t",
+        "version"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "const": "meta"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2,
+          "description": "Raw format MAJOR version. Readers refuse a higher value."
+        },
+        "formatVersion": {
+          "type": "string",
+          "description": "\"2.1\" | \"2.2\" (minor, informative); \"1\" for the V8 engine",
+          "x-since": "2.1"
+        },
+        "engine": {
+          "enum": [
+            "v2",
+            "v8"
+          ]
+        },
+        "gitHead": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/commit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Commit the map was recorded at."
+        },
+        "dirty": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "The working tree had uncommitted changes at record time (null: not a git repository)."
+        },
+        "dirtyFiles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dirtyEntry"
+          },
+          "x-since": "2.2",
+          "description": "Files modified / untracked at record time (git status --porcelain=v1 -z --untracked-files=all). Required for `vto affected` to use a dirty map (DECISIONS D5.9)."
+        },
+        "testFiles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/path"
+          },
+          "x-since": "2.2",
+          "description": "Every test file Vitest collected, including files without any test record."
+        },
+        "caseInsensitive": {
+          "type": "boolean",
+          "x-since": "2.2"
+        },
+        "vitest": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "root": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Canonical (realpath) project root, '/' separators (DECISIONS D2.1)."
+        },
+        "setupFiles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/path"
+          }
+        },
+        "projects": {
+          "type": "array",
+          "items": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "producer": {
+          "type": "string",
+          "description": "e.g. \"vto-daemon\""
+        },
+        "stored": {
+          "type": "boolean"
+        },
+        "pathBase": {
+          "const": "root"
+        }
+      }
+    },
+    "file": {
+      "type": "object",
+      "required": [
+        "t",
+        "file",
+        "blocks"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "const": "file"
+        },
+        "file": {
+          "$ref": "#/$defs/path"
+        },
+        "blocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/block"
+          }
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256",
+          "description": "contentHash of the ORIGINAL file (DECISIONS D1)."
+        },
+        "hash": {
+          "type": "string",
+          "deprecated": true,
+          "description": "First 16 hex of sha256. Deprecated: writers should stop, readers ignore."
+        }
+      }
+    },
+    "fileload": {
+      "type": "object",
+      "required": [
+        "t",
+        "testFile",
+        "modules"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "const": "fileload"
+        },
+        "testFile": {
+          "$ref": "#/$defs/path"
+        },
+        "hits": {
+          "$ref": "#/$defs/hitMap"
+        },
+        "modules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/module"
+          },
+          "description": "Every module evaluated for the test file, up to its last hook (not only until the first beforeAll)."
+        },
+        "loadMs": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "reads": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/read"
+          },
+          "x-since": "2.1"
+        },
+        "readsComplete": {
+          "type": "boolean",
+          "x-since": "2.2",
+          "description": "true: every fs entry point was wrapped and no child process / worker was started; false: something escaped (DECISIONS D5.8)."
+        },
+        "error": {
+          "type": "boolean",
+          "x-since": "2.2",
+          "description": "The test file failed to load or a file-level hook threw: coverage incomplete."
+        }
+      }
+    },
+    "test": {
+      "type": "object",
+      "required": [
+        "t",
+        "file",
+        "name",
+        "state"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "const": "test"
+        },
+        "file": {
+          "$ref": "#/$defs/path"
+        },
+        "name": {
+          "type": "string",
+          "description": "Full name, describe chain joined by \" > \"."
+        },
+        "line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "state": {
+          "enum": [
+            "pass",
+            "fail",
+            "skip",
+            "todo"
+          ]
+        },
+        "durationMs": {
+          "type": "number",
+          "minimum": 0
+        },
+        "assertions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hits": {
+          "$ref": "#/$defs/hitMap"
+        },
+        "tainted": {
+          "type": "boolean"
+        },
+        "leaky": {
+          "type": "boolean"
+        },
+        "retryCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "assertHash": {
+          "type": "string"
+        },
+        "domHash": {
+          "type": "string"
+        },
+        "cov": {
+          "type": "array",
+          "description": "V8 engine (format 1) only."
+        }
+      }
+    },
+    "other": {
+      "type": "object",
+      "required": [
+        "t"
+      ],
+      "properties": {
+        "t": {
+          "enum": [
+            "script",
+            "env",
+            "sig"
+          ],
+          "description": "script: V8 engine source record (FORMAT.md v1). env: daemon environment probe (contracts/env*, WP3). sig: verify signals. Not validated here."
+        }
+      }
+    }
+  }
+}

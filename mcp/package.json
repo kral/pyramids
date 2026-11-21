@@ -1,0 +1,19 @@
+{
+  "name": "vto-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "description": "vto daemon (warm Vitest + incremental coverage map) and MCP server",
+  "bin": {
+    "vto-daemon": "./bin/vto-daemon.mjs",
+    "vto-mcp": "./bin/vto-mcp.mjs"
+  },
+  "engines": { "node": ">=20" },
+  "scripts": { "test": "node --test --test-concurrency=1 \"test/*.test.mjs\"" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "zod": "3.25.76"
+  },
+  "optionalDependencies": {}
+}

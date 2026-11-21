@@ -1,0 +1,40 @@
+ vto ui   run r12 · affected · vmThreads                                            ✗ finished 20 s
+ █████████████████████████████████████████  412/412  100 %  ✓ 400  ✗ 7  ↓ 5  ✔ 1 fixed  · 6 groups
+ dom  ██████████████ 259/259 ✗3    node ██████████████ 153/153 ✗4
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Details  ↓3                                                                                      │
+│ ✗ useCart > computes totals with quantity                                                        │
+│ still failing  src/hooks/useCart.test.ts:8  · node                                               │
+│                                                                                                  │
+│ Message                                                                                          │
+│   AssertionError: expected { subtotal: 100, vat: 21, …(2) } to deeply equal { subtotal: 200,     │
+│     vat: 42, …(2) }                                                                              │
+│                                                                                                  │
+│ Diff                                                                                             │
+│   - Expected                                                                                     │
+│   + Received                                                                                     │
+│     {                                                                                            │
+│   -   "count": 2,                                                                                │
+│   -   "subtotal": 200,                                                                           │
+│   -   "total": 242,                                                                              │
+│   -   "vat": 42,                                                                                 │
+│   +   "count": 1,                                                                                │
+│   +   "subtotal": 100,                                                                           │
+│   +   "total": 121,                                                                              │
+│   +   "vat": 21,                                                                                 │
+│     }                                                                                            │
+│                                                                                                  │
+│ Failing line  src/hooks/useCart.test.ts:8:35                                                     │
+│    6 │   it('computes totals with quantity', () => {                                             │
+│    7 │     const { result } = renderHook(() => useCart([{ sku: 'A', price: 100, qty: 2 }]));     │
+│ ❯  8 │     expect(result.current.totals).toEqual({ subtotal: 200, vat: 42, total: 242, count: 2… │
+│      │                                   ^                                                       │
+│    9 │   });                                                                                     │
+│   10 │                                                                                           │
+│                                                                                                  │
+│ Project frame  src/hooks/useCart.ts:8:45                                                         │
+│    6 │   const [items, setItems] = useState(initial);                                            │
+│    7 │   const totals = useMemo(() => {                                                          │
+│ ❯  8 │     const subtotal = items.reduce((s, i) => s + i.price, 0);                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ o open  r rerun  R rerun all  c AI prompt  a queue  f filter: all  / search  ? help  q quit

@@ -1,0 +1,45 @@
+{
+  "name": "@vto/vto",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "description": "vto - faster Vitest runs: test impact analysis, safe fast pools (vm-guard), overlap reports, daemon + MCP server for AI agents",
+  "bin": {
+    "vto": "./bin/vto.mjs",
+    "vitest-overlap": "./vitest-overlap.mjs"
+  },
+  "files": [
+    "bin/",
+    "vitest-overlap.mjs",
+    "collector/*.mjs",
+    "collector/setup.ts",
+    "verify/*.mjs",
+    "docs/",
+    "FORMAT.md",
+    "README.md",
+    "SECURITY.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
+  ],
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "check": "node .github/scripts/check-repo.mjs",
+    "test": "node --test --test-concurrency=1 \"verify/test/*.test.mjs\" \"test/*.test.mjs\"",
+    "test:all": "node .github/scripts/ci-local.mjs"
+  },
+  "dependencies": {
+    "magic-string": "1.4.5",
+    "oxc-parser": "0.159.0"
+  },
+  "peerDependencies": {
+    "vitest": ">=5.1 <6"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
+  }
+}

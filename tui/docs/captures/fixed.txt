@@ -1,0 +1,30 @@
+ vto ui   run r12 · affected · vmThreads                                                                ✓ finished 20 s
+ ████████████████████████████████████████████████  412/412  100 %  ✓ 400  ✗ 7  ↓ 5  ✔ 7 fixed  · 6 groups
+ dom  ██████████████ 259/259 ✗3    node ██████████████ 153/153 ✗4
+╭────────────────────────────────────────────────╮╭────────────────────────────────────────────────────────────────────╮
+│ Failures 0  · filter: all                      ││ Details  ↓5                                                        │
+│   ✔ formatPrice > formats thousands with a sp… ││ ✔ formatDate > formats Czech date                                  │
+│ ❯ ✔ formatDate > formats Czech date  fixed du… ││ fixed during run  src/utils/format.test.ts:16  · node              │
+│   ✔ useCart > computes totals with quantity  … ││                                                                    │
+│   ✔ Button > disabled  fixed during run        ││ Message                                                            │
+│   ✔ ▸ TypeError: Cannot read properties of un… ││   AssertionError: expected '21. 11. 2026' to be '21. 11. 2026' //  │
+│   ✔ retry > gives up after 3 attempts  fixed … ││     Object.is equality                                             │
+│                                                ││                                                                    │
+│                                                ││ Diff                                                               │
+│                                                ││   - Expected                                                       │
+│                                                ││   + Received                                                       │
+│                                                ││   - 21. 11. 2026                                                   │
+│                                                ││   + 21.␣11.␣2026                                                   │
+│                                                ││                                                                    │
+│                                                ││ Failing line  src/utils/format.test.ts:16:48                       │
+│                                                ││   14 │ describe('formatDate', () => {                              │
+│                                                ││   15 │   it('formats Czech date', () => {                          │
+│                                                ││ ❯ 16 │     expect(formatDate(new Date(2026, 10, 21))).toBe('21. 1… │
+│                                                ││      │                                                ^            │
+│                                                ││   17 │   });                                                       │
+│                                                ││   18 │ });                                                         │
+│                                                ││                                                                    │
+│                                                ││ Project frame  src/utils/format.ts:8:12                            │
+│                                                ││    6 │                                                             │
+╰────────────────────────────────────────────────╯╰────────────────────────────────────────────────────────────────────╯
+ · Rerunning 6 test(s) as run r13 – results will show up here

@@ -1,0 +1,194 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`frames (snapshots) > ASCII fallback (no Unicode) 1`] = `
+" vto ui   běh r12 . dotčené . vmThreads                                  - běží 0 ms . zbývá ~9.0 s
+ ######################................  242/412   58 %  + 234  x 3  - 5  v 1 opraveno  . 3 skupin
+ dom  ######........ 127/259    node ##########.... 115/153 x3
++--------------------------------------------------------------------------------------------------+
+| Selhání 2  . filtr: vše                                                                          |
+| > v formatPrice > formats thousands with a space and decimal comma  opraveno během běhu          |
+|   x formatDate > formats Czech date  format.test.ts:16                                           |
+|   x useCart > computes totals with quantity  stále selhává                                       |
++--------------------------------------------------------------------------------------------------+
++--------------------------------------------------------------------------------------------------+
+| Detail  v22                                                                                      |
+| v formatPrice > formats thousands with a space and decimal comma                                 |
+| opraveno během běhu  src/utils/format.test.ts:6  . node                                          |
+|                                                                                                  |
+| Zpráva                                                                                           |
+|   AssertionError: expected '1234.50 Kč' to be '1 234,50 Kč' // Object.is equality                |
+|                                                                                                  |
+| Rozdíl                                                                                           |
++--------------------------------------------------------------------------------------------------+
+ o otevřít  r znovu  R znovu vše  c prompt pro AI  a do fronty  f filtr: vše  ? nápověda  q konec"
+`;
+
+exports[`frames (snapshots) > details zoomed for a grouped failure (Enter expands, Enter on member zooms) 1`] = `
+" vto ui   běh r12 · dotčené · vmThreads                                            ✗ dokončeno 20 s
+ ██████████████████████████████████████  412/412  100 %  ✓ 400  ✗ 7  ↓ 5  ✔ 1 opraveno  · 6 skupin
+ dom  ██████████████ 259/259 ✗3    node ██████████████ 153/153 ✗4
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Detail  ↓4                                                                                       │
+│ ✗ UserList > renders empty state while loading (case 6)                                          │
+│ src/components/UserList.test.tsx:12  · dom  · stejná chyba v 2 testech                           │
+│                                                                                                  │
+│ Zpráva                                                                                           │
+│   TypeError: Cannot read properties of undefined (reading 'map')                                 │
+│                                                                                                  │
+│ Selhávající řádek  src/components/UserList.test.tsx:12:5                                         │
+│   10 │                                                                                           │
+│   11 │   it('renders empty state while loading', () => {                                         │
+│ ❯ 12 │     render(<UserList onSelect={vi.fn()} />);                                              │
+│      │     ^                                                                                     │
+│   13 │     expect(screen.getByRole('list')).toBeEmptyDOMElement();                               │
+│   14 │   });                                                                                     │
+│                                                                                                  │
+│ Rámec v projektu  src/components/UserList.tsx:12:13                                              │
+│   10 │   return (                                                                                │
+│   11 │     <ul className="user-list">                                                            │
+│ ❯ 12 │       {users.map((u) => (                                                                 │
+│      │             ^                                                                             │
+│   13 │         <li key={u.id} onClick={() => onSelect(u.id)}>                                    │
+│   14 │           {u.name} <small>{u.email}</small>                                               │
+│                                                                                                  │
+│ Změněné pokryté řádky: src/components/UserList.tsx:12                                            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ o otevřít  r znovu  R znovu vše  c prompt pro AI  a do fronty  f filtr: vše  ? nápověda  q konec"
+`;
+
+exports[`frames (snapshots) > fixed during run + finished state 1`] = `
+" vto ui   běh r12 · dotčené · vmThreads                                                                ✗ dokončeno 20 s
+ ████████████████████████████████████████████████  412/412  100 %  ✓ 400  ✗ 7  ↓ 5  ✔ 1 opraveno  · 6 skupin
+ dom  ██████████████ 259/259 ✗3    node ██████████████ 153/153 ✗4
+╭────────────────────────────────────────────────╮╭────────────────────────────────────────────────────────────────────╮
+│ Selhání 6  · filtr: vše                        ││ Detail  ↓7                                                         │
+│ ❯ ✔ formatPrice > formats thousands with a sp… ││ ✔ formatPrice > formats thousands with a space and decimal comma   │
+│   ✗ formatDate > formats Czech date  format.t… ││ opraveno během běhu  src/utils/format.test.ts:6  · node            │
+│   ✗ useCart > computes totals with quantity  … ││                                                                    │
+│   ✗ Button > disabled  Button.test.tsx:17      ││ Zpráva                                                             │
+│   ✗ ▸ TypeError: Cannot read properties of un… ││   AssertionError: expected '1234.50 Kč' to be '1 234,50 Kč' //     │
+│   ✗ retry > gives up after 3 attempts  client… ││     Object.is equality                                             │
+│                                                ││                                                                    │
+│                                                ││ Rozdíl                                                             │
+│                                                ││   - Očekáváno                                                      │
+│                                                ││   + Obdrženo                                                       │
+│                                                ││   - 1 234,50 Kč                                                    │
+│                                                ││   + 1234.50 Kč                                                     │
+│                                                ││                                                                    │
+│                                                ││ Selhávající řádek  src/utils/format.test.ts:6:5                    │
+│                                                ││   4 │ describe('formatPrice', () => {                              │
+│                                                ││   5 │   it('formats thousands with a space and decimal comma', ()… │
+│                                                ││ ❯ 6 │     expect(formatPrice(1234.5)).toBe('1 234,50 Kč');         │
+│                                                ││     │     ^                                                        │
+│                                                ││   7 │   });                                                        │
+│                                                ││   8 │                                                              │
+│                                                ││                                                                    │
+│                                                ││ Rámec v projektu  src/utils/format.ts:3:17                         │
+│                                                ││   1 │ /** Formátuje cenu v Kč: 1234.5 → "1 234,50 Kč" */           │
+╰────────────────────────────────────────────────╯╰────────────────────────────────────────────────────────────────────╯
+ ⏎ detail  o otevřít  r znovu  R znovu vše  c prompt pro AI  a do fronty  f filtr: vše  / hledat  ? nápověda  q konec"
+`;
+
+exports[`frames (snapshots) > help overlay 1`] = `
+" vto ui   běh r12 · dotčené · vmThreads                                   ⠋ běží 0 ms · zbývá ~14 s
+ ███████████▌░░░░░░░░░░░░░░░░░░░░░░░░░░  125/412   30 %  ✓ 119  ✗ 3  ↓ 3  ✔ 1 opraveno  · 3 skupin
+ dom  ███▍░░░░░░░░░░ 63/259    node █████▋░░░░░░░░ 62/153 ✗3
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Nápověda – klávesy                                                                               │
+│                                                                                                  │
+│ ↑ ↓ / j k       pohyb v seznamu selhání (PgUp/PgDn po stránkách, g/G začátek/konec)              │
+│ Enter           rozbalit skupinu / přepnout detail na celou obrazovku                            │
+│ Tab             přepnout fokus mezi seznamem a detailem (posun detailu j/k)                      │
+│ o / O           otevřít soubor projektu na řádku v editoru ($VTO_EDITOR, $VISUAL, $EDITOR)       │
+│ r               spustit znovu vybrané selhání (celou skupinu)                                    │
+│ R               spustit znovu všechna neopravená selhání                                         │
+│ c               zkopírovat prompt pro AI se vším potřebným do schránky                           │
+│ a               poslat skupinu do fronty úloh MCP (pro agenta)                                   │
+│ f  /            přepnout filtr vše → selhané → opravené; / hledat text                           │
+│ q               ukončit UI (běh v daemonu pokračuje)                                             │
+│                                                                                                  │
+│ o = místo k opravě (první rámec v projektu), O = selhávající řádek v testu                       │
+│ Libovolná klávesa zavře nápovědu                                                                 │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ o otevřít  r znovu  R znovu vše  c prompt pro AI  a do fronty  f filtr: vše  ? nápověda  q konec"
+`;
+
+exports[`frames (snapshots) > narrow layout (80x24), stacked panes 1`] = `
+" vto ui   běh r12 · dotčené · vmThreads              ⠋ běží 0 ms · zbývá ~9.0 s
+ ██████████▌░░░░░░░  242/412   58 %  ✓ 234  ✗ 3  ↓ 5  ✔ 1 opraveno  · 3 skupin
+ dom  ██████▊░░░░░░░ 127/259    node ██████████▌░░░ 115/153 ✗3
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Selhání 2  · filtr: vše                                                      │
+│ ❯ ✔ formatPrice > formats thousands with a space and decimal comma  opraven… │
+│   ✗ formatDate > formats Czech date  format.test.ts:16                       │
+│   ✗ useCart > computes totals with quantity  stále selhává                   │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Detail  ↓21                                                                  │
+│ ✔ formatPrice > formats thousands with a space and decimal comma             │
+│ opraveno během běhu  src/utils/format.test.ts:6  · node                      │
+│                                                                              │
+│ Zpráva                                                                       │
+│   AssertionError: expected '1234.50 Kč' to be '1 234,50 Kč' // Object.is     │
+│     equality                                                                 │
+│                                                                              │
+│ Rozdíl                                                                       │
+│   - Očekáváno                                                                │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ o otevřít  r znovu  c prompt pro AI  f filtr: vše  ? nápověda  q konec"
+`;
+
+exports[`frames (snapshots) > run in progress with failures (wide layout, 120 cols) 1`] = `
+" vto ui   běh r12 · dotčené · vmThreads                                                      ⠋ běží 0 ms · zbývá ~9.0 s
+ ████████████████████████████▏░░░░░░░░░░░░░░░░░░░  242/412   58 %  ✓ 234  ✗ 3  ↓ 5  ✔ 1 opraveno  · 3 skupin
+ dom  ██████▊░░░░░░░ 127/259    node ██████████▌░░░ 115/153 ✗3
+╭────────────────────────────────────────────────╮╭────────────────────────────────────────────────────────────────────╮
+│ Selhání 2  · filtr: vše                        ││ Detail  ↓5                                                         │
+│ ❯ ✔ formatPrice > formats thousands with a sp… ││ ✔ formatPrice > formats thousands with a space and decimal comma   │
+│   ✗ formatDate > formats Czech date  format.t… ││ opraveno během běhu  src/utils/format.test.ts:6  · node            │
+│   ✗ useCart > computes totals with quantity  … ││                                                                    │
+│                                                ││ Zpráva                                                             │
+│                                                ││   AssertionError: expected '1234.50 Kč' to be '1 234,50 Kč' //     │
+│                                                ││     Object.is equality                                             │
+│                                                ││                                                                    │
+│                                                ││ Rozdíl                                                             │
+│                                                ││   - Očekáváno                                                      │
+│                                                ││   + Obdrženo                                                       │
+│                                                ││   - 1 234,50 Kč                                                    │
+│                                                ││   + 1234.50 Kč                                                     │
+│                                                ││                                                                    │
+│                                                ││ Selhávající řádek  src/utils/format.test.ts:6:5                    │
+│                                                ││   4 │ describe('formatPrice', () => {                              │
+│                                                ││   5 │   it('formats thousands with a space and decimal comma', ()… │
+│                                                ││ ❯ 6 │     expect(formatPrice(1234.5)).toBe('1 234,50 Kč');         │
+│                                                ││     │     ^                                                        │
+│                                                ││   7 │   });                                                        │
+│                                                ││   8 │                                                              │
+│                                                ││                                                                    │
+│                                                ││ Rámec v projektu  src/utils/format.ts:3:17                         │
+│                                                ││   1 │ /** Formátuje cenu v Kč: 1234.5 → "1 234,50 Kč" */           │
+│                                                ││   2 │ export function formatPrice(value: number): string {         │
+│                                                ││ ❯ 3 │   const fixed = value.toFixed(2);                            │
+╰────────────────────────────────────────────────╯╰────────────────────────────────────────────────────────────────────╯
+ ⏎ detail  o otevřít  r znovu  R znovu vše  c prompt pro AI  a do fronty  f filtr: vše  / hledat  ? nápověda  q konec"
+`;
+
+exports[`frames (snapshots) > waiting for the first event 1`] = `
+" vto ui   ⠋ Čekám na události…
+Zdroj: mock
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Selhání 0  · filtr: vše                                                                          │
+│ Zatím žádná selhání                                                                              │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Detail                                                                                           │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ o otevřít  r znovu  R znovu vše  c prompt pro AI  a do fronty  f filtr: vše  ? nápověda  q konec"
+`;

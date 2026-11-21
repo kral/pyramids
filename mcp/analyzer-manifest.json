@@ -1,0 +1,5 @@
+{
+  "$comment": "sha256 of every prebuilt analyzer binary this vto-mcp release accepts (written by scripts/pack-analyzer.mjs --manifest). The resolver refuses npm analyzer packages that are not pinned here (SECURITY N1a).",
+  "version": 1,
+  "binaries": {}
+}

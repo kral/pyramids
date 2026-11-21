@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "vto": {
+      "command": "node",
+      "args": ["${VTO_HOME}/mcp/bin/vto-mcp.mjs", "--root", "${CLAUDE_PROJECT_DIR:-.}"],
+      "env": { "VTO_POOL": "${VTO_POOL:-auto}" },
+      "timeout": 3600000
+    }
+  }
+}

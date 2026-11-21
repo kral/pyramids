@@ -1,0 +1,65 @@
+{"t":"file","file":"src/price.ts","hash":"6e2adfda58f11a24","sha256":"6e2adfda58f11a248f28b3a9e13af8c7632c72bfd4139c531bf1a36fadf66d1d","blocks":[[1,55,1,60,"b"],[1,7,7,1,"f"],[2,2,2,39,"b"],[2,16,2,39,"b"],[3,2,6,39,"s"],[4,2,4,30,"b"],[4,17,4,30,"b"],[5,2,5,24,"b"],[5,11,5,24,"b"],[8,7,10,1,"f"]]}
+{"t":"fileload","testFile":"test/price.test.ts","hits":{},"modules":["src/price.ts"],"loadMs":{"src/price.ts":0.04},"reads":["test/__snapshots__/price.test.ts.snap"]}
+{"t":"test","file":"test/price.test.ts","name":"price > basic","line":4,"state":"pass","durationMs":0.939,"assertions":1,"hits":{"src/price.ts":[0,1,2,4,5,7]}}
+{"t":"test","file":"test/price.test.ts","name":"price > basic again","line":5,"state":"pass","durationMs":0.342,"assertions":1,"hits":{"src/price.ts":[0,1,2,4,5,7]}}
+{"t":"test","file":"test/price.test.ts","name":"price > bulk discount","line":6,"state":"pass","durationMs":0.227,"assertions":1,"hits":{"src/price.ts":[0,1,2,4,6,7]}}
+{"t":"test","file":"test/price.test.ts","name":"price > vip bulk","line":7,"state":"pass","durationMs":0.154,"assertions":1,"hits":{"src/price.ts":[1,2,4,6,8]}}
+{"t":"test","file":"test/price.test.ts","name":"price > throws on zero","line":8,"state":"pass","durationMs":0.66,"assertions":1,"hits":{"src/price.ts":[0,1,3]}}
+{"t":"test","file":"test/price.test.ts","name":"format > formats","line":11,"state":"pass","durationMs":0.137,"assertions":1,"hits":{"src/price.ts":[9]}}
+{"t":"fileload","testFile":"test/cli.test.ts","hits":{},"modules":[],"loadMs":{},"reads":["test/__snapshots__/cli.test.ts.snap"]}
+{"t":"test","file":"test/cli.test.ts","name":"cli prints the greeting","line":3,"state":"pass","durationMs":62.225,"assertions":1,"hits":{}}
+{"t":"fileload","testFile":"test/guards/no-random-worker.test.ts","hits":{},"modules":[],"loadMs":{},"reads":["test/guards/__snapshots__/no-random-worker.test.ts.snap"]}
+{"t":"test","file":"test/guards/no-random-worker.test.ts","name":"src/price.ts never uses Math.random (read in a worker thread)","line":3,"state":"pass","durationMs":57.446,"assertions":1,"hits":{}}
+{"t":"file","file":"src/app.ts","hash":"55593d3587a6b58c","sha256":"55593d3587a6b58c76161746550d3fbcf815c7de7c24cd0a080d82ffda32d372","blocks":[[1,7,4,1,"f"]]}
+{"t":"file","file":"src/page.ts","hash":"78d2d698745ab420","sha256":"78d2d698745ab420a1408bb3e64c8ac272322e680bf13382635a7f7feaee7171","blocks":[[2,7,4,1,"f"]]}
+{"t":"fileload","testFile":"test/app.test.ts","hits":{},"modules":["src/app.ts"],"loadMs":{"src/app.ts":0.05},"reads":["test/__snapshots__/app.test.ts.snap"]}
+{"t":"test","file":"test/app.test.ts","name":"app opens the lazy page with its title","line":3,"state":"pass","durationMs":16.113,"assertions":1,"hits":{"src/app.ts":[0],"src/page.ts":[0]}}
+{"t":"fileload","testFile":"test/guards/no-random-shell.test.ts","hits":{},"modules":[],"loadMs":{},"reads":["test/guards/__snapshots__/no-random-shell.test.ts.snap"]}
+{"t":"test","file":"test/guards/no-random-shell.test.ts","name":"no file under src uses Math.random (grep in a child process)","line":3,"state":"pass","durationMs":6.603,"assertions":1,"hits":{}}
+{"t":"fileload","testFile":"test/guards/no-random-glob.test.ts","hits":{},"modules":[],"loadMs":{},"reads":["src","src/app.ts","src/columns.ts","src/config.ts","src/disabled","src/disabled/extra.ts","src/help.ts","src/page.ts","src/plugins","src/plugins/a.ts","src/price.ts","src/registry.ts","src/uses-legacy.ts","test/guards/__snapshots__/no-random-glob.test.ts.snap"]}
+{"t":"test","file":"test/guards/no-random-glob.test.ts","name":"no file under src uses Math.random (fs.globSync + readFileSync)","line":3,"state":"pass","durationMs":5.369,"assertions":10,"hits":{}}
+{"t":"file","file":"src/price.ts","hash":"6e2adfda58f11a24","sha256":"6e2adfda58f11a248f28b3a9e13af8c7632c72bfd4139c531bf1a36fadf66d1d","blocks":[[1,55,1,60,"b"],[1,7,7,1,"f"],[2,2,2,39,"b"],[2,16,2,39,"b"],[3,2,6,39,"s"],[4,2,4,30,"b"],[4,17,4,30,"b"],[5,2,5,24,"b"],[5,11,5,24,"b"],[8,7,10,1,"f"]]}
+{"t":"fileload","testFile":"test/docs.test.ts","hits":{},"modules":["src/price.ts"],"loadMs":{"src/price.ts":0.037},"reads":["docs/api.md","test/__snapshots__/docs.test.ts.snap"]}
+{"t":"test","file":"test/docs.test.ts","name":"docs/api.md documents every export","line":4,"state":"pass","durationMs":0.985,"assertions":2,"hits":{}}
+{"t":"fileload","testFile":"test/guards/no-random-tinyglobby.test.ts","hits":{},"modules":[],"loadMs":{},"reads":["src","src/app.ts","src/columns.ts","src/config.ts","src/disabled","src/disabled/extra.ts","src/help.ts","src/page.ts","src/plugins","src/plugins/a.ts","src/price.ts","src/registry.ts","src/uses-legacy.ts","test/guards/__snapshots__/no-random-tinyglobby.test.ts.snap"]}
+{"t":"test","file":"test/guards/no-random-tinyglobby.test.ts","name":"no file under src uses Math.random (tinyglobby)","line":4,"state":"pass","durationMs":17.685,"assertions":10,"hits":{}}
+{"t":"fileload","testFile":"test/guards/no-random-fh.test.ts","hits":{},"modules":[],"loadMs":{},"reads":["test/guards/__snapshots__/no-random-fh.test.ts.snap"]}
+{"t":"test","file":"test/guards/no-random-fh.test.ts","name":"src/price.ts never uses Math.random (FileHandle read)","line":3,"state":"pass","durationMs":2.63,"assertions":1,"hits":{}}
+{"t":"file","file":"src/lib.mjs","hash":"de5be7f0d32a4fda","sha256":"de5be7f0d32a4fda86a782dbd89de9aef146e7f2453ae28d7e1b0b013201eda4","blocks":[[1,7,3,1,"f"]]}
+{"t":"fileload","testFile":"test/lib.test.ts","hits":{},"modules":["src/lib.mjs"],"loadMs":{"src/lib.mjs":0.039},"reads":["test/__snapshots__/lib.test.ts.snap"]}
+{"t":"test","file":"test/lib.test.ts","name":"greet returns a string","line":3,"state":"pass","durationMs":0.875,"assertions":1,"hits":{"src/lib.mjs":[0]}}
+{"t":"file","file":"src/config.ts","hash":"e59155baaa2f8496","sha256":"e59155baaa2f8496df2adeb40aafdcea8273bf4bfa995aa0c744838ad2a0a6c0","blocks":[[2,7,4,1,"f"]]}
+{"t":"fileload","testFile":"test/lazy.test.ts","hits":{},"modules":[],"loadMs":{},"reads":["test/__snapshots__/lazy.test.ts.snap"]}
+{"t":"test","file":"test/lazy.test.ts","name":"tax uses the configured rate (module loaded lazily, like env-dependent config tests)","line":3,"state":"pass","durationMs":8.075,"assertions":1,"hits":{"src/config.ts":[0]}}
+{"t":"file","file":"src/columns.ts","hash":"e7bdfbaeb1cee71d","sha256":"e7bdfbaeb1cee71d639f89ae3584c56d90d8e2c9b74587ea10cd95509c29bfb0","blocks":[[2,40,2,66,"f"],[3,38,3,63,"f"],[5,7,7,1,"f"]]}
+{"t":"fileload","testFile":"test/header.test.ts","hits":{},"modules":["src/columns.ts"],"loadMs":{"src/columns.ts":0.049},"reads":["test/__snapshots__/header.test.ts.snap"]}
+{"t":"test","file":"test/header.test.ts","name":"header labels","line":3,"state":"pass","durationMs":1.249,"assertions":1,"hits":{}}
+{"t":"file","file":"src/plugins/a.ts","hash":"f504ca112a0b48b5","sha256":"f504ca112a0b48b5ba070a2d4a74b76fc759c47b0d2dd1945fea7627bd4db405","blocks":[]}
+{"t":"file","file":"src/registry.ts","hash":"40249ddf2d03bdd0","sha256":"40249ddf2d03bdd0315cd541e976320fab779cad8af99a19e198144264f0f53e","blocks":[[2,7,2,97,"f"],[2,73,2,86,"f"]]}
+{"t":"fileload","testFile":"test/registry.test.ts","hits":{},"modules":["src/plugins/a.ts","src/registry.ts"],"loadMs":{"src/plugins/a.ts":0.06,"src/registry.ts":0.044},"reads":["test/__snapshots__/registry.test.ts.snap"]}
+{"t":"test","file":"test/registry.test.ts","name":"only plugin a is registered","line":3,"state":"pass","durationMs":1.881,"assertions":1,"hits":{"src/registry.ts":[0,1]}}
+{"t":"file","file":"src/uses-legacy.ts","hash":"29f14b96e69b25c3","sha256":"29f14b96e69b25c39cd378200b8e77da18886d5ba99f05d87e17fa58ab3c8b4f","blocks":[[3,7,5,1,"f"]]}
+{"t":"fileload","testFile":"test/uses-legacy.test.ts","hits":{},"modules":["src/uses-legacy.ts"],"loadMs":{"src/uses-legacy.ts":0.14},"reads":["src/legacy.cjs","test/__snapshots__/uses-legacy.test.ts.snap"]}
+{"t":"test","file":"test/uses-legacy.test.ts","name":"clamps to 10","line":3,"state":"pass","durationMs":1.673,"assertions":1,"hits":{"src/uses-legacy.ts":[0]}}
+{"t":"fileload","testFile":"test/guards/no-random-fd.test.ts","hits":{},"modules":[],"loadMs":{},"reads":["test/guards/__snapshots__/no-random-fd.test.ts.snap"]}
+{"t":"test","file":"test/guards/no-random-fd.test.ts","name":"src/price.ts never uses Math.random (fd based read)","line":3,"state":"pass","durationMs":0.959,"assertions":1,"hits":{}}
+{"t":"file","file":"src/price.ts","hash":"6e2adfda58f11a24","sha256":"6e2adfda58f11a248f28b3a9e13af8c7632c72bfd4139c531bf1a36fadf66d1d","blocks":[[1,55,1,60,"b"],[1,7,7,1,"f"],[2,2,2,39,"b"],[2,16,2,39,"b"],[3,2,6,39,"s"],[4,2,4,30,"b"],[4,17,4,30,"b"],[5,2,5,24,"b"],[5,11,5,24,"b"],[8,7,10,1,"f"]]}
+{"t":"fileload","testFile":"test/ci-only.test.ts","hits":{},"modules":["src/price.ts"],"loadMs":{"src/price.ts":0.038},"reads":["test/__snapshots__/ci-only.test.ts.snap"]}
+{"t":"test","file":"test/ci-only.test.ts","name":"format returns a string","line":3,"state":"pass","durationMs":0.801,"assertions":1,"hits":{"src/price.ts":[9]}}
+{"t":"file","file":"src/disabled/extra.ts","hash":"3a4be813da470f1c","sha256":"3a4be813da470f1cbcfe5c855235384cad47f48027481773b6d911871600c97b","blocks":[]}
+{"t":"fileload","testFile":"test/extra.test.ts","hits":{},"modules":["src/disabled/extra.ts"],"loadMs":{"src/disabled/extra.ts":0.053},"reads":["test/__snapshots__/extra.test.ts.snap"]}
+{"t":"test","file":"test/extra.test.ts","name":"extra has a name","line":3,"state":"pass","durationMs":0.9,"assertions":1,"hits":{}}
+{"t":"file","file":"src/help.ts","hash":"632091829c356a6a","sha256":"632091829c356a6a1b4033e816858d84af55c82d2a3776f1285f407751c7df78","blocks":[[2,7,2,68,"f"]]}
+{"t":"fileload","testFile":"test/help.test.ts","hits":{},"modules":["src/help.ts","README.md"],"loadMs":{"src/help.ts":0.051},"reads":["test/__snapshots__/help.test.ts.snap"]}
+{"t":"test","file":"test/help.test.ts","name":"help text comes from the README","line":3,"state":"pass","durationMs":0.914,"assertions":1,"hits":{"src/help.ts":[0]}}
+{"t":"fileload","testFile":"test/guards/size.test.ts","hits":{},"modules":[],"loadMs":{},"reads":["docs/api.md","test/guards/__snapshots__/size.test.ts.snap"]}
+{"t":"test","file":"test/guards/size.test.ts","name":"docs/api.md stays short (statSync)","line":3,"state":"pass","durationMs":0.949,"assertions":1,"hits":{}}
+{"t":"file","file":"src/legacy.cjs","hash":"da1e30bb3c419089","sha256":"da1e30bb3c419089dc88878323ad8cbe32f15c628af51c9e3a7036b2754b11a9","blocks":[[2,23,2,81,"f"]]}
+{"t":"fileload","testFile":"test/legacy-direct.test.ts","hits":{},"modules":["src/legacy.cjs"],"loadMs":{"src/legacy.cjs":0.136},"reads":["test/__snapshots__/legacy-direct.test.ts.snap"]}
+{"t":"test","file":"test/legacy-direct.test.ts","name":"legacy exports clamp","line":3,"state":"pass","durationMs":3.166,"assertions":1,"hits":{}}
+{"t":"file","file":"src/page.ts","hash":"78d2d698745ab420","sha256":"78d2d698745ab420a1408bb3e64c8ac272322e680bf13382635a7f7feaee7171","blocks":[[2,7,4,1,"f"]]}
+{"t":"fileload","testFile":"test/page.test.ts","hits":{},"modules":["src/page.ts"],"loadMs":{"src/page.ts":0.04},"reads":["test/__snapshots__/page.test.ts.snap"]}
+{"t":"test","file":"test/page.test.ts","name":"page renders something","line":3,"state":"pass","durationMs":0.869,"assertions":1,"hits":{"src/page.ts":[0]}}
+{"t":"file","file":"src/columns.ts","hash":"e7bdfbaeb1cee71d","sha256":"e7bdfbaeb1cee71d639f89ae3584c56d90d8e2c9b74587ea10cd95509c29bfb0","blocks":[[2,40,2,66,"f"],[3,38,3,63,"f"],[5,7,7,1,"f"]]}
+{"t":"fileload","testFile":"test/columns.test.ts","hits":{},"modules":["src/columns.ts"],"loadMs":{"src/columns.ts":0.042},"reads":["test/__snapshots__/columns.test.ts.snap"]}
+{"t":"test","file":"test/columns.test.ts","name":"renders cells","line":3,"state":"pass","durationMs":1.109,"assertions":1,"hits":{"src/columns.ts":[0,2]}}

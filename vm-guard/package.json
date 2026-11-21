@@ -1,0 +1,30 @@
+{
+  "name": "@vto/vm-guard",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "description": "Makes Vitest fast pools (vmThreads, isolate:false) safe: realm shims, leak detection, quarantine, planned shared workers",
+  "bin": { "vm-guard": "./bin/vm-guard.mjs" },
+  "exports": {
+    ".": { "types": "./src/index.d.ts", "default": "./src/index.mjs" },
+    "./setup": "./src/setup.bundle.mjs",
+    "./sequencer": "./src/sequencer.mjs",
+    "./realm": "./src/realm.mjs",
+    "./envstore": { "types": "./src/envstore.d.ts", "default": "./src/envstore.mjs" },
+    "./package.json": "./package.json"
+  },
+  "files": ["bin/", "src/", "scripts/", "README.md", "README.cs.md"],
+  "engines": { "node": ">=22.5" },
+  "peerDependencies": { "vitest": ">=5.1 <6" },
+  "devDependencies": {
+    "jsdom": "^31.0.1",
+    "vitest": "^5.1.1"
+  },
+  "scripts": {
+    "build": "node scripts/bundle-setup.mjs",
+    "check:bundle": "node scripts/bundle-setup.mjs --check",
+    "test": "node scripts/bundle-setup.mjs && node --test --test-concurrency=1 test/*.test.mjs",
+    "test:unit": "VM_GUARD_TEST_NO_INTEGRATION=1 node --test test/*.test.mjs"
+  }
+}

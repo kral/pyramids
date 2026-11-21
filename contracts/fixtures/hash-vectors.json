@@ -1,0 +1,77 @@
+{
+ "$comment": "contracts/DECISIONS.md D1: contentHash = SHA-256 hex of the bytes after removing ONE leading UTF-8 BOM and replacing every CR LF by LF. `sha256` is the plain hash of the same bytes (accepted by readers for maps written before D1).",
+ "vectors": [
+  {
+   "name": "empty",
+   "base64": "",
+   "contentHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+   "name": "lf",
+   "base64": "ZXhwb3J0IGNvbnN0IGEgPSAxOwo=",
+   "contentHash": "037ecd1db38c230c248787e60fd7bfc0cb0101b187b59535b6e7483be762d350",
+   "sha256": "037ecd1db38c230c248787e60fd7bfc0cb0101b187b59535b6e7483be762d350"
+  },
+  {
+   "name": "crlf",
+   "base64": "ZXhwb3J0IGNvbnN0IGEgPSAxOw0K",
+   "contentHash": "037ecd1db38c230c248787e60fd7bfc0cb0101b187b59535b6e7483be762d350",
+   "sha256": "f8bfa98819f02db4df7eca4c610e70f3f8fa171d31e5abfaaebfe2dfec05f67c"
+  },
+  {
+   "name": "bom+crlf",
+   "base64": "77u/ZXhwb3J0IGNvbnN0IGEgPSAxOw0K",
+   "contentHash": "037ecd1db38c230c248787e60fd7bfc0cb0101b187b59535b6e7483be762d350",
+   "sha256": "ca98101eaf83db18e54449cbf78b5b13122e1cae34147bbef79649dedfb73ffa"
+  },
+  {
+   "name": "bom only",
+   "base64": "77u/",
+   "contentHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+  },
+  {
+   "name": "two BOMs: only the first is removed",
+   "base64": "77u/77u/eA==",
+   "contentHash": "84144a41283d6dc344addf4e83189d83fdd656439675abf54e6f44ccb73b4eb6",
+   "sha256": "aa9d9d8ad7a736cb08a7f3fff0e5429898dbfa9abefe332f3c598f75c63ae0e5"
+  },
+  {
+   "name": "lone CR kept",
+   "base64": "YQ1iCg==",
+   "contentHash": "367d1c77eadc1495a7db4200f46a8b90ea1fa926282722d308c05a65098a4112",
+   "sha256": "367d1c77eadc1495a7db4200f46a8b90ea1fa926282722d308c05a65098a4112"
+  },
+  {
+   "name": "CR CR LF -> CR LF",
+   "base64": "YQ0NCmI=",
+   "contentHash": "18745f36a05e29072709042d6062ce54f1b08ff36c27ba80c39f81fb010c8ce2",
+   "sha256": "5e63341b6816df299c0c6d61e6ec4a5168ee01f279feb39dbeb2c3784f31ed94"
+  },
+  {
+   "name": "no trailing newline",
+   "base64": "YQ0KYg==",
+   "contentHash": "7e18f737311b2dc3b2f269dd78396b0351f14fb66efa879f768cb23181883c78",
+   "sha256": "18745f36a05e29072709042d6062ce54f1b08ff36c27ba80c39f81fb010c8ce2"
+  },
+  {
+   "name": "non-ASCII UTF-8 (not NFC-normalised)",
+   "base64": "Ly8gxI1lbsOtayBjzIwK",
+   "contentHash": "02feaf75941540d38ecee6c2466b6ad2413fd539545d0e7da805b1544e7a6d6f",
+   "sha256": "02feaf75941540d38ecee6c2466b6ad2413fd539545d0e7da805b1544e7a6d6f"
+  },
+  {
+   "name": "invalid UTF-8 / binary",
+   "base64": "//4ADQqA",
+   "contentHash": "30f978d15bc891b1d09af837b7d5873036688d5127819b2c91704119b6594273",
+   "sha256": "52461d36c3de41a660f4cb92eba5bccbaab62f5ee6f8722184900b8fe8f4deb2"
+  },
+  {
+   "name": "BOM not at start is kept",
+   "base64": "Ye+7vw0K",
+   "contentHash": "5fb9605f967ad1a621dc05d8018405d134982bdd789aa2fb83ccd3f0b036995d",
+   "sha256": "08de1e01d7a23e250f82f1a39f1ea05b12999301f66bb53fde33310d52cf92d7"
+  }
+ ]
+}

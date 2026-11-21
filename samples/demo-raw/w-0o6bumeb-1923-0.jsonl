@@ -1,0 +1,8 @@
+{"t":"file","file":"src/price.ts","sha256":"6e2adfda58f11a248f28b3a9e13af8c7632c72bfd4139c531bf1a36fadf66d1d","blocks":[[1,55,1,60,"b"],[1,7,7,1,"f"],[2,2,2,39,"b"],[2,16,2,39,"b"],[3,2,6,39,"s"],[4,2,4,30,"b"],[4,17,4,30,"b"],[5,2,5,24,"b"],[5,11,5,24,"b"],[8,7,10,1,"f"]]}
+{"t":"fileload","testFile":"test/price.test.ts","hits":{},"modules":["src/price.ts"],"loadMs":{"src/price.ts":0.055},"reads":["test/__snapshots__/price.test.ts.snap"],"readsComplete":true}
+{"t":"test","file":"test/price.test.ts","name":"price > basic","line":4,"state":"pass","durationMs":1.305,"assertions":1,"hits":{"src/price.ts":[0,1,2,4,5,7]}}
+{"t":"test","file":"test/price.test.ts","name":"price > basic again","line":5,"state":"pass","durationMs":0.354,"assertions":1,"hits":{"src/price.ts":[0,1,2,4,5,7]}}
+{"t":"test","file":"test/price.test.ts","name":"price > bulk discount","line":6,"state":"pass","durationMs":0.339,"assertions":1,"hits":{"src/price.ts":[0,1,2,4,6,7]}}
+{"t":"test","file":"test/price.test.ts","name":"price > vip bulk","line":7,"state":"pass","durationMs":0.2,"assertions":1,"hits":{"src/price.ts":[1,2,4,6,8]}}
+{"t":"test","file":"test/price.test.ts","name":"price > throws on zero","line":8,"state":"pass","durationMs":0.915,"assertions":1,"hits":{"src/price.ts":[0,1,3]}}
+{"t":"test","file":"test/price.test.ts","name":"format > formats","line":11,"state":"pass","durationMs":0.216,"assertions":1,"hits":{"src/price.ts":[9]}}

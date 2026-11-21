@@ -1,0 +1,3 @@
+{"t":"file","file":"src/price.ts","sha256":"6e2adfda58f11a248f28b3a9e13af8c7632c72bfd4139c531bf1a36fadf66d1d","blocks":[[1,55,1,60,"b"],[1,7,7,1,"f"],[2,2,2,39,"b"],[2,16,2,39,"b"],[3,2,6,39,"s"],[4,2,4,30,"b"],[4,17,4,30,"b"],[5,2,5,24,"b"],[5,11,5,24,"b"],[8,7,10,1,"f"]]}
+{"t":"fileload","testFile":"test/other.test.ts","hits":{},"modules":["src/price.ts"],"loadMs":{"src/price.ts":0.055},"reads":["test/__snapshots__/other.test.ts.snap"],"readsComplete":true}
+{"t":"test","file":"test/other.test.ts","name":"duplicate of basic in other file","line":3,"state":"pass","durationMs":2.057,"assertions":1,"hits":{"src/price.ts":[0,1,2,4,5,7]}}
