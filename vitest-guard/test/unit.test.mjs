@@ -99,3 +99,14 @@ test('autoMemoryLimit stays below RAM share and V8 heap', () => {
 test('signature strips paths and numbers', () => {
   assert.equal(signature('\x1b[31mAssertionError: expected 5 to be 0 at /a/b/c.ts:3:4\n at x'), 'AssertionError: expected N to be N at <path>');
 });
+
+test('leak detector ignores env vars that Vitest sets per environment (SSR, MODE, …) but reports user ones', async () => {
+  const { captureOuter, diffOuter, VITEST_OWNED_ENV } = await import('../src/fingerprint.mjs');
+  const base = captureOuter();
+  const now = captureOuter();
+  now.env = { ...base.env };
+  for (const k of VITEST_OWNED_ENV) now.env[k] = String(base.env[k] ?? '') + 'x';
+  assert.deepEqual(diffOuter(base, now).filter((d) => d.kind === 'process.env'), []);
+  now.env.MY_FLAG = '1';
+  assert.deepEqual(diffOuter(base, now).find((d) => d.kind === 'process.env')?.keys, ['MY_FLAG']);
+});

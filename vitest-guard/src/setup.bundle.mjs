@@ -151,6 +151,9 @@ const fp = (() => {
 //  - "context" state: DOM, storage, globals, timers, mocks, node_modules singletons. Fresh per file in
 //    vmThreads, shared in isolate:false.
 
+// Set by Vitest itself per environment (Vite env mirrored into process.env), so they differ between a
+// jsdom file and a node file without any user code touching them.
+const VITEST_OWNED_ENV = new Set(['NODE_ENV', 'TEST', 'SSR', 'MODE', 'DEV', 'PROD', 'BASE_URL']);
 
 const BUILTINS = ['http', 'https', 'net', 'tls', 'dns', 'fs', 'fs/promises', 'child_process', 'events', 'util', 'timers', 'crypto', 'stream', 'zlib', 'os', 'path', 'url', 'worker_threads']; // not 'module': vm pools hand every context its own fake Module
 const nodeRequire = createRequire(import.meta.url);
@@ -180,7 +183,7 @@ const OUTER_SRC = `(function (process, BUILTINS) {
     const ignoreListeners = (opts && opts.ignoreListeners) || [];
     const out = [];
     const envKeys = new Set([...Object.keys(base.env), ...Object.keys(now.env)]);
-    const envDiff = [...envKeys].filter((k) => base.env[k] !== now.env[k] && !k.startsWith('VITEST') && k !== 'NODE_ENV' && k !== 'TEST');
+    const envDiff = [...envKeys].filter((k) => base.env[k] !== now.env[k] && !k.startsWith('VITEST') && !['NODE_ENV', 'TEST', 'SSR', 'MODE', 'DEV', 'PROD', 'BASE_URL'].includes(k)); // set by Vitest per environment (keep in sync with VITEST_OWNED_ENV)
     if (envDiff.length) out.push({ kind: 'process.env', keys: envDiff.slice(0, 20) });
     const ev = new Set([...Object.keys(base.listeners), ...Object.keys(now.listeners)]);
     const lsn = [...ev].filter((e) => !ignoreListeners.includes(e) && (now.listeners[e] || 0) > (base.listeners[e] || 0));
@@ -397,7 +400,7 @@ function removeExt(names, { expect: ex, assertionProto } = {}) {
   return gone;
 }
 
-return { BUILTINS, captureOuter, diffOuter, restoreEnv, WATCHED_GLOBALS, captureGlobals, diffGlobals, restoreGlobals, isLibHeadNode, captureDom, diffDom, restoreDom, captureModuleState, diffModuleState, EXT_OWNERS, captureExt, diffExt, removeExt };
+return { VITEST_OWNED_ENV, BUILTINS, captureOuter, diffOuter, restoreEnv, WATCHED_GLOBALS, captureGlobals, diffGlobals, restoreGlobals, isLibHeadNode, captureDom, diffDom, restoreDom, captureModuleState, diffModuleState, EXT_OWNERS, captureExt, diffExt, removeExt };
 })();
 
 // vitest-guard setup file. Put it FIRST in `setupFiles` (defineVitestGuardConfig does that).
