@@ -87,13 +87,13 @@ jobs:
           - { os: ubuntu-24.04, node: '22.22.2' }    # engines.node lower bound (jsdom 31: ^22.22.2)
           - { os: windows-2025, node: '22.22.2' }
     runs-on: ${{ matrix.os }}
-    env:
-      # temp dirs on the same drive as the checkout (Windows: C: vs D: made relative paths cross drives)
-      TEMP: ${{ runner.temp }}
-      TMP: ${{ runner.temp }}
-      TMPDIR: ${{ runner.temp }}
     timeout-minutes: 45
     steps:
+      - name: 'temp dirs on the checkout drive (Windows: C vs D made relative paths cross drives)'
+        shell: bash
+        run: |
+          t="${RUNNER_TEMP}"
+          { echo "TEMP=$t"; echo "TMP=$t"; echo "TMPDIR=$t"; } >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { persist-credentials: false }
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
