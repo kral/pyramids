@@ -21,7 +21,9 @@ after(() => { if (!process.env.VTO_TEST_KEEP) fs.rmSync(TMP, { recursive: true, 
 
 function project(name) {
   const dir = path.join(TMP, name);
-  fs.cpSync(path.join(HERE, 'fixtures', 'proj'), dir, { recursive: true });
+  // `filter` keeps cpSync on Node's JS implementation: the native one (no options) aborts the process with 0xC0000409
+  // on Windows when the source path is not ASCII (CI job "path with a space and diacritics")
+  fs.cpSync(path.join(HERE, 'fixtures', 'proj'), dir, { recursive: true, filter: () => true });
   fs.symlinkSync(NM, path.join(dir, 'node_modules'), 'junction');
   return dir;
 }
