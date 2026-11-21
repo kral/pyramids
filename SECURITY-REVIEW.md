@@ -272,7 +272,7 @@ Ordering is by severity, then likelihood. "PoC" refers to `/home/claude/sec-scra
 
 ### F16 – Analyzer binary discovery and env overrides — **Low**
 - `which/where vto` fallback: on Windows `where` searches the **current directory first**, so a repo shipping `vto.exe` gets it executed by `vitest-overlap --analyze-only`, which a user would reasonably expect not to run repo code. `VTO_BIN` and `VTO_COLLECTOR_DIR` load code from env (trusted, but document it).
-- **Fix**: resolve the binary only from the installed package (`require.resolve('@kral/vto-cli-<platform>/bin/vto')`), never from PATH or cwd by default. Verify its hash against a manifest shipped in the JS package.
+- **Fix**: resolve the binary only from the installed package (`require.resolve('@jirikral/vto-cli-<platform>/bin/vto')`), never from PATH or cwd by default. Verify its hash against a manifest shipped in the JS package.
 
 ### F17 – `affected --vitest` output unsafe for shell substitution — **Low**
 - `shell_quote` quotes are not interpreted inside `$(…)`. Word splitting and globbing still happen, and names starting with `-` (a test file at the root named `--reporter=x.test.ts`) become Vitest options.

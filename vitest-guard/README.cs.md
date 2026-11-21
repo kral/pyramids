@@ -1,6 +1,6 @@
 # vitest-guard
 
-> **Upozornění:** `@kral/vitest-guard` zatím není publikovaný na npm. Nespouštějte `npx vitest-guard`: název bez scope nám nepatří a kdokoli, kdo si ho zaregistruje, by spustil svůj kód na vašem stroji. Použijte lokální kopii (`node <cesta-k-vto>/vitest-guard/bin/vitest-guard.mjs`) nebo npm skript.
+> **Upozornění:** `@jirikral/vitest-guard` zatím není publikovaný na npm. Nespouštějte `npx vitest-guard`: název bez scope nám nepatří a kdokoli, kdo si ho zaregistruje, by spustil svůj kód na vašem stroji. Použijte lokální kopii (`node <cesta-k-vto>/vitest-guard/bin/vitest-guard.mjs`) nebo npm skript.
 
 
 *English version: [README.md](README.md).*
@@ -38,7 +38,7 @@ rizika, která se reprodukovala nebo je potvrzuje dokumentace/zdroják Vitestu.
 // vitest.config.ts
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
-import { defineVitestGuardConfig } from '@kral/vitest-guard';
+import { defineVitestGuardConfig } from '@jirikral/vitest-guard';
 
 export default defineVitestGuardConfig(
   defineConfig({ plugins: [react()], test: { environment: 'jsdom', setupFiles: ['./test/setup.ts'] } }),
@@ -47,7 +47,7 @@ export default defineVitestGuardConfig(
 ```
 
 `defineVitestGuardConfig` udělá:
-- vloží `@kral/vitest-guard/setup` jako **první** setup file (před vaše),
+- vloží `@jirikral/vitest-guard/setup` jako **první** setup file (před vaše),
 - `mode: 'vm'` → `pool: 'vmThreads'` a rozumný `vmMemoryLimit` (viz Paměť); `mode: 'shared'` → `threads` + `isolate: false`,
 - rozdělí běh do `projects`: soubory z `.vitest-guard/incompatible.json` (pro daný režim) běží v izolovaných `forks`,
   ostatní v rychlém režimu. Projekty mají `extends: true` a nemění Vite konfiguraci, takže sdílejí jeden Vite server,
@@ -125,7 +125,7 @@ a pro každou zvolí režim:
 | `restoreEnv` / `reset` | `true` | obnova `process.env` / resety shared režimu |
 | `resetModules` | `true` | shared: `vi.resetModules()` po každém souboru. **Nutné pro správnost `vi.mock`** (viz níže), izoluje i `src` stav. `node_modules` zůstávají v cache |
 | `diag` | jen pod CLI | diagnostika (znečištění na konci souboru, residual po resetu, sken stavu `node_modules`), stojí CPU |
-| `setup` | `'file'` | `'import'`: první setup soubor sám začíná `import '@kral/vitest-guard/setup'` (o modul méně na soubor) |
+| `setup` | `'file'` | `'import'`: první setup soubor sám začíná `import '@jirikral/vitest-guard/setup'` (o modul méně na soubor) |
 | `alwaysProjects` | `false` | `projects` i bez karantény (jinak se nepoužívají, stojí ~4 % CPU) |
 | `sharedPool` | `'threads'` | `'forks'` pro shared režim |
 | `integrity` | `true` | shared: kontrola integrity `expect`/matcherů/`vi` na začátku souboru (F12) |

@@ -1,6 +1,6 @@
 # vitest-guard
 
-> **Warning:** `@kral/vitest-guard` is not published to npm yet. Do not run `npx vitest-guard`: the unscoped name is not ours, and whoever registers it would run their code on your machine. Use the local copy (`node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs`) or an npm script.
+> **Warning:** `@jirikral/vitest-guard` is not published to npm yet. Do not run `npx vitest-guard`: the unscoped name is not ours, and whoever registers it would run their code on your machine. Use the local copy (`node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs`) or an npm script.
 
 
 *Czech version: [README.cs.md](README.cs.md).*
@@ -36,7 +36,7 @@ limitations): [../docs/vitest-guard/index.md](../docs/vitest-guard/index.md).
 // vitest.config.ts
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
-import { defineVitestGuardConfig } from '@kral/vitest-guard';
+import { defineVitestGuardConfig } from '@jirikral/vitest-guard';
 
 export default defineVitestGuardConfig(
   defineConfig({ plugins: [react()], test: { environment: 'jsdom', setupFiles: ['./test/setup.ts'] } }),
@@ -45,7 +45,7 @@ export default defineVitestGuardConfig(
 ```
 
 `defineVitestGuardConfig`:
-- puts `@kral/vitest-guard/setup` **first** in `setupFiles` (one bundled module; every setup module costs a fetch and an
+- puts `@jirikral/vitest-guard/setup` **first** in `setupFiles` (one bundled module; every setup module costs a fetch and an
   evaluation per test file in vm pools);
 - sets the pool. `vm` → `vmThreads` plus a sane `vmMemoryLimit`. `shared` → `threads` + `isolate:false`;
 - quarantine: files in `.vitest-guard/incompatible.json` (for the mode) run in a sibling `forks` project. Without a
@@ -145,7 +145,7 @@ and picks a mode per group:
 | `resetModules` | `true` | shared: `vi.resetModules()` after every file. **Required for `vi.mock` correctness** |
 | `integrity` | `true` | shared: integrity check of `expect` / matchers / `vi` at file start (see Security) |
 | `diag` | CLI only | pollution diff at file end, residual after reset, node_modules export-state scan (costs CPU) |
-| `setup` | `'file'` | `'import'`: your first setup file starts with `import '@kral/vitest-guard/setup'` (one module less per file) |
+| `setup` | `'file'` | `'import'`: your first setup file starts with `import '@jirikral/vitest-guard/setup'` (one module less per file) |
 | `alwaysProjects` | `false` | create `projects` even without a quarantine |
 | `sharedPool` | `'threads'` | `'forks'` for shared mode |
 | `ignoreModules` | `['stylis/…']` | node_modules paths whose exports hold parser scratch state (not reported as leaks) |

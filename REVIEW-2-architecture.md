@@ -159,7 +159,7 @@ there as an untested gap (ARCHITECTURE.md §5, "Monorepos") and is now a reprodu
 
 ### 1.2 Adapter and feature detection
 
-One package, `@kral/vto-vitest-adapter`, is the only code allowed to name anything in §1.1. It has two entry
+One package, `@jirikral/vto-vitest-adapter`, is the only code allowed to name anything in §1.1. It has two entry
 points, because half the coupling lives in the worker.
 
 ```
@@ -320,7 +320,7 @@ Contract tests, all in the cheap CI suite:
 
 Reduce the number of implementations rather than testing more of them:
 
-- One JS reader, `@kral/vto-raw` (≈150 lines), used by the daemon store, verify, vitest-guard and fault injection.
+- One JS reader, `@jirikral/vto-raw` (≈150 lines), used by the daemon store, verify, vitest-guard and fault injection.
 - One stored-map form. `vto pack` writes what the daemon reads; the daemon stores root-relative paths (fixes N6).
 - One content-hash definition: **SHA-256 of the UTF-8 text after BOM removal and CRLF→LF**, used by the
   collector, the analyzer's base-blob check and the daemon (fixes N3; drop the unused 16-hex `hash`).
@@ -328,7 +328,7 @@ Reduce the number of implementations rather than testing more of them:
 - One owner of `env.json`: vitest-guard (it is in vitest-guard's directory and vitest-guard works without vto). The daemon
   hands it probe records through an exported `mergeEnvEvidence()` and never writes the file itself (fixes N4).
 - One git driver, the hardened one, and one module that turns "what changed" into hunks.
-- One client library `@kral/vto-ipc-client` (discovery, auth, framing) used by mcp, the CLI and the tui; delete the
+- One client library `@jirikral/vto-ipc-client` (discovery, auth, framing) used by mcp, the CLI and the tui; delete the
   copy in `tui/src/sources/protocol.ts:45-136`. One mock daemon.
 
 ---
@@ -500,8 +500,8 @@ Recommendation, same direction as ARCHITECTURE.md ADR-2 and still not done:
 
 | tier | artefact | when used |
 |---|---|---|
-| default | **`@kral/vto-analyzer-wasm`** (`wasm32-wasip1`, run through `node:wasi`), a regular dependency | always available; one file for every OS and CPU, not an executable, nothing for AppLocker to block |
-| optional speed-up | `@kral/vto-analyzer-<os>-<arch>` native packages as `optionalDependencies`: `win32-x64`, `win32-arm64`, `linux-x64-gnu`, `linux-x64-musl`, `linux-arm64-gnu`, `darwin-arm64`, `darwin-x64` | picked when present and its hash matches the value compiled into the **JS** package (not the one beside the binary) |
+| default | **`@jirikral/vto-analyzer-wasm`** (`wasm32-wasip1`, run through `node:wasi`), a regular dependency | always available; one file for every OS and CPU, not an executable, nothing for AppLocker to block |
+| optional speed-up | `@jirikral/vto-analyzer-<os>-<arch>` native packages as `optionalDependencies`: `win32-x64`, `win32-arm64`, `linux-x64-gnu`, `linux-x64-musl`, `linux-arm64-gnu`, `darwin-arm64`, `darwin-x64` | picked when present and its hash matches the value compiled into the **JS** package (not the one beside the binary) |
 | override | `VTO_ANALYZER=/path` (one variable; drop `VTO_BIN`) | developers, air-gapped installs |
 
 Work needed for the WASM tier **[E]** (not built in this review; the `wasm32-wasip1` target is not installed
@@ -659,9 +659,9 @@ Dependency-ordered. An item lists what it needs before it can start.
 |---|---|---|---|
 | B1 | Scope decisions S1–S6 with the owner (one meeting), then delete/move | – | S to decide, M to do |
 | B2 | `contracts/`: schemas for raw, map, env, ipc, report; golden fixtures; producer + reader tests; one JS reader; one stored-map form with relative paths (N6); one version field | B1, A7 | M–L |
-| B3 | `@kral/vto-vitest-adapter` with capability probes; replace the three `createVitest` copies; lint ban on internals elsewhere | B1, A7 | L |
+| B3 | `@jirikral/vto-vitest-adapter` with capability probes; replace the three `createVitest` copies; lint ban on internals elsewhere | B1, A7 | L |
 | B4 | Compatibility matrix in CI (§1.3), nightly `beta` row | B3 | M |
-| B5 | Engine split (§3.1) and mcp → TypeScript, generated protocol types shared with the tui, `@kral/vto-ipc-client` | B1, B2 | M–L |
+| B5 | Engine split (§3.1) and mcp → TypeScript, generated protocol types shared with the tui, `@jirikral/vto-ipc-client` | B1, B2 | M–L |
 | B6 | Git out of the analyzer; one hardened git driver; analyzer NFC + explicit case flag + UNC | B2 | M |
 
 ### Phase C — make it installable and defensible

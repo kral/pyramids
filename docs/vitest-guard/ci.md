@@ -7,7 +7,7 @@ Principles:
 - PRs run the fast mode. A nightly job runs the isolated reference suite and `vitest-guard verify`.
 - Quarantine files are committed and reviewed (CODEOWNERS recommended). A CI job never commits them: it fails and
   tells the developer to run `check` locally.
-- `@kral/vitest-guard` is not on npm yet. The jobs below check out the vto repository at a pinned commit and install
+- `@jirikral/vitest-guard` is not on npm yet. The jobs below check out the vto repository at a pinned commit and install
   the tarball. Replace `<OWNER>/<VTO_REPO>` and `<VTO_SHA>`; pin actions by SHA in real use. The examples were
   written from the CLI's documented behaviour and not executed on a hosted runner (unverified there).
 
@@ -41,7 +41,7 @@ jobs:
           npm i --no-save "$RUNNER_TEMP"/kral-vitest-guard-*.tgz
       - run: npx vitest run               # exit code = the gate; wrapped config, VITEST_GUARD_MODE unset
       # optional: detect a newly vm-incompatible test (exit 4 = would change the quarantine)
-      # - run: node node_modules/@kral/vitest-guard/bin/vitest-guard.mjs check
+      # - run: node node_modules/@jirikral/vitest-guard/bin/vitest-guard.mjs check
 
   nightly:                                # whole suite isolated + false-green hunt
     if: github.event_name == 'schedule'
@@ -59,9 +59,9 @@ jobs:
           npm i --no-save "$RUNNER_TEMP"/kral-vitest-guard-*.tgz
       - run: npx vitest run
         env: { VITEST_GUARD_MODE: isolated }  # reference: Vitest default isolation
-      - run: node node_modules/@kral/vitest-guard/bin/vitest-guard.mjs verify --sample all
+      - run: node node_modules/@jirikral/vitest-guard/bin/vitest-guard.mjs verify --sample all
         # exit 5 = false green, 4 = order-dependent / quarantine would change, 1 = failures
-      - run: node node_modules/@kral/vitest-guard/bin/vitest-guard.mjs check --prune
+      - run: node node_modules/@jirikral/vitest-guard/bin/vitest-guard.mjs check --prune
         # exit 4 = quarantine changed (an entry could be released or added): open a PR with the diff
 ```
 
@@ -109,7 +109,7 @@ steps:
     env: { VITEST_GUARD_MODE: isolated }
     condition: and(succeeded(), eq(variables['Build.Reason'], 'Schedule'))
     displayName: tests (isolated reference)
-  - script: node node_modules/@kral/vitest-guard/bin/vitest-guard.mjs verify --sample all
+  - script: node node_modules/@jirikral/vitest-guard/bin/vitest-guard.mjs verify --sample all
     workingDirectory: $(Build.SourcesDirectory)/app
     condition: and(succeeded(), eq(variables['Build.Reason'], 'Schedule'))
     displayName: vitest-guard verify (exit 5 = false green, 4 = quarantine changes)

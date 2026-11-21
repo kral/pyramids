@@ -242,7 +242,7 @@ correct and safe. A changed test file selects the whole file, which is good. Gap
 
 ### M11. Windows: distribution and paths
 - **Distribution:** ship the analyzer as a plain CLI binary in per-platform npm packages through
-  `optionalDependencies` (`@kral/vto-cli-win32-x64-msvc`, `-win32-arm64-msvc`, `-linux-x64-gnu`, `-linux-x64-musl`,
+  `optionalDependencies` (`@jirikral/vto-cli-win32-x64-msvc`, `-win32-arm64-msvc`, `-linux-x64-gnu`, `-linux-x64-musl`,
   `-darwin-arm64`, `-darwin-x64`), plus a tiny JS shim in `bin`. This is the oxlint/biome/esbuild pattern, and
   oxc-parser in the collector already depends on it.
   - Build natively on GitHub Actions `windows-latest` (MSVC) rather than cross-compiling. If you must

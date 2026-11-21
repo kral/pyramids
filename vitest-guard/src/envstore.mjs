@@ -6,7 +6,7 @@
 // and concurrent config loads lost updates. Every writer MUST go through `updateEnv()` (or `foldEnvRecords()`).
 //
 // No dependency on Vitest or on the rest of vitest-guard: safe to import from the daemon
-// (`import { updateEnv } from '@kral/vitest-guard/envstore'` or by path `vitest-guard/src/envstore.mjs`).
+// (`import { updateEnv } from '@jirikral/vitest-guard/envstore'` or by path `vitest-guard/src/envstore.mjs`).
 //
 // ---------------------------------------------------------------------------------------------------------
 // Document:  { format: 'vto-env/1', producer, updatedAt, files: { <root-relative path, '/'>: Entry } }

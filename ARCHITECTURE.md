@@ -218,8 +218,8 @@ ranges, see §6):
 | artefact | contents | how installed |
 |---|---|---|
 | `vto` (npm, JS) | CLI shim, collector, verify, daemon, MCP server | `npm i -D vto` |
-| `@kral/vto-analyzer-<os>-<arch>` (npm, optional deps) | static Rust binary: win32-x64-msvc, win32-arm64-msvc, linux-x64-gnu, linux-x64-musl, linux-arm64-gnu, darwin-arm64, darwin-x64 | `optionalDependencies` (oxlint/biome pattern, REVIEW-1 M11). `mcp/src/platform.mjs` `analyzerCandidates` already expects `@kral/vto-analyzer-<platform>-<arch>` |
-| `@kral/vto-analyzer-wasm` | `wasm32-wasip1` build run via `node:wasi` | fallback for `--omit=optional`, odd platforms and corporate mirrors that drop binaries |
+| `@jirikral/vto-analyzer-<os>-<arch>` (npm, optional deps) | static Rust binary: win32-x64-msvc, win32-arm64-msvc, linux-x64-gnu, linux-x64-musl, linux-arm64-gnu, darwin-arm64, darwin-x64 | `optionalDependencies` (oxlint/biome pattern, REVIEW-1 M11). `mcp/src/platform.mjs` `analyzerCandidates` already expects `@jirikral/vto-analyzer-<platform>-<arch>` |
+| `@jirikral/vto-analyzer-wasm` | `wasm32-wasip1` build run via `node:wasi` | fallback for `--omit=optional`, odd platforms and corporate mirrors that drop binaries |
 | `vitest-guard` (npm, JS) | independent package, own semver | `npm i -D vitest-guard` |
 
 Where state lives (today, plus the recommended layout):
@@ -447,7 +447,7 @@ There are 25 touch points. Six are high risk (V1, V6–V8, V9, V10, V14), and **
 
 ### 4.2 Compatibility strategy
 
-1. **Adapter layer.** Create `@kral/vto-vitest-adapter` (one module per side, main and worker). It is the only code
+1. **Adapter layer.** Create `@jirikral/vto-vitest-adapter` (one module per side, main and worker). It is the only code
    allowed to touch V1–V18. It exposes a small interface:
    - `getEvaluatedModules()`
    - `getAssertionCount(ctx)`

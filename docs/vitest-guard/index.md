@@ -3,7 +3,7 @@
 vitest-guard makes Vitest's two fast execution modes safe enough to use as the default for a whole suite. This page is
 the one-page overview; the other pages go deeper.
 
-> Status: the package is `@kral/vitest-guard`, version 0.1.0, **not published to npm yet**. Do not run `npx vitest-guard`: the unscoped name is not ours, and whoever registers it would run their code on your machine. Use the local copy (`node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs`) or an npm script.
+> Status: the package is `@jirikral/vitest-guard`, version 0.1.0, **not published to npm yet**. Do not run `npx vitest-guard`: the unscoped name is not ours, and whoever registers it would run their code on your machine. Use the local copy (`node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs`) or an npm script.
 
 ## The problem
 

@@ -1,4 +1,4 @@
-# Publish @kral/vitest-guard to npm (usable from npm, pnpm and yarn) with SLSA provenance.
+# Publish @jirikral/vitest-guard to npm (usable from npm, pnpm and yarn) with SLSA provenance.
 #
 # Trigger: push a tag `vitest-guard-v<version>` whose version equals vitest-guard/package.json.
 # Safety: the publish job runs in the protected environment `npm-publish`. Nothing is published until
@@ -52,7 +52,7 @@ jobs:
           want="${GITHUB_REF_NAME#vitest-guard-v}"
           have="$(node -p "require('./vitest-guard/package.json').version")"
           name="$(node -p "require('./vitest-guard/package.json').name")"
-          [ "$name" = "@kral/vitest-guard" ] || { echo "::error::unexpected package name $name"; exit 1; }
+          [ "$name" = "@jirikral/vitest-guard" ] || { echo "::error::unexpected package name $name"; exit 1; }
           [ "$want" = "$have" ] || { echo "::error::tag $GITHUB_REF_NAME does not match package.json version $have"; exit 1; }
       - name: install and test the package itself
         working-directory: vitest-guard

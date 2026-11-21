@@ -39,7 +39,7 @@ vitest-guard completely, `VITEST_GUARD_MODE=off` (your untouched config).
 ## FAQ
 
 **Can I use `npx vitest-guard`?** No – never: the unscoped npm name is not ours (anyone could publish it). Use an npm script or
-`node node_modules/@kral/vitest-guard/bin/vitest-guard.mjs`.
+`node node_modules/@jirikral/vitest-guard/bin/vitest-guard.mjs`.
 
 **Do I need the CLI at all?** Day to day, no: `vitest run` with the wrapped config is the fast mode and uses the
 committed quarantine. The CLI creates and maintains that quarantine and checks for false greens.

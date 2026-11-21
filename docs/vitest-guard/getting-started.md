@@ -3,7 +3,7 @@
 Requirements: Node `^22.22.2 || >=24.15.0`, Vitest `>=5.1 <6` installed in your project (vitest-guard always uses the
 project's own Vitest; `package.json` declares it as a peer dependency).
 
-> `@kral/vitest-guard` is not published to npm yet. Do not run `npx vitest-guard`: the unscoped name is not ours, and whoever registers it would run their code on your machine. Use the local copy (`node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs`) or an npm script. Every command below runs the local copy.
+> `@jirikral/vitest-guard` is not published to npm yet. Do not run `npx vitest-guard`: the unscoped name is not ours, and whoever registers it would run their code on your machine. Use the local copy (`node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs`) or an npm script. Every command below runs the local copy.
 
 ## 1. Install
 
@@ -35,14 +35,14 @@ detects that its setup files live outside your project root and uses an identica
 How to run the CLI (the package has `bin: vitest-guard`):
 
 - as an npm script (recommended, works on all platforms): `"guard": "vitest-guard"` then `npm run guard -- check`;
-- directly: `node node_modules/@kral/vitest-guard/bin/vitest-guard.mjs check` (macOS/Linux/PowerShell alike).
+- directly: `node node_modules/@jirikral/vitest-guard/bin/vitest-guard.mjs check` (macOS/Linux/PowerShell alike).
 
 ## 2. Wrap the config
 
 ```ts
 // vitest.config.ts
 import { defineConfig } from 'vitest/config';
-import { defineVitestGuardConfig } from '@kral/vitest-guard';
+import { defineVitestGuardConfig } from '@jirikral/vitest-guard';
 
 export default defineVitestGuardConfig(
   defineConfig({ test: { environment: 'jsdom', setupFiles: ['./test/setup.ts'] } }),
@@ -57,7 +57,7 @@ original config for everyday use, create `vitest.guard.config.ts` and pass `--co
 ## 3. Ten-minute walkthrough
 
 Same on Windows PowerShell, macOS and Linux (only the shell differs). Replace `vitest-guard` by
-`node node_modules/@kral/vitest-guard/bin/vitest-guard.mjs` if you have no npm script.
+`node node_modules/@jirikral/vitest-guard/bin/vitest-guard.mjs` if you have no npm script.
 
 1. Choose the mode per project, measuring on the whole suite (minutes, CPU heavy):
    `npm run guard -- compare --sample all`. It prints forks vs vm vs shared per project and a recommendation, and

@@ -33,7 +33,7 @@ test('killTree uses taskkill /T /F on Windows and the process group on POSIX', (
 
 test('analyzer resolution never uses PATH or cwd', () => {
   const c = analyzerCandidates({ platform: 'win32', arch: 'x64', here: '/x/mcp/src' });
-  assert.ok(c.some((x) => x.pkg === '@kral/vto-analyzer-win32-x64' && x.file === 'bin/vto.exe'));
+  assert.ok(c.some((x) => x.pkg === '@jirikral/vto-analyzer-win32-x64' && x.file === 'bin/vto.exe'));
   assert.ok(c.every((x) => typeof x === 'object' && (x.pkg || path.isAbsolute(x.dev || x.env))));
   // installed inside node_modules: no sibling cargo build is ever considered (it would be repo-controlled)
   assert.ok(!analyzerCandidates({ here: '/proj/node_modules/vto-mcp/src', env: {} }).some((x) => x.dev));

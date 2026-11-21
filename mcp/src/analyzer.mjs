@@ -18,7 +18,7 @@ const sha256File = (f) => createHash('sha256').update(readFileSync(f)).digest('h
  * Which analyzer binary runs (SECURITY N1a). Never a path the project under test controls:
  * the project's node_modules, PATH and the current directory are not searched.
  *  - VTO_ANALYZER: explicit user configuration (environment, outside the repository); must be absolute
- *  - @kral/vto-analyzer-<platform>-<arch> resolved from vto's OWN installation only; the binary's sha256
+ *  - @jirikral/vto-analyzer-<platform>-<arch> resolved from vto's OWN installation only; the binary's sha256
  *    must equal the hash pinned in analyzer-manifest.json shipped inside vto-mcp (a hash stored in
  *    the binary's own package proves nothing) – a missing pin is a refusal, not a pass
  *  - development: the cargo build of this checkout (only when vto does not live in node_modules)
@@ -51,7 +51,7 @@ export function resolveAnalyzer(opts = {}) {
     if (sha256File(f) !== want) throw new Error(`${c.pkg}@${version}: binary hash does not match vto-mcp's analyzer-manifest.json – reinstall vto`);
     return done(f);
   }
-  throw new Error(`vto analyzer binary not found${problems.length ? ` (${problems.join('; ')})` : ''}: set VTO_ANALYZER to an absolute path, install the matching @kral/vto-analyzer-<platform>-<arch> release, or \`cargo build --release\` in analyzer/`);
+  throw new Error(`vto analyzer binary not found${problems.length ? ` (${problems.join('; ')})` : ''}: set VTO_ANALYZER to an absolute path, install the matching @jirikral/vto-analyzer-<platform>-<arch> release, or \`cargo build --release\` in analyzer/`);
   function done(f) { if (useCache) cached = f; return f; }
 }
 

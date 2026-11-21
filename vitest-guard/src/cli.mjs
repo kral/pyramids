@@ -669,7 +669,7 @@ export function requireWrapped(c) {
   or:   keep your config and pass a wrapped one:  vitest-guard ${'<command>'} --config vitest.guard.config.ts
 see --help`;
 }
-const PKG = (() => { try { return JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')); } catch { return { name: '@kral/vitest-guard', version: '0.0.0' }; } })();
+const PKG = (() => { try { return JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')); } catch { return { name: '@jirikral/vitest-guard', version: '0.0.0' }; } })();
 const COMMANDS = new Set(['check', 'verify', 'compare', 'calibrate', 'plan', 'run', 'hunt', 'scan', 'report']);
 
 export async function main(argv) {

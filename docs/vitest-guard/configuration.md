@@ -1,13 +1,13 @@
 # Configuration
 
 ```ts
-import { defineVitestGuardConfig } from '@kral/vitest-guard';
+import { defineVitestGuardConfig } from '@jirikral/vitest-guard';
 export default defineVitestGuardConfig(userConfig, options);
 ```
 
 `userConfig` is a plain Vitest/Vite config object (not a function, not a promise; vitest-guard throws a message that
 says how to resolve it first). The result is a config object; your own keys are kept. Types:
-`node_modules/@kral/vitest-guard/src/index.d.ts` (`VitestGuardOptions`).
+`node_modules/@jirikral/vitest-guard/src/index.d.ts` (`VitestGuardOptions`).
 
 ## What the function changes
 
@@ -53,11 +53,11 @@ says how to resolve it first). The result is a config object; your own keys are 
 | `ignoreModules` | string[] | `[]` (+ built-in stylis entries) | node_modules paths whose exports hold scratch state (also learned after 3 consecutive changes) |
 | `sharedPool` | `'threads' \| 'forks'` | `'threads'` | pool used by shared mode |
 | `alwaysProjects` | boolean | `false` | emit `test.projects` even without quarantine |
-| `setup` | `'file' \| 'import'` | `'file'` | `'import'`: your first setup file must start with `import '@kral/vitest-guard/setup'` (one module less per file) |
+| `setup` | `'file' \| 'import'` | `'file'` | `'import'`: your first setup file must start with `import '@jirikral/vitest-guard/setup'` (one module less per file) |
 
 Exported helpers: `autoMemoryLimit(maxWorkers)` (min of 50 % RAM / workers and 60 % of the V8 heap limit, at least
 512 MB), `readQuarantine(root, mode, file?)`, `setupFileFor(root, file?)`, `SETUP_FILE`, `SETUP_TAIL_FILE`,
-`DEFAULT_INCLUDE`, `DEFAULT_EXCLUDE`, `VitestGuardSequencer`. Subpath exports: `@kral/vitest-guard/setup`,
+`DEFAULT_INCLUDE`, `DEFAULT_EXCLUDE`, `VitestGuardSequencer`. Subpath exports: `@jirikral/vitest-guard/setup`,
 `/sequencer`, `/realm`, `/envstore`.
 
 ## Environment variables

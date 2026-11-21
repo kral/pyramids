@@ -11,7 +11,7 @@ project. The resolved options travel to the setup file through `test.provide.vit
 
 For every test file Vitest runs, in this order:
 
-1. vitest-guard's setup (`@kral/vitest-guard/setup`, one bundled module `setup.bundle.mjs`, because each extra module
+1. vitest-guard's setup (`@jirikral/vitest-guard/setup`, one bundled module `setup.bundle.mjs`, because each extra module
    costs a fetch and an evaluation per file in vm pools). Skipped with `setup: 'import'`, where your first setup file
    imports it.
 2. root `setupFiles` (projects with `extends: true`), then the project's `setupFiles`.

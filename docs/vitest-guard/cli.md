@@ -4,7 +4,7 @@ Invocation (never `npx vitest-guard`: the unscoped npm name is not ours):
 
 ```sh
 npm run guard -- <command> [options]            # with "guard": "vitest-guard" in package.json scripts
-node node_modules/@kral/vitest-guard/bin/vitest-guard.mjs <command> [options]
+node node_modules/@jirikral/vitest-guard/bin/vitest-guard.mjs <command> [options]
 ```
 
 Everything below is also printed by `vitest-guard --help` and `vitest-guard <command> --help` (also `vitest-guard help <command>`).
