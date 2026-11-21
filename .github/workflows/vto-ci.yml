@@ -87,6 +87,11 @@ jobs:
           - { os: ubuntu-24.04, node: '22.22.2' }    # engines.node lower bound (jsdom 31: ^22.22.2)
           - { os: windows-2025, node: '22.22.2' }
     runs-on: ${{ matrix.os }}
+    env:
+      # temp dirs on the same drive as the checkout (Windows: C: vs D: made relative paths cross drives)
+      TEMP: ${{ runner.temp }}
+      TMP: ${{ runner.temp }}
+      TMPDIR: ${{ runner.temp }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
