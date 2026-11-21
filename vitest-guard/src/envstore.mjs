@@ -157,6 +157,18 @@ export function readEnv(root) {
   return { files, producer: typeof doc?.producer === 'string' ? doc.producer : null, updatedAt: typeof doc?.updatedAt === 'string' ? doc.updatedAt : null };
 }
 
+// Windows: replacing a file that another process has open (a concurrent reader) fails with
+// EPERM/EBUSY/EACCES for a short moment; retry briefly instead of losing the write.
+function renameWithRetry(from, to) {
+  const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  for (let attempt = 0; ; attempt++) {
+    try { fs.renameSync(from, to); return; } catch (e) {
+      if (process.platform !== 'win32' || !['EPERM', 'EBUSY', 'EACCES'].includes(e.code) || attempt >= 40) throw e;
+      sleep(Math.min(5 + attempt * 5, 50));
+    }
+  }
+}
+
 function writeEnv(root, files, producer, at) {
   const dir = safeStateDir(root);
   if (!dir) return false;
@@ -166,7 +178,7 @@ function writeEnv(root, files, producer, at) {
     const sorted = Object.fromEntries(Object.keys(files).sort().map((k) => [k, files[k]]));
     // 'wx': never follows a planted symlink; rename replaces env.json itself (also when that is a symlink)
     fs.writeFileSync(tmp, JSON.stringify({ format: ENV_FORMAT, producer, updatedAt: at, files: sorted }, null, 1) + '\n', { flag: 'wx', mode: 0o644 });
-    fs.renameSync(tmp, file);
+    renameWithRetry(tmp, file);
     return true;
   } catch { try { fs.rmSync(tmp, { force: true }); } catch {} return false; }
 }
