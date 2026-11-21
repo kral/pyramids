@@ -141,7 +141,7 @@ const STEPS = {
   /** every CLI answers --help and --version; the dispatcher's own tests */
   smoke() {
     node([path.join(REPO, '.github/scripts/smoke-cli.mjs')]);
-    nodeTests(REPO, testFiles(path.join(REPO, '.github/scripts/test')));
+    nodeTests(REPO, [...testFiles(path.join(REPO, '.github/scripts/test')), ...testFiles(path.join(REPO, 'bin/test'))]);
   },
 
   analyzer() {

@@ -126,6 +126,14 @@ const COMMANDS = {
     detail: 'Fast Vitest pools made safe (vmThreads / shared workers). Needs vitest.config wrapped with defineVitestGuardConfig.',
     node: 'vitest-guard/bin/vitest-guard.mjs', helpArgs: ['--help'],
   },
+  savings: {
+    summary: 'savings: estimate (before installing) | measured (realised, from the daemon metrics)',
+    usage: 'vto savings estimate --suite-min MIN [--ci-runs N] [--devs N] [--usd-per-min USD] … [--json]\n       vto savings measured [--since 30d] [--root DIR] [--json]',
+    sub: {
+      estimate: { node: 'bin/savings-estimate.mjs', helpArgs: ['--help'], summary: 'projected monthly CI minutes, cost, waiting and tokens saved (transparent model, every input a flag)' },
+      measured: { node: 'mcp/bin/vto-daemon.mjs', prepend: ['savings'], summary: 'time / CPU / tokens saved by past runs [--since 30d] (same as vto daemon savings)' },
+    },
+  },
   ci: {
     summary: 'print a CI template: `vto ci github` | `vto ci azure`',
     usage: 'vto ci github|azure [--out FILE]',

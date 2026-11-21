@@ -33,12 +33,12 @@ const VERDICT = {
 };
 
 // One closing block: title, verdict line, key/value facts, optional table, next steps.
-export function summary({ title, verdict, label, headline, facts = [], tableLines = [], next = [] }, { out = (s) => console.log(s), stream = process.stdout, env = process.env } = {}) {
+export function summary({ tool = 'vitest-guard', title, verdict, label, headline, facts = [], tableLines = [], next = [] }, { out = (s) => console.log(s), stream = process.stdout, env = process.env } = {}) {
   const p = painter(colorEnabled(stream, env));
   const v = VERDICT[verdict] || VERDICT.fail;
   const unicode = p.on || process.platform !== 'win32';
   const rule = p.dim((unicode ? '─' : '-').repeat(60));
-  const lines = [rule, ` ${p.bold('vitest-guard ' + title)}`];
+  const lines = [rule, ` ${p.bold(tool + ' ' + title)}`];
   const tag = p[v.color](p.bold(`${unicode ? v.sym + ' ' : ''}${label || v.ascii}`));
   lines.push(` ${tag}  ${headline}`);
   const kw = Math.max(0, ...facts.filter(([, val]) => val !== undefined && val !== null && val !== '').map(([k]) => width(k)));

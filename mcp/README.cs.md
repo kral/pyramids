@@ -85,7 +85,7 @@ průměrně vybráno 74 z 3174 testů (2,3 %), vto 8,6 s proti 58 s plného běh
 
 ## Nastavení pro Claude Code
 
-Požadavky: Node ≥ 20 (doporučeno 22), vlastní `vitest` projektu (testováno 5.1.x), git volitelně (jen
+Požadavky: Node `^22.22.2 || >=24.15.0`, vlastní `vitest` projektu (testováno 5.1.x), git volitelně (jen
 pro `base`), binárka analyzeru (`cargo build --release` v `analyzer/`, npm balíček
 `@jirikral/vto-analyzer-<platforma>-<arch>`, nebo `VTO_ANALYZER=<cesta>`).
 

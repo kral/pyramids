@@ -162,7 +162,7 @@ Plus `analyzer/faultinject` (60 mutants on the analyzer fixture, recall 100 %) f
 
 ## Setup for Claude Code
 
-Requirements: Node ≥ 20 (22 recommended), the project's own `vitest` (5.1.x tested), git optional
+Requirements: Node `^22.22.2 || >=24.15.0`, the project's own `vitest` (5.1.x tested), git optional
 (only for `base`), the analyzer binary (`cargo build --release` in `analyzer/`, or the npm package
 `@jirikral/vto-analyzer-<platform>-<arch>`, or `VTO_ANALYZER=<path>`).
 

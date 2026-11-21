@@ -12,10 +12,10 @@ Preferred: from a tarball (a real copy inside `node_modules`, no symlink).
 ```sh
 # in the vto checkout
 cd vitest-guard
-npm pack                      # creates kral-vitest-guard-0.1.0.tgz (23 files)
+npm pack                      # creates jirikral-vitest-guard-0.1.0-alpha.2.tgz (26 files)
 # in your project
 cd /path/to/your-project
-npm i -D /path/to/vto/vitest-guard/kral-vitest-guard-0.1.0.tgz
+npm i -D /path/to/vto/vitest-guard/jirikral-vitest-guard-0.1.0-alpha.2.tgz
 ```
 
 PowerShell:
@@ -24,7 +24,7 @@ PowerShell:
 cd C:\src\vto\vitest-guard
 npm pack
 cd C:\src\your-project
-npm i -D C:\src\vto\vitest-guard\kral-vitest-guard-0.1.0.tgz
+npm i -D C:\src\vto\vitest-guard\jirikral-vitest-guard-0.1.0-alpha.2.tgz
 ```
 
 From the repository directly (`npm i -D ../vto/vitest-guard`, `npm link`) creates a symlink. That works: vitest-guard
