@@ -110,3 +110,20 @@ test('leak detector ignores env vars that Vitest sets per environment (SSR, MODE
   now.env.MY_FLAG = '1';
   assert.deepEqual(diffOuter(base, now).find((d) => d.kind === 'process.env')?.keys, ['MY_FLAG']);
 });
+
+test('ui: plain summary without colour, colour only when forced', async () => {
+  const { summary, colorEnabled, table, painter } = await import('../src/ui.mjs');
+  assert.equal(colorEnabled({ isTTY: true }, { NO_COLOR: '1' }), false);
+  assert.equal(colorEnabled({ isTTY: false }, { FORCE_COLOR: '1' }), true);
+  assert.equal(colorEnabled({ isTTY: false }, {}), false);
+  let out = '';
+  summary({ title: 'check · vm', verdict: 'ok', headline: '3 files passed', facts: [['exit code', 0], ['skipped', undefined]], next: ['done'] }, { out: (s) => (out = s), stream: { isTTY: false }, env: {} });
+  assert.doesNotMatch(out, /\x1b\[/);
+  assert.match(out, /OK {2}3 files passed/);
+  assert.match(out, /exit code {2}0/);
+  assert.doesNotMatch(out, /skipped/);
+  summary({ title: 't', verdict: 'fail', headline: 'h' }, { out: (s) => (out = s), stream: { isTTY: false }, env: { FORCE_COLOR: '1' } });
+  assert.match(out, /\x1b\[31m/);
+  const t = table(['a', 'bb'], [['xyz', painter(true).red('1')]], ['l', 'r'], painter(false));
+  assert.equal(t[1], 'xyz   ' + '\x1b[31m1\x1b[39m');
+});

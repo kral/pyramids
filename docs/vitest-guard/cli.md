@@ -29,6 +29,12 @@ From `contracts/DECISIONS.md` D3:
 Precedence inside `check`: 1 beats 4. Inside `verify`: 5 beats 4. `--help` and `--version` exit 0 on stdout; usage
 errors print one message plus "see --help" on stderr.
 
+## Output
+
+`check`, `verify` and `compare` end with a summary block: a verdict (`OK`, `QUARANTINE`, `SAFE`, `FALSE GREEN`, `FAIL`, `MEASURED`), the key numbers, the exit code and the suggested next step. `compare` prints the mode comparison as a table.
+
+Colour is used only on an interactive terminal. `NO_COLOR=1` turns it off, `FORCE_COLOR=1` turns it on (for example in a CI log viewer that renders ANSI). In CI, pipes and files the output is plain text, and the `[vitest-guard] …` lines above the summary stay unchanged, so existing log greps keep working.
+
 ## Global options
 
 | option | meaning |

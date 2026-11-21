@@ -10,6 +10,7 @@ import { scanFile } from './scan.mjs';
 import { readJson } from './index.mjs';
 import { validEdges, pickKnown, privateTmp } from './safety.mjs';
 import { findConfigFile, gitHead, configKey } from './verifystate.mjs';
+import { summary, table, painter, colorEnabled, verdictOf } from './ui.mjs';
 
 // contracts/DECISIONS.md D3: 0 ok | 1 test failures (incl. unexplained/flaky) | 2 usage or config error |
 // 4 quarantine/conflict state changed | 5 false green. (3 = "run all" belongs to selection tools.)
@@ -268,8 +269,8 @@ export async function cmdCheck(c, o) {
   say(`${mode}${mode === 'shared' && o.plan !== false ? ' (planned)' : ''}: ${first.files.size} files, ${failing.length} failing ${failing.join(' ')}`);
   if (o.prune) for (const m of auto ? ['vm', 'shared'] : [mode]) await prune(c, q, m);
   if (!failing.length) {
-    if (first.code) { say(`Vitest exited with code ${first.code} although no file failed (unhandled error?):\n` + first.log.slice(-2000)); return report(c, workers, EXIT.FAIL); }
-    return report(c, workers, EXIT.OK);
+    if (first.code) { say(`Vitest exited with code ${first.code} although no file failed (unhandled error?):\n` + first.log.slice(-2000)); return checkSummary(c, mode, { files: first.files.size, unhandled: true }, report(c, workers, EXIT.FAIL)); }
+    return checkSummary(c, mode, { files: first.files.size }, report(c, workers, EXIT.OK));
   }
 
   const iso = await runVitest({ root: c.root, config: c.config, mode: 'isolated', files: failing, verbose: c.verbose, tag: 'isolated' });
@@ -307,7 +308,28 @@ export async function cmdCheck(c, o) {
   if (flaky.length) say(`${flaky.length} flaky file(s): not quarantined; exit 1 (a failure that was not explained is never reported as ok)`);
   if (newQ.length || conflicts.length) say('quarantine/conflict state changed: commit .vitest-guard/incompatible.json / conflicts.json and re-run (exit 4)');
   // D3: 1 (failures, incl. flaky/unexplained) wins over 4 (new quarantine); 0 only when nothing failed
-  return report(c, workers, genuine.length || flaky.length || unexplained.length ? EXIT.FAIL : newQ.length || conflicts.length ? EXIT.NEW_QUARANTINE : EXIT.FAIL /* a file failed and nothing explains it */);
+  const code = genuine.length || flaky.length || unexplained.length ? EXIT.FAIL : newQ.length || conflicts.length ? EXIT.NEW_QUARANTINE : EXIT.FAIL /* a file failed and nothing explains it */;
+  return checkSummary(c, mode, { files: first.files.size, failing: failing.length, genuine, newQ, conflicts, flaky, unexplained }, report(c, workers, code));
+}
+
+function checkSummary(c, mode, d, code) {
+  const n = (a) => (a ? a.length : 0);
+  const quarantined = Object.values(load(c, 'incompatible.json', {}) || {}).reduce((s, m) => s + (m && typeof m === 'object' ? Object.keys(m).length : 0), 0);
+  const headline = code === EXIT.OK ? `${d.files} files passed in ${mode} mode`
+    : d.unhandled ? `no file failed, but Vitest exited with an error (unhandled error?)`
+    : code === EXIT.NEW_QUARANTINE ? `${n(d.newQ) + n(d.conflicts)} ${mode}-only failure(s) explained and recorded`
+    : `${n(d.genuine) || d.failing} of ${d.files} files fail`;
+  const next = [];
+  if (n(d.genuine)) next.push('fix the failing tests: they also fail in isolated forks, so the failure is real');
+  if (n(d.flaky)) next.push(`${n(d.flaky)} flaky file(s): re-run; vitest-guard never reports an unexplained failure as ok`);
+  if (n(d.unexplained)) next.push('unexplained failures: re-run with --verbose, or `vitest-guard hunt <file>`');
+  if (code === EXIT.NEW_QUARANTINE) next.push('commit .vitest-guard/incompatible.json and conflicts.json, then re-run');
+  if (code === EXIT.OK && mode === 'shared') next.push('shared realms can hide failures: confirm with `vitest-guard verify --mode shared`');
+  summary({ title: `check · ${mode}`, verdict: verdictOf(code), label: code === EXIT.NEW_QUARANTINE ? 'QUARANTINE' : undefined, headline,
+    facts: [['real failures', n(d.genuine) || undefined, 'red'], ['newly quarantined', n(d.newQ) || undefined, 'yellow'], ['conflicts', n(d.conflicts) || undefined, 'yellow'],
+      ['flaky', n(d.flaky) || undefined, 'yellow'], ['unexplained', n(d.unexplained) || undefined, 'red'], ['quarantine size', quarantined || undefined], ['exit code', code]],
+    next });
+  return code;
 }
 
 function report(c, workers, code) {
@@ -447,7 +469,16 @@ export async function cmdVerify(c, o) {
   save(c, `verify-${mode}.json`, record);
   if (auto && Object.values(groups).includes('shared')) save(c, 'verify-shared.json', record); // what the shared-mode warning of the config reads
   if (!complete) say(`note: only ${sample.length} of ${all.length} files were compared; the shared-mode warning of \`vitest run\` stays until a full verify is clean`);
-  return falseGreen.length ? EXIT.FALSE_GREEN : falseRed.length || quarantined.length ? EXIT.NEW_QUARANTINE : EXIT.OK;
+  const code = falseGreen.length ? EXIT.FALSE_GREEN : falseRed.length || quarantined.length ? EXIT.NEW_QUARANTINE : EXIT.OK;
+  summary({ title: `verify · ${mode}`, verdict: verdictOf(code), label: code === EXIT.FALSE_GREEN ? 'FALSE GREEN' : code === EXIT.NEW_QUARANTINE ? 'QUARANTINE' : 'SAFE',
+    headline: code === EXIT.OK ? `${mode} matches isolated forks on ${sample.length}${complete ? '' : ` of ${all.length}`} files` : code === EXIT.FALSE_GREEN ? `${falseGreen.length} test(s) pass in ${mode} but fail in isolated forks` : `${falseRed.length} test(s) fail in ${mode} only (order-dependent)`,
+    facts: [['orders', orders.join(', ')], ['files compared', complete ? `${sample.length} (all)` : `${sample.length} of ${all.length}`, complete ? undefined : 'yellow'],
+      ['false green', falseGreen.length, falseGreen.length ? 'red' : 'green'], ['false red', falseRed.length, falseRed.length ? 'yellow' : 'green'],
+      ['known conflicts', knownRed.length || undefined], ['quarantined now', quarantined.length || undefined, 'yellow'], ['exit code', code]],
+    next: [...(falseGreen.length ? ['false-green files now run in isolated forks, where they FAIL: that failure is real, fix the test'] : []),
+      ...(quarantined.length ? ['commit .vitest-guard/incompatible.json'] : []),
+      ...(!complete ? ['decide with a full run: `vitest-guard verify --sample all`'] : [])] });
+  return code;
 }
 
 // ---------------- compare (G2) ----------------
@@ -501,6 +532,16 @@ export async function cmdCompare(c, o) {
   say(`mode comparison per project (${unit}, sample; mismatches = tests whose result differs from isolated forks):`);
   for (const r of rows) say(`  ${r.project}: ${r.files}/${r.of} files | forks ${r.isolated} | vm ${r.vm} (${pct(r.vm, r.isolated)}${r.vmMismatch ? `, ${r.vmMismatch} mismatches` : ''}) | shared ${r.shared} (${pct(r.shared, r.isolated)}${r.sharedMismatch ? `, ${r.sharedMismatch} mismatches` : ''}) -> recommend ${r.recommend}: ${r.why}`);
   save(c, 'compare.json', { at: new Date().toISOString(), unit, rows });
+  {
+    const p = painter(colorEnabled());
+    const cell = (v, base, mm) => `${v}${base ? ` ${(() => { const s = pct(v, base); return v < base ? p.green(s) : p.yellow(s); })()}` : ''}${mm ? p.red(` ⚠${mm}`) : ''}`;
+    const tl = table(['project', 'files', `forks (${unit})`, 'vm', 'shared', 'recommend'],
+      rows.map((r) => [r.project, `${r.files}/${r.of}`, String(r.isolated), cell(r.vm, r.isolated, r.vmMismatch), cell(r.shared, r.isolated, r.sharedMismatch), p.bold(r.recommend)]), ['l', 'r', 'r', 'r', 'r', 'l'], p);
+    const mism = rows.some((r) => r.vmMismatch || r.sharedMismatch);
+    summary({ title: 'compare', verdict: 'ok', label: 'MEASURED', headline: `${rows.length} project(s); ⚠n = tests whose result differs from forks`, tableLines: tl,
+      next: [...(Number.isFinite(n) ? ['a sample can miss the CPU-heavy files: decide with `--sample all`'] : []), ...(mism ? ['mismatching modes are never recommended; see `vitest-guard verify`'] : []),
+        ...rows.filter((r) => r.recommend === 'shared').map((r) => `${r.project}: gate on shared only after a clean \`vitest-guard verify --mode shared\``)] });
+  }
   if (o.write !== false) {
     // mode 'auto' reads these per project/group (overridable with autoModes in the config)
     const modes = { ...(load(c, 'modes.json', {}).modes || {}) };
