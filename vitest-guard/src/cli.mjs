@@ -11,6 +11,7 @@ import { readJson } from './index.mjs';
 import { validEdges, pickKnown, privateTmp } from './safety.mjs';
 import { findConfigFile, gitHead, configKey } from './verifystate.mjs';
 import { summary, table, painter, colorEnabled, verdictOf } from './ui.mjs';
+import { startSwan } from './swan.mjs';
 
 // contracts/DECISIONS.md D3: 0 ok | 1 test failures (incl. unexplained/flaky) | 2 usage or config error |
 // 4 quarantine/conflict state changed | 5 false green. (3 = "run all" belongs to selection tools.)
@@ -495,12 +496,15 @@ export async function cmdCompare(c, o) {
   let seed = Number(o.seed || 1);
   const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
   const rows = [];
+  const swan = c.verbose ? { update() {}, stop() {} } : startSwan('comparing modes');
+  try {
   for (const project of projects) {
     const all = specs.filter((x) => x.project === project).map((x) => x.file);
     const sample = all.length <= n ? all : [...all].sort(() => rnd() - 0.5).slice(0, n).sort();
     const args = project ? ['--project', project] : [];
     const res = {};
     for (const mode of ['isolated', 'vm', 'shared']) {
+      swan.update(`comparing modes · ${project || 'root'} · ${mode === 'isolated' ? 'forks' : mode} · ${sample.length} file${sample.length === 1 ? "" : "s"}`);
       const cpu0 = childCpuSeconds(), t0 = Date.now();
       const r = await runVitest({ root: c.root, config: c.config, mode, files: sample, args, env: { VITEST_GUARD_DIAG: '0' }, verbose: c.verbose, tag: `compare-${mode}` });
       const cpu1 = childCpuSeconds();
@@ -526,6 +530,7 @@ export async function cmdCompare(c, o) {
     }
     rows.push({ project: project || '(root)', files: sample.length, of: all.length, isolated: metric('isolated'), vm: metric('vm'), shared: metric('shared'), vmMismatch: res.vm.falseGreen + res.vm.falseRed, sharedMismatch: res.shared.falseGreen + res.shared.falseRed, recommend: rec, why });
   }
+  } finally { swan.stop(); }
   const unit = childCpuSeconds() !== null ? 'CPU s' : 'wall s';
   const pct = (a, b) => (b ? `${a - b > 0 ? '+' : ''}${Math.round(((a - b) / b) * 100)} %` : '');
   if (Number.isFinite(n)) say(`note: a random sample can miss the few CPU-heavy files that decide the result (vm global access is slower in hot code); decide with --sample all`);

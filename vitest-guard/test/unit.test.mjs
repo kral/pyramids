@@ -127,3 +127,29 @@ test('ui: plain summary without colour, colour only when forced', async () => {
   const t = table(['a', 'bb'], [['xyz', painter(true).red('1')]], ['l', 'r'], painter(false));
   assert.equal(t[1], 'xyz   ' + '\x1b[31m1\x1b[39m');
 });
+
+test('swan: constant frame width, off without a TTY or in CI, draws and cleans up on a TTY', async () => {
+  const { swanFrame, animationEnabled, startSwan } = await import('../src/swan.mjs');
+  const widths = new Set();
+  for (let i = 0; i < 200; i++) for (const l of swanFrame(i, '')) widths.add(l.trimEnd().length <= 42);
+  assert.deepEqual([...widths], [true]);
+  assert.equal(swanFrame(0, 'x').length, swanFrame(57, 'x').length);
+  assert.doesNotMatch(swanFrame(3, 'x').join('\n'), /\x1b/);
+  assert.match(swanFrame(3, 'x', { color: true }).join('\n'), /\x1b\[38;5;69m/);
+  assert.equal(animationEnabled({ isTTY: false }, {}), false);
+  assert.equal(animationEnabled({ isTTY: true }, { CI: 'true' }), false);
+  assert.equal(animationEnabled({ isTTY: true }, { VTO_NO_ANIMATION: '1' }), false);
+  assert.equal(animationEnabled({ isTTY: true }, { TERM: 'xterm' }), true);
+  let out = '';
+  const off = startSwan('x', { stream: { isTTY: false, write: (s) => { out += s; } }, env: {} });
+  off.stop(); assert.equal(out, '');
+  const tty = { isTTY: true, write: (s) => { out += s; } };
+  const s = startSwan('working', { stream: tty, env: { TERM: 'xterm', NO_COLOR: '1' }, delayMs: 0, intervalMs: 5 });
+  await new Promise((r) => setTimeout(r, 40));
+  s.update('still working');
+  await new Promise((r) => setTimeout(r, 20));
+  s.stop();
+  assert.match(out, /\.-\./); assert.match(out, /still working/);
+  assert.ok(out.endsWith('\x1b[J\x1b[?25h'), 'the swan is erased and the cursor shown again');
+  const before = out.length; await new Promise((r) => setTimeout(r, 20)); assert.equal(out.length, before, 'nothing drawn after stop');
+});

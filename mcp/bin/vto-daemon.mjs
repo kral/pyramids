@@ -59,15 +59,17 @@ if (cmd === 'serve') {
     if (!c) { out({ stopped: false, note: 'no daemon running' }); process.exit(0); }
     await c.call('stop'); c.close(); out({ stopped: true }); process.exit(0);
   }
+  // the swan glides while the daemon starts and the metrics are read (TTY only, after 0.4 s)
+  const swan = cmd === 'savings' && !flags.json ? (await import('../../vitest-guard/src/swan.mjs')).startSwan('reading savings') : null;
   try { b = await Backend.open(root, { daemon: !stateless && autostartCmds.has(cmd), client: 'vto-cli' }); }
-  catch (e) { console.error(`vto: ${e.message}`); process.exit(2); }
+  catch (e) { swan?.stop(); console.error(`vto: ${e.message}`); process.exit(2); }
   if (b.daemonError && !flags.json) console.error(`vto: daemon unavailable (${b.daemonError}); running in-process`);
   let code = 0;
   try {
     if (cmd === 'status') out(await b.call('status'));
     else if (cmd === 'affected') { const a = await b.call('affected', { base: flags.base, limit: 100 }); out(a); if (a.runAll) code = 3; } // D3: 3 = run all
     else if (cmd === 'why') out(await b.call('why_failed', { test: flags.pos?.[0] }));
-    else if (cmd === 'savings') { const r = await b.call('savings', { since: flags.since || '30d' }); flags.json ? out(r) : printSavings(r); }
+    else if (cmd === 'savings') { let r; try { r = await b.call('savings', { since: flags.since || '30d' }); } finally { swan?.stop(); } flags.json ? out(r) : await printSavings(r); }
     else if (cmd === 'watch') await watch(b);
     else if (cmd === 'run' || cmd === 'run-affected' || cmd === 'ci-report') {
       const kind = flags.full ? 'full' : flags.failed ? 'failed' : flags.files.length || flags.name ? 'tests' : 'affected';
@@ -108,16 +110,38 @@ function printRun(r) {
   if (r.error) console.log(`  error: ${r.error}`);
 }
 
-function printSavings(r) {
-  const m = (ms) => `${(ms / 60000).toFixed(1)} min`;
-  console.log(`vto savings since ${r.since}: ${r.runs} runs (${r.fullRuns} full, ${r.partialRuns} partial)`);
-  console.log(`  full runs avoided        ${r.fullRunsAvoided}`);
-  console.log(`  wall time saved          ${m(r.wallSavedMs)}   (vs forks baseline ${m(r.wallSavedVsForksMs)})`);
-  console.log(`  CPU saved                ${r.cpuHoursSaved} h   (vs forks baseline ${(r.cpuSavedVsForksMs / 3600e3).toFixed(3)} h)`);
-  console.log(`  test-minutes saved       ${r.testMinutesSaved}`);
-  console.log(`  tokens returned          ${r.tokens.returned}  (classic: default ${r.tokens.classicDefault}, minimal/agent ${r.tokens.classicMinimal}, verbose ${r.tokens.classicVerbose}; ${r.tokens.runsMeasured} runs measured)`);
-  console.log(`  time-to-first-failure    ${m(r.ttffGainedMs)} gained over ${r.ttffRuns} failing runs`);
-  console.log(`  measured/estimated       wall ${r.measured.wall}/${r.estimated.wall}, cpu ${r.measured.cpu}/${r.estimated.cpu} runs  (formulas: mcp/SAVINGS.md)`);
+async function printSavings(r) {
+  const { summary, table, painter, colorEnabled } = await import('../../vitest-guard/src/ui.mjs');
+  const p = painter(colorEnabled());
+  const min = (ms) => (ms >= 3600e3 ? `${(ms / 3600e3).toFixed(1)} h` : `${(ms / 60000).toFixed(1)} min`);
+  const n = (x) => Math.round(x).toLocaleString('en-US');
+  if (!r.runs) {
+    summary({ tool: 'vto', title: `savings · last ${r.since}`, verdict: 'warn', label: 'NO DATA', headline: 'no finished runs recorded in this period',
+      next: ['record the map once with a full run: `vto run full`', 'then work as usual with `vto run`; every run is measured', 'before installing anywhere: `vto savings estimate --suite-min MIN`'] });
+    return;
+  }
+  const t = r.tokens;
+  const tokenRows = t.runsMeasured ? [
+    ['vto answers', n(t.returned), ''],
+    ['classic default reporter', n(t.classicDefault), p.green(n(t.saved.vsDefault) + ' saved')],
+    ['classic minimal (agents)', n(t.classicMinimal), p.green(n(t.saved.vsMinimal) + ' saved')],
+    ['classic verbose', n(t.classicVerbose), p.green(n(t.saved.vsVerbose) + ' saved')],
+  ] : [];
+  const est = r.estimated.wall + r.estimated.cpu;
+  summary({
+    tool: 'vto', title: `savings · last ${r.since}`, verdict: 'ok', label: 'MEASURED',
+    headline: `${n(r.fullRunsAvoided)} full runs avoided in ${n(r.runs)} runs (${n(r.fullRuns)} full)`,
+    facts: [
+      ['wall time saved', min(r.wallSavedMs), 'green'],
+      ['CPU saved', `${r.cpuHoursSaved} h`, 'green'],
+      ['vs forks baseline', r.wallSavedVsForksMs ? `${min(r.wallSavedVsForksMs)} wall, ${(r.cpuSavedVsForksMs / 3600e3).toFixed(2)} h CPU` : undefined],
+      ['test-minutes skipped', r.testMinutesSaved || undefined],
+      ['first failure sooner', r.ttffRuns ? `${min(r.ttffGainedMs)} over ${n(r.ttffRuns)} failing runs` : undefined],
+      ['basis', `measured ${r.measured.wall} runs, estimated ${r.estimated.wall} (no full run of that pool to compare with)`, est ? 'yellow' : undefined],
+    ],
+    tableLines: tokenRows.length ? table([`tokens (${t.runsMeasured} runs)`, 'tokens', ''], tokenRows, ['l', 'r', 'r'], p) : [],
+    next: [...(est ? ['run `vto run full` once per pool so savings are measured, not extrapolated'] : []), 'formulas: mcp/SAVINGS.md · machine-readable: --json'],
+  });
 }
 
 async function watch(b) {
