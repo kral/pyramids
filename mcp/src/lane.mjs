@@ -261,7 +261,7 @@ async function run(msg) {
     } else {
       specs = [];
       for (const s of msg.specs) {
-        const file = path.resolve(root, s.file);
+        const file = slash(path.resolve(root, s.file)); // Vitest module ids use '/' on Windows too (D:/a/…); a '\\' id misses its name filter
         let projects = findProjects(file);
         if (!projects.length) projects = [vitest.getRootProject()];
         for (const p of projects) specs.push(p.createSpecification(file, s.names?.length ? { testNames: s.names } : undefined));

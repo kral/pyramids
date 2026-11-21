@@ -113,7 +113,7 @@ test('vto ci prints the shipped templates; --out never overwrites', () => {
 });
 
 test('vto doctor: machine-readable report; a directory without Vitest is exit 2 with a fix for every failed check', () => {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vto doctor ěš ')));
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'vto doctor ěš '))); // .native: expands Windows 8.3 short names (RUNNER~1), as doctor does
   try {
     const r = vto(['doctor', '--root', dir, '--json']);
     assert.equal(r.status, 2);

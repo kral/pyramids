@@ -244,18 +244,20 @@ describe('AI prompt cannot be forged (N3 prompt)', () => {
   });
 });
 
+// these drive the real file system with POSIX paths (/usr/bin/…, symlinks); Windows semantics are covered by the mock-fs test below
+const itPosix = it.skipIf(process.platform === 'win32');
 describe('`o` / `O` open only project source files, never through an OS handler (N4)', () => {
   const suspend = async (fn: () => Promise<void>) => { await fn(); };
   const withEditor = () => fakeDeps({ env: { PATH: '/usr/bin', VTO_EDITOR: 'code' }, files: ['/usr/bin/code', '/usr/bin/xdg-open', '/usr/bin/open'] });
 
-  it('review PoC editor-poc.mjs: ../outside/evil.desktop is rejected and nothing is spawned', async () => {
+  itPosix('review PoC editor-poc.mjs: ../outside/evil.desktop is rejected and nothing is spawned', async () => {
     for (const d of [withEditor(), fakeDeps({ files: ['/usr/bin/xdg-open'] })]) {
       const a = realActions(root, { hasTTY: false, writeTerminal: () => {}, deps: d.deps });
       await expect(a.openEditor({ file: '../outside/evil.desktop', line: 3 }, suspend)).rejects.toThrow(/outside the project root/);
       expect(d.calls).toEqual([]);
     }
   });
-  it('rejects absolute paths outside, symlinks pointing out, directories, missing files, non-source extensions', async () => {
+  itPosix('rejects absolute paths outside, symlinks pointing out, directories, missing files, non-source extensions', async () => {
     const d = withEditor();
     const a = realActions(root, { hasTTY: false, writeTerminal: () => {}, deps: d.deps });
     const cases: [string, RegExp][] = [
@@ -297,7 +299,7 @@ describe('`o` / `O` open only project source files, never through an OS handler 
     expect(resolveInsideRoot('C:\\proj', '..\\proj-evil\\a.ts', { fs: wfs, platform: 'win32' })).toMatchObject({ ok: false, error: 'outside the project root' });
     expect(resolveInsideRoot('C:\\proj', 'D:\\x\\a.ts', { fs: wfs, platform: 'win32' }).ok).toBe(false);
   });
-  it('root given through a symlink still works (realpath on both sides)', async () => {
+  itPosix('root given through a symlink still works (realpath on both sides)', async () => {
     const d = withEditor();
     const a = realActions(path.join(tmp, 'rootlink'), { hasTTY: false, writeTerminal: () => {}, deps: d.deps });
     await a.openEditor({ file: 'src/ok.ts', line: 2, col: 3 }, suspend);
@@ -305,7 +307,7 @@ describe('`o` / `O` open only project source files, never through an OS handler 
     expect(d.calls[0]).toMatchObject({ cmd: '/usr/bin/code', args: ['-g', `${path.join(root, 'src', 'ok.ts')}:2:3`] });
     expect(d.calls[0].opts.shell).toBe(false);
   });
-  it('no editor → NoEditorError with the validated path; xdg-open / open / explorer are never spawned', async () => {
+  itPosix('no editor → NoEditorError with the validated path; xdg-open / open / explorer are never spawned', async () => {
     for (const platform of ['linux', 'darwin', 'win32'] as const) {
       const d = fakeDeps({ platform, env: { PATH: '/usr/bin' }, exists: (p) => /xdg-open|open|explorer/i.test(p) });
       expect(resolveEditor(d.deps, false)).toBeNull();

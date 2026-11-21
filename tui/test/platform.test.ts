@@ -150,7 +150,7 @@ describe('IPC endpoint discovery', () => {
     const home = '/home/dev';
     expect(runtimeBase({ platform: 'linux', env: {}, home })).toBe('/home/dev/.cache/vto/run');
     expect(runtimeBase({ platform: 'darwin', env: {}, home })).toBe('/home/dev/Library/Caches/vto/run');
-    expect(runtimeBase({ platform: 'win32', env: { LOCALAPPDATA: 'C:\\Users\\Žofie\\AppData\\Local' }, home })).toBe(path.join('C:\\Users\\Žofie\\AppData\\Local', 'vto', 'run'));
+    expect(runtimeBase({ platform: 'win32', env: { LOCALAPPDATA: 'C:\\Users\\Žofie\\AppData\\Local' }, home })).toBe('C:\\Users\\Žofie\\AppData\\Local\\vto\\run');
     expect(projectKey('/home/dev/proj', false)).toMatch(/^[0-9a-f]{16}$/);
     expect(projectKey('/home/dev/Proj', true)).toBe(projectKey('/home/dev/proj', true));
     const p = path.resolve(__dirname, '../../mcp/src/ipc.mjs');

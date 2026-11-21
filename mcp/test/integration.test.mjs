@@ -51,7 +51,7 @@ test('stateless engine: first run records the map, edits select only affected te
     // failing tests stay selected until they pass
     assert.ok((await dispatch(eng, 'affected', {})).count >= 2);
     const why = await dispatch(eng, 'why_failed', { test: 'test/price.test.ts:6' });
-    assert.match(why.error, /expected 63 to be 72/);
+    assert.match(why.error, /expected 63 to be 72/, JSON.stringify({ why, failing: Object.keys(eng.store.state.failing) }).slice(0, 2000));
     assert.ok(why.frames.length >= 1);
     edit(root, 'src/price.ts', 'total *= 0.7', 'total *= 0.8');
     const r3 = await eng.waitRun((await dispatch(eng, 'start_run', {})).runId);
@@ -101,7 +101,7 @@ test('daemon: failures stream before run end, fix loop re-runs a fixed test duri
     assert.equal(rr.lane, 'fix');
     const rrDone = await b.call('wait_run', { runId: rr.runId });
     const mainStill = await b.call('run_status', { runId: s.runId });
-    assert.equal(rrDone.ran, 1);
+    assert.equal(rrDone.ran, 1, JSON.stringify(rrDone).slice(0, 2000));
     assert.equal(mainStill.status, 'running', 'fix-lane re-run must finish while the main run is still running');
     const r = await b.call('wait_run', { runId: s.runId });
     const rs = evs.find((e) => e.ev === 'run-start' && e.runId === s.runId);

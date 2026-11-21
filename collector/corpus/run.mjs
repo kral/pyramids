@@ -22,6 +22,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CASES = path.join(HERE, 'cases');
+// Vite ids use '/' on every platform (D:/a/…/cases/x.ts on Windows); compare in that spelling
+const slashed = (p) => p.replace(/\\/g, '/');
+const inCases = (id) => slashed(id).startsWith(slashed(CASES) + '/');
 const argv = process.argv.slice(2);
 const opt = (name, def) => {
   const i = argv.indexOf('--' + name);
@@ -57,8 +60,8 @@ function wrapTransform(plugin, captures, all, sink) {
   if (!fn) return plugin;
   const wrapped = async function (code, id, ...rest) {
     const res = await fn.call(this, code, id, ...rest);
-    const clean = id.replace(/[?#].*$/, '');
-    if (clean.startsWith(CASES + path.sep) || clean.startsWith(CASES + '/')) {
+    const clean = path.resolve(id.replace(/[?#].*$/, '')); // the key lookups use (path.join(CASES, f))
+    if (inCases(clean)) {
       const out = res == null ? null : typeof res === 'string' ? res : res.code ?? null;
       const meta = res && typeof res === 'object' ? res.meta ?? null : null;
       captures[clean] = { id, input: code, output: out, meta, blocks: res && typeof res === 'object' && Array.isArray(res.blocks) ? res.blocks : undefined, extra: res && typeof res === 'object' ? Object.keys(res) : [] };
@@ -104,7 +107,7 @@ function tsLowerPlugin() {
     enforce: 'pre',
     async transform(code, id) {
       const clean = id.replace(/[?#].*$/, '');
-      if (!clean.startsWith(CASES) || !LOWER.test(path.basename(clean))) return null;
+      if (!inCases(clean) || !LOWER.test(path.basename(clean))) return null;
       ts ??= (await import('typescript')).default;
       const r = ts.transpileModule(code, {
         fileName: clean,
