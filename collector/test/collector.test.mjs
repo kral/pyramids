@@ -38,7 +38,7 @@ function readRaw(rawDir) {
 function collect(name, args = [], { cwd, env = {}, script = path.join(COLLECTOR, 'run-raw.mjs'), dir = project(name) } = {}) {
   const raw = path.join(TMP, 'raw-' + name);
   const argv = script.endsWith('run-raw.mjs') ? [script, raw, ...args] : [script, cwd ?? dir, raw, ...args];
-  const r = spawnSync(process.execPath, argv, { cwd: cwd ?? dir, encoding: 'utf8', env: { ...process.env, GITHUB_ACTIONS: '', CI: '', VTO_RAW_DIR: '', VTO_ROOT: '', VTO_RUN_ID: '', VTO_CASE_INSENSITIVE: '', ...env } });
+  const r = spawnSync(process.execPath, argv, { cwd: cwd ?? dir, encoding: 'utf8', env: { ...process.env, GITHUB_ACTIONS: '', CI: '', FORCE_COLOR: '0', NO_COLOR: '1', VTO_RAW_DIR: '', VTO_ROOT: '', VTO_RUN_ID: '', VTO_CASE_INSENSITIVE: '', ...env } });
   return { dir, raw, status: r.status, out: r.stdout + r.stderr, ...readRaw(raw) };
 }
 
