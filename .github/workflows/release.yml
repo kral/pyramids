@@ -1,0 +1,116 @@
+# Release: on a tag v* (or manually as a dry run) build the analyzer for every platform, pack the npm
+# packages as tarballs, generate SHA256SUMS and SLSA build provenance, and create a GitHub Release.
+# Nothing is published to npm. Tags with a '-' (e.g. v0.1.0-alpha.1) become pre-releases.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Build and attest, but do not create a release'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  RUST_TOOLCHAIN: '1.97.0'
+
+jobs:
+  test:
+    # the release must come from a commit whose full CI passes
+    uses: ./.github/workflows/vto-ci.yml
+
+  analyzer:
+    name: analyzer (${{ matrix.target }})
+    needs: test
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { os: ubuntu-24.04,     target: x86_64-unknown-linux-gnu,  npm: linux-x64,    exe: vto }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, npm: linux-arm64,  exe: vto }
+          - { os: macos-15,         target: aarch64-apple-darwin,      npm: darwin-arm64, exe: vto }
+          - { os: macos-15-intel,   target: x86_64-apple-darwin,       npm: darwin-x64,   exe: vto }
+          - { os: windows-2025,     target: x86_64-pc-windows-msvc,    npm: win32-x64,    exe: vto.exe }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with: { node-version: 22 }
+      - name: Rust toolchain (pinned)
+        shell: bash
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --target "${{ matrix.target }}" --no-self-update
+          rustup default "$RUST_TOOLCHAIN"
+      - name: release build
+        shell: bash
+        working-directory: analyzer
+        run: cargo build --release --locked --target "${{ matrix.target }}"
+      - name: archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="vto-analyzer-${GITHUB_REF_NAME//\//-}-${{ matrix.target }}"
+          mkdir -p "out/$name"
+          cp "analyzer/target/${{ matrix.target }}/release/${{ matrix.exe }}" LICENSE-MIT LICENSE-APACHE "out/$name/"
+          cd out
+          if [ "${{ runner.os }}" = "Windows" ]; then 7z a -tzip "$name.zip" "$name" >/dev/null; else tar czf "$name.tar.gz" "$name"; fi
+          rm -rf "$name"
+      - name: pack @vto/analyzer-${{ matrix.npm }}
+        run: node mcp/scripts/pack-analyzer.mjs --target ${{ matrix.target }} --npm ${{ matrix.npm }} --bin analyzer/target/${{ matrix.target }}/release/${{ matrix.exe }} --out out
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with: { name: 'analyzer-${{ matrix.npm }}', path: out/, retention-days: 7, if-no-files-found: error }
+
+  npm-tarballs:
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with: { node-version: 22 }
+      - name: build TUI
+        run: |
+          npm --prefix tui ci --ignore-scripts
+          node tui/node_modules/typescript/bin/tsc -p tui
+      - name: npm pack (no publish)
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          for dir in . vm-guard mcp tui; do npm pack "./$dir" --pack-destination out --ignore-scripts; done
+          ls -l out
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with: { name: npm-tarballs, path: out/, retention-days: 7, if-no-files-found: error }
+
+  release:
+    needs: [analyzer, npm-tarballs]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write       # create the release
+      id-token: write       # sign provenance (Sigstore)
+      attestations: write   # store the attestation
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with: { path: artifacts, merge-multiple: true }
+      - name: SHA256SUMS
+        working-directory: artifacts
+        run: sha256sum * | tee SHA256SUMS
+      - uses: actions/attest-build-provenance@62fc1d596301d0ab9914e1fec14dc5c8d93f65cd # v3.2.0
+        with: { subject-path: 'artifacts/*' }
+      - name: create GitHub release
+        if: ${{ github.event_name == 'push' || !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          pre=""; case "$TAG" in *-*) pre="--prerelease";; esac
+          gh release create "$TAG" artifacts/* --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes $pre --verify-tag
