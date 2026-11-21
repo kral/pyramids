@@ -9,7 +9,7 @@
     "vto-daemon": "./bin/vto-daemon.mjs",
     "vto-mcp": "./bin/vto-mcp.mjs"
   },
-  "engines": { "node": ">=22.12" },
+  "engines": { "node": "^22.22.2 || >=24.15.0" },
   "scripts": { "test": "node --test --test-concurrency=1 \"test/*.test.mjs\"" },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
