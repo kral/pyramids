@@ -107,9 +107,12 @@ describe.skipIf(!havePty)('e2e: interactive TUI in a real pty', () => {
     expect(out).toContain('\x1b[?1049h'); // entered the alternate screen
     expect(out).toContain('\x1b[?1049l'); // and restored the user's screen
     expect(out).toContain('\x1b[?2026h'); // synchronized output (no tearing)
-    expect(out).toMatch(/\x1b\]52;c;[A-Za-z0-9+/=]{100,}\x07/); // clipboard via OSC 52 (no clipboard tool in CI)
-    const b64 = /\x1b\]52;c;([A-Za-z0-9+/=]+)\x07/.exec(out)![1];
-    expect(Buffer.from(b64, 'base64').toString('utf8')).toContain('## Selhávající testy');
+    // clipboard via OSC 52 only where CI has no clipboard tool (Linux); macOS/Windows runners have pbcopy / clip.exe
+    if (process.platform === 'linux') {
+      expect(out).toMatch(/\x1b\]52;c;[A-Za-z0-9+/=]{100,}\x07/);
+      const b64 = /\x1b\]52;c;([A-Za-z0-9+/=]+)\x07/.exec(out)![1];
+      expect(Buffer.from(b64, 'base64').toString('utf8')).toContain('## Selhávající testy');
+    }
     expect(out).toContain('opraveno během běhu');
     expect(out).toContain('Znovu spouštím');
     expect(out).toContain('38;2;'); // truecolor
