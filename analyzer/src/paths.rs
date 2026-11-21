@@ -183,7 +183,32 @@ fn eq_comp(a: &str, b: &str, ci: bool) -> bool {
 
 /// Path of `p` relative to `root` (both normalised absolute). Falls back to `p` if they share
 /// nothing (e.g. different drives).
+/// `rel_raw`, but an absolute path that lies outside `root` only because of a different
+/// spelling of the same directory (macOS `/var` → `/private/var`, Windows 8.3 short names,
+/// symlinked or `subst` roots) is canonicalised (its nearest existing ancestor) and retried.
 pub fn rel(p: &str, root: &str) -> String {
+    let r = rel_raw(p, root);
+    if !(r.starts_with("..") || is_abs(&r)) || !is_abs(p) {
+        return r;
+    }
+    // nearest existing ancestor, canonicalised, plus the remaining components
+    let mut head = std::path::PathBuf::from(p);
+    let mut tail: Vec<std::ffi::OsString> = Vec::new();
+    while !head.exists() {
+        match (head.file_name().map(|n| n.to_os_string()), head.parent().map(|x| x.to_path_buf())) {
+            (Some(n), Some(parent)) => { tail.push(n); head = parent; }
+            _ => return r,
+        }
+    }
+    let mut c = canonical_root(&head);
+    for n in tail.iter().rev() {
+        c = format!("{}/{}", c.trim_end_matches('/'), n.to_string_lossy());
+    }
+    let r2 = rel_raw(&c, root);
+    if r2.starts_with("..") || is_abs(&r2) { r } else { r2 }
+}
+
+fn rel_raw(p: &str, root: &str) -> String {
     let ci = p.as_bytes().get(1) == Some(&b':'); // Windows → case-insensitive
     let a: Vec<&str> = p.split('/').filter(|s| !s.is_empty()).collect();
     let b: Vec<&str> = root.split('/').filter(|s| !s.is_empty()).collect();
@@ -206,6 +231,26 @@ pub fn rel(p: &str, root: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn rel_through_a_symlinked_spelling_of_the_root() {
+        // macOS: /var is a symlink to /private/var; maps written with one spelling must resolve
+        let base = std::env::temp_dir().join(format!("vto-rel-{}", std::process::id()));
+        let real = base.join("real");
+        std::fs::create_dir_all(real.join("src")).unwrap();
+        std::fs::write(real.join("src/a.ts"), "x").unwrap();
+        let link = base.join("link");
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let root = canonical_root(&link);
+        let via_link = format!("{}/src/a.ts", normalize(&link.to_string_lossy()));
+        assert_eq!(rel(&via_link, &root), "src/a.ts");
+        // a file that does not exist yet (new file) resolves through its existing ancestor
+        let new_file = format!("{}/src/new/b.ts", normalize(&link.to_string_lossy()));
+        assert_eq!(rel(&new_file, &root), "src/new/b.ts");
+        let _ = std::fs::remove_dir_all(&base);
+    }
     #[test]
     fn paths() {
         assert_eq!(url_to_path("file:///home/a/src/x%20y.ts"), "/home/a/src/x y.ts");
