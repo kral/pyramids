@@ -30,7 +30,7 @@
  * Exit code: 0 ok, 2 usage error or no report unit found in the raw data.
  */
 import { spawn } from 'node:child_process';
-import { lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, realpathSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { generateMutants, lineIndex, parse, pseudoSpans, OPS_SPEC, OPS_EXT } from './mutate.mjs';
@@ -80,7 +80,8 @@ for (let i = 0; i < args.length; i++) {
 if (!opt.raw || !opt.report) { console.error('usage: vto verify overlap --raw DIR --report report.json [--root DIR] [--out DIR]   (--help for all options)'); process.exit(2); }
 const LANG = lang();
 const L = tr(LANG);
-const root = path.resolve(opt.root);
+// canonical spelling, as the collector records meta.root: realpath.native expands Windows 8.3 short names (RUNNER~1) and symlinks
+const root = (() => { const r = path.resolve(opt.root); try { return realpathSync.native(r); } catch { return r; } })();
 const outDir = path.resolve(opt.out);
 const log = (...x) => { if (!opt.quiet) console.error('vto verify:', ...x); };
 const T0 = performance.now();
