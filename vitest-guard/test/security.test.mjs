@@ -89,7 +89,7 @@ test('F9 / PoC 9 end to end: a non-test module listed in incompatible.json is no
 });
 
 // ---------------- F8 ----------------
-test('F8: private temp dir is 0700 with an unpredictable name, removed on cleanup', () => {
+test('F8: private temp dir is 0700 with an unpredictable name, removed on cleanup', { skip: process.platform === 'win32' && 'POSIX permission bits do not apply on Windows (per-user %TEMP% with ACLs)' }, () => {
   const a = privateTmp(), b = privateTmp();
   try {
     assert.notEqual(a.dir, b.dir);
@@ -99,7 +99,7 @@ test('F8: private temp dir is 0700 with an unpredictable name, removed on cleanu
   assert.equal(fs.existsSync(a.dir), false);
 });
 
-test('F8: readOwnedFile refuses symlinks, hard links and non-private directories', () => {
+test('F8: readOwnedFile refuses symlinks, hard links and non-private directories', { skip: process.platform === 'win32' && 'POSIX permission bits do not apply on Windows (per-user %TEMP% with ACLs)' }, () => {
   const t = privateTmp();
   try {
     const victim = path.join(os.tmpdir(), `vmg-victim-${Date.now()}.txt`);

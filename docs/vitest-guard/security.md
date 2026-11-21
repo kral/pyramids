@@ -47,3 +47,10 @@ tests for these cases: `vitest-guard/test/security.test.mjs`.
 
 The package has no runtime dependencies; it requires your project's Vitest (peer). It is not on npm: install from a
 reviewed commit. Never run `npx vitest-guard` in its place: the unscoped npm name is not ours.
+
+## Windows note
+
+The private temporary directories and owned-file checks (mode `0700`, refusing files readable by
+group/others, refusing symlinks and hard links) rely on POSIX permission bits. On Windows they are
+created under the per-user `%TEMP%`, which is protected by the user profile's ACLs; the POSIX-specific
+checks are not applied there, and the corresponding tests are skipped on Windows with that reason.

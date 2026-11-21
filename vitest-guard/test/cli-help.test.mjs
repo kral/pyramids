@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 // CLI help, option parsing and small usability fixes (no Vitest needed unless marked).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -56,7 +57,7 @@ test('verify --no-plan is honoured; --orders planned with --no-plan is a usage e
 
 test('reactPackages reaches the setup file through provide', integration, () => {
   const root = project({ 'package.json': '{"type":"module"}', 'test/a.test.ts': `import { it } from 'vitest';\nit('a', () => {});\n` });
-  const code = `import { defineVitestGuardConfig } from ${JSON.stringify(indexFile)};\nconst c = defineVitestGuardConfig({ test: { include: ['test/**/*.test.ts'] } }, { reactPackages: ['my-react-lib'] });\nconsole.log(JSON.stringify(c.test.provide.vitestGuard.reactPackages));\n`;
+  const code = `import { defineVitestGuardConfig } from ${JSON.stringify(pathToFileURL(indexFile).href)};\nconst c = defineVitestGuardConfig({ test: { include: ['test/**/*.test.ts'] } }, { reactPackages: ['my-react-lib'] });\nconsole.log(JSON.stringify(c.test.provide.vitestGuard.reactPackages));\n`;
   fs.writeFileSync(path.join(root, 'print.mjs'), code);
   const r = cli(root, [], { bin: path.join(root, 'print.mjs') });
   assert.match(r.stdout, /\["my-react-lib"\]/, r.out);
