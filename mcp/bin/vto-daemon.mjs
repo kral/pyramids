@@ -15,6 +15,7 @@ import { Backend, findRoot } from '../src/client.mjs';
 import { serve } from '../src/daemon.mjs';
 
 const argv = process.argv.slice(2);
+if (argv[0] === '-h' || argv[0] === '--help' || argv[0] === '--version') argv.splice(0, 0, 'status'); // flags before any command
 const cmd = argv.shift() || 'status';
 const flags = { files: [] };
 for (let i = 0; i < argv.length; i++) {

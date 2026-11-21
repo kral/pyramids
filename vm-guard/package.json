@@ -15,7 +15,7 @@
     "./package.json": "./package.json"
   },
   "files": ["bin/", "src/", "scripts/", "README.md", "README.cs.md"],
-  "engines": { "node": ">=22.5" },
+  "engines": { "node": ">=22.12" },
   "peerDependencies": { "vitest": ">=5.1 <6" },
   "devDependencies": {
     "jsdom": "^31.0.1",

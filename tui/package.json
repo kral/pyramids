@@ -39,7 +39,7 @@
     "vto-ui": "./bin/vto-ui.mjs"
   },
   "engines": {
-    "node": ">=22.5"
+    "node": ">=22.12"
   },
   "files": [
     "bin/",

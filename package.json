@@ -23,7 +23,7 @@
     "LICENSE-APACHE"
   ],
   "engines": {
-    "node": ">=22.5"
+    "node": ">=22.12"
   },
   "scripts": {
     "check": "node .github/scripts/check-repo.mjs",

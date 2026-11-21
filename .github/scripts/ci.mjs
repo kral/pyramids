@@ -201,6 +201,11 @@ const STEPS = {
       } finally { fs.rmSync(path.dirname(path.dirname(dst)), { recursive: true, force: true }); }
       return;
     }
+    // the smoke test runs `vto ui --help`, which needs tui/dist
+    if (!fs.existsSync(path.join(REPO, 'tui/dist/cli.js'))) {
+      need('tui/node_modules', 'npm --prefix tui ci --ignore-scripts');
+      node([path.join(REPO, 'tui/node_modules/typescript/bin/tsc'), '-p', '.'], { cwd: path.join(REPO, 'tui') });
+    }
     STEPS.smoke();
     node([path.join(REPO, 'collector/selftest.mjs')]);
     nodeTests(REPO, testFiles(path.join(REPO, 'collector/test')));
@@ -209,7 +214,7 @@ const STEPS = {
 };
 
 const wanted = argv.filter((a) => !a.startsWith('--'));
-const order = ['lint', 'smoke', 'analyzer', 'collector', 'mcp', 'tui', 'vm-guard', 'verify', 'oddpath'];
+const order = ['lint', 'analyzer', 'collector', 'mcp', 'tui', 'vm-guard', 'verify', 'smoke', 'oddpath']; // smoke after tui: it needs tui/dist
 const steps = wanted.flatMap((w) => (w === 'all' ? order : [w]));
 if (!steps.length || steps.some((s) => !Object.hasOwn(STEPS, s))) {
   process.stderr.write(`usage: node .github/scripts/ci.mjs <install|${order.join('|')}|all>… [--allow-skips]\n`);

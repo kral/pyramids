@@ -14,7 +14,7 @@ root-relative file names only (`meta.pathBase: "root"`, no `meta.root`). CI chec
 Try the analyzer on it (from the repository root, after `cargo build --release` in `analyzer/`):
 
 ```sh
-analyzer/target/release/vto samples/demo-raw --out /tmp/vto-sample-report
+analyzer/target/release/vto samples/demo-raw --out vto-sample-report
 # vto [v2]: 7 tests (7 evaluated, 0 excluded), 10 items · identical: 1 groups · … · minimal set: 4/7
 ```
 

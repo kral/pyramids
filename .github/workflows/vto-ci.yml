@@ -4,7 +4,7 @@
 #   lint       node --check on every script, repo hygiene (samples, pinned actions, docs)
 #   analyzer   cargo test + release build on 5 targets, packed as @vto/analyzer-* artifacts
 #   test       all packages (collector, daemon/MCP, TUI, vm-guard, verify) + CLI smoke test on
-#              Linux / macOS / Windows with Node 22.5 (declared minimum), 22 and 24
+#              Linux / macOS / Windows with Node 22.12 (declared minimum, Vite 8 requires it), 22 and 24
 #   odd-path   the same checkout under "Můj projekt ěš/" (space + diacritics) on 3 OS
 #
 # Policy
@@ -83,8 +83,8 @@ jobs:
         os: [ubuntu-24.04, macos-15, windows-2025]
         node: ['22', '24']
         include:
-          - { os: ubuntu-24.04, node: '22.5.0' }     # engines.node lower bound
-          - { os: windows-2025, node: '22.5.0' }
+          - { os: ubuntu-24.04, node: '22.12.0' }    # engines.node lower bound (Vite 8: >=22.12)
+          - { os: windows-2025, node: '22.12.0' }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
