@@ -164,7 +164,7 @@ Plus `analyzer/faultinject` (60 mutants on the analyzer fixture, recall 100 %) f
 
 Requirements: Node ≥ 20 (22 recommended), the project's own `vitest` (5.1.x tested), git optional
 (only for `base`), the analyzer binary (`cargo build --release` in `analyzer/`, or the npm package
-`@vto/analyzer-<platform>-<arch>`, or `VTO_ANALYZER=<path>`).
+`@kral/vto-analyzer-<platform>-<arch>`, or `VTO_ANALYZER=<path>`).
 
 ```sh
 git clone <repo> vto && cd vto
@@ -343,7 +343,7 @@ stateless loop, daemon streaming + fix loop + fix lane + console redaction, MCP 
 
 ## Analyzer distribution plan
 
-Prebuilt binaries per platform as npm packages `@vto/analyzer-<platform>-<arch>` (`linux-x64`, `linux-arm64`,
+Prebuilt binaries per platform as npm packages `@kral/vto-analyzer-<platform>-<arch>` (`linux-x64`, `linux-arm64`,
 `darwin-arm64`, `darwin-x64`, `win32-x64`) with `os`/`cpu` fields, listed as `optionalDependencies` of the JS
 package (esbuild/oxc scheme); built and packed in the CI matrix (`scripts/pack-analyzer.mjs`, sha256 recorded
 in the package). Publishing (npm trusted publishing with provenance, signed binaries) is not set up yet.

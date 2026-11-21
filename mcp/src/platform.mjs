@@ -90,7 +90,7 @@ export function spawnDetached(script, args, { cwd, logFile, env = process.env } 
  * Analyzer binary candidates, in order (SECURITY N1a): only places the USER or the vto installation
  * controls – never the project under test, never PATH, never the current directory.
  *   1. env VTO_ANALYZER (absolute path, set by the user outside the repository)
- *   2. npm package @vto/analyzer-<platform>-<arch>, resolved from vto's own installation; its sha256
+ *   2. npm package @kral/vto-analyzer-<platform>-<arch>, resolved from vto's own installation; its sha256
  *      must equal the hash pinned in vto-mcp's analyzer-manifest.json
  *   3. a local cargo build next to this checkout (development; not when installed in node_modules)
  */
@@ -98,7 +98,7 @@ export function analyzerCandidates({ platform = process.platform, arch = process
   const exe = platform === 'win32' ? 'vto.exe' : 'vto';
   const c = [];
   if (env.VTO_ANALYZER) c.push({ env: env.VTO_ANALYZER });
-  c.push({ pkg: `@vto/analyzer-${platform}-${arch}`, file: `bin/${exe}` });
+  c.push({ pkg: `@kral/vto-analyzer-${platform}-${arch}`, file: `bin/${exe}` });
   if (here && !toPosix(here).split('/').includes('node_modules')) {
     c.push({ dev: path.resolve(here, '../../analyzer/target/release', exe) });
     c.push({ dev: path.resolve(here, '../../analyzer/target/debug', exe) });

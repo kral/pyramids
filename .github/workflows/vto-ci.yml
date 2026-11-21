@@ -2,7 +2,7 @@
 # on a developer machine runs exactly what CI runs.
 #
 #   lint       node --check on every script, repo hygiene (samples, pinned actions, docs)
-#   analyzer   cargo test + release build on 5 targets, packed as @vto/analyzer-* artifacts
+#   analyzer   cargo test + release build on 5 targets, packed as @kral/vto-analyzer-* artifacts
 #   test       all packages (collector, daemon/MCP, TUI, vm-guard, verify) + CLI smoke test on
 #              Linux / macOS / Windows with Node 22.12 (declared minimum, Vite 8 requires it), 22 and 24
 #   odd-path   the same checkout under "Můj projekt ěš/" (space + diacritics) on 3 OS
@@ -71,7 +71,7 @@ jobs:
           rustup default "$RUST_TOOLCHAIN"
       - name: cargo test + release build
         run: node .github/scripts/ci.mjs analyzer
-      - name: pack @vto/analyzer-${{ matrix.npm }}
+      - name: pack @kral/vto-analyzer-${{ matrix.npm }}
         run: node mcp/scripts/pack-analyzer.mjs --target ${{ matrix.target }} --npm ${{ matrix.npm }} --bin analyzer/target/${{ matrix.target }}/release/${{ matrix.exe }} --out dist
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with: { name: 'analyzer-${{ matrix.npm }}', path: dist/, retention-days: 7, if-no-files-found: error }

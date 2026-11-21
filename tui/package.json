@@ -1,5 +1,5 @@
 {
-  "name": "@vto/tui",
+  "name": "@kral/vto-tui",
   "version": "0.1.0",
   "description": "vto ui - live terminal UI for vto/Vitest runs (Ink)",
   "scripts": {

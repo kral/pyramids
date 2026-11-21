@@ -62,7 +62,7 @@ jobs:
           cd out
           if [ "${{ runner.os }}" = "Windows" ]; then 7z a -tzip "$name.zip" "$name" >/dev/null; else tar czf "$name.tar.gz" "$name"; fi
           rm -rf "$name"
-      - name: pack @vto/analyzer-${{ matrix.npm }}
+      - name: pack @kral/vto-analyzer-${{ matrix.npm }}
         run: node mcp/scripts/pack-analyzer.mjs --target ${{ matrix.target }} --npm ${{ matrix.npm }} --bin analyzer/target/${{ matrix.target }}/release/${{ matrix.exe }} --out out
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with: { name: 'analyzer-${{ matrix.npm }}', path: out/, retention-days: 7, if-no-files-found: error }

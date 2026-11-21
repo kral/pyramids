@@ -20,7 +20,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 async function loadEnvStore() {
   const cands = [path.resolve(here, '../../vm-guard/src/envstore.mjs')];
   const req = createRequire(import.meta.url);
-  for (const spec of ['@vto/vm-guard/envstore', 'vm-guard/envstore']) { try { cands.push(req.resolve(spec)); } catch {} }
+  for (const spec of ['@kral/vm-guard/envstore', 'vm-guard/envstore']) { try { cands.push(req.resolve(spec)); } catch {} }
   for (const f of cands) {
     try { if (!fs.existsSync(f)) continue; const m = await import(pathToFileURL(f).href); if (typeof m.updateEnv === 'function') return m; } catch {}
   }

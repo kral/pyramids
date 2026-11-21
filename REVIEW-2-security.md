@@ -80,11 +80,11 @@ cloned third-party repository can supply.
 This covers three related issues.
 
 - **N1a – analyzer binary from the project's `node_modules`.** `mcp/src/analyzer.mjs` `resolveAnalyzer`
-  resolves `@vto/analyzer-<platform>` first from vto, then **from the project root**
+  resolves `@kral/vto-analyzer-<platform>` first from vto, then **from the project root**
   (`createRequire(projectRoot/package.json)`). It does this **before** the local cargo build. The sha256 it checks
   comes from the **same** package's `package.json`, so the check proves nothing, and a missing `vto.sha256` is
   accepted.
-  - **PoC**: `dproj/node_modules/@vto/analyzer-linux-x64/bin/vto` is a shell script. The MCP call
+  - **PoC**: `dproj/node_modules/@kral/vto-analyzer-linux-x64/bin/vto` is a shell script. The MCP call
     `affected_tests {}` produced `REPO-ANALYZER-RAN.txt` ("repo-supplied analyzer ran: affected … --diff -"). The
     vitest config was never executed.
 - **N1b – daemon git calls are not hardened.** `mcp/src/select.mjs` runs `execFile('git', ['diff', …])` without
