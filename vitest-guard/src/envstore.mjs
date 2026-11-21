@@ -115,7 +115,11 @@ export function withEnvLock(root, fn, { timeoutMs = 3000, staleMs = 30000 } = {}
   const deadline = Date.now() + timeoutMs;
   let held = false;
   for (let i = 0; ; i++) {
-    try { fs.writeFileSync(lock, token, { flag: 'wx', mode: 0o600 }); held = true; break; } catch (e) { if (e.code !== 'EEXIST') break; }
+    try { fs.writeFileSync(lock, token, { flag: 'wx', mode: 0o600 }); held = true; break; } catch (e) {
+      // Windows: a lock file that another process is deleting is briefly "delete pending" → EPERM/EACCES
+      const busy = e.code === 'EEXIST' || (process.platform === 'win32' && ['EPERM', 'EACCES', 'EBUSY'].includes(e.code));
+      if (!busy) break;
+    }
     try {
       const st = fs.lstatSync(lock);
       const age = Date.now() - st.mtimeMs;
