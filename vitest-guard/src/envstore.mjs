@@ -161,6 +161,8 @@ export function readEnv(root) {
   return { files, producer: typeof doc?.producer === 'string' ? doc.producer : null, updatedAt: typeof doc?.updatedAt === 'string' ? doc.updatedAt : null };
 }
 
+const ORPHAN_MS = 10000; // a `.folding` claim older than this belongs to a fold that failed or died
+
 // Windows: replacing a file that another process has open (a concurrent reader) fails with
 // EPERM/EBUSY/EACCES for a short moment; retry briefly instead of losing the write.
 function renameWithRetry(from, to) {
@@ -233,7 +235,8 @@ export const removeEnvEntries = (root, files, o = {}) => updateEnv(root, {}, { .
  */
 export function foldEnvRecords(root, { producer = 'vitest-guard' } = {}) {
   const stateDir = envStateDir(root);
-  const lines = (p) => { try { return fs.readFileSync(p, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { return []; } };
+  const parse = (txt) => txt.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  const lines = (p) => { try { return parse(fs.readFileSync(p, 'utf8')); } catch { return []; } };
   const recs = [], done = [];
   // vto collector raw env records: weakest of the probes here (applied first, so own probes of this run win ties)
   try {
@@ -243,23 +246,35 @@ export function foldEnvRecords(root, { producer = 'vitest-guard' } = {}) {
       for (const r of lines(path.join(vtoRaw, lane, n))) if (r.t === 'env' && typeof r.dom === 'boolean' && r.testFile) recs.push([r.testFile, { group: r.dom && DOM_ENVS.has(r.env) ? 'dom' : 'node', source: 'probe', env: r.env ?? null, dom: r.dom, by: 'vto' }, true]);
     }
   } catch {}
+  // S11: a per-worker file is claimed by renaming it first (workers of other lanes may still append to it: their next
+  // append creates a fresh file), then read; it is deleted only after a successful write. A claim left behind by a
+  // fold that failed or crashed is picked up again by a later fold once it is older than ORPHAN_MS.
   try {
     for (const n of fs.readdirSync(stateDir)) {
-      if (!/^env-.*\.jsonl$/.test(n)) continue;
-      const p = path.join(stateDir, n);
-      if (isSymlink(p)) continue;
-      for (const r of lines(p)) {
+      const claimedBefore = /^env-.*\.jsonl\.[^.]+\.folding$/.test(n);
+      if (!/^env-.*\.jsonl$/.test(n) && !claimedBefore) continue;
+      const from = path.join(stateDir, n);
+      if (isSymlink(from)) continue;
+      if (claimedBefore) { try { if (Date.now() - fs.lstatSync(from).mtimeMs < ORPHAN_MS) continue; } catch { continue; } }
+      const p = path.join(stateDir, `${n.replace(/\.[^.]+\.folding$/, '')}.${process.pid}-${crypto.randomBytes(4).toString('hex')}.folding`);
+      try { renameWithRetry(from, p); } catch { continue; } // gone (another fold claimed it) or locked: next fold
+      let own, buf;
+      try { buf = fs.readFileSync(p); own = parse(buf.toString('utf8')); } catch { continue; } // unreadable now: the claim is retried later
+      for (const r of own) {
         if (r.t === 'env' && typeof r.dom === 'boolean') recs.push([r.file, { group: r.dom && (!r.env || DOM_ENVS.has(r.env)) ? 'dom' : 'node', source: 'probe', env: r.env ?? null, dom: r.dom, by: 'vitest-guard', ...(r.via ? { via: String(r.via).slice(0, 60) } : {}) }]);
         if (r.t === 'env-miss') recs.push([r.file, { group: 'dom', source: 'probe', env: r.env ?? null, dom: true, miss: { key: r.key }, by: 'vitest-guard' }]);
       }
-      done.push(p);
+      done.push([p, buf.length]);
     }
   } catch {}
-  if (!recs.length) return readEnv(root).files;
+  // a worker that opened the file just before the rename may still append to the claim: a claim that grew after it
+  // was read is not deleted (a later fold reads it again; merging the same record twice changes nothing)
+  const drop = () => { for (const [p, n] of done) { try { if (fs.statSync(p).size === n) fs.rmSync(p, { force: true }); } catch {} } };
+  if (!recs.length) { drop(); return readEnv(root).files; }
   // vto raw records only fill gaps (the daemon folds them with its own rules too); own records use the full precedence
   const cur = readEnv(root).files;
   const list = recs.filter(([f, , onlyNew]) => !onlyNew || !cur[envKey(root, f) ?? '']).map(([f, r]) => [f, r]);
   const res = updateEnv(root, list, { producer });
-  if (res.written || !res.changed.length) for (const p of done) { try { fs.rmSync(p); } catch {} }
+  if (res.written || !res.changed.length) drop();
   return res.files;
 }

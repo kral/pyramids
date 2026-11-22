@@ -134,3 +134,31 @@ test('envstore: foldEnvRecords folds per-worker records once and keeps what othe
   assert.ok(!fs.existsSync(path.join(root, '.vitest-guard/run/env-1-1.jsonl')), 'folded record file removed');
   assert.deepEqual(foldEnvRecords(root), files, 'idempotent');
 });
+
+test('envstore S11: records appended while foldEnvRecords runs are never lost (claim by rename, then read)', async () => {
+  const root = mk();
+  const dir = path.join(root, '.vitest-guard/run'); fs.mkdirSync(dir, { recursive: true });
+  const n = 1500;
+  const writer = `const fs=require('fs');let i=0;const f=${JSON.stringify(path.join(dir, 'env-4242-1.jsonl'))};const t=setInterval(()=>{for(let k=0;k<5&&i<${n};k++,i++)fs.appendFileSync(f,JSON.stringify({t:'env-miss',file:'src/f'+i+'.test.js',env:'node',key:'document'})+'\\n');if(i>=${n})clearInterval(t);},1);`;
+  const child = spawn(process.execPath, ['-e', writer], { stdio: 'inherit' });
+  let done = false; child.on('exit', () => (done = true));
+  while (!done) { foldEnvRecords(root); await new Promise((r) => setTimeout(r, 1)); }
+  foldEnvRecords(root);
+  // a claim that grew after it was read is left for a later fold: age it so that the last fold takes it
+  for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.folding'))) { const old = new Date(Date.now() - 60000); fs.utimesSync(path.join(dir, f), old, old); }
+  const files = foldEnvRecords(root);
+  assert.equal(Object.keys(files).length, n, 'every appended record reached env.json');
+  assert.deepEqual(fs.readdirSync(dir).filter((x) => /^env-.*jsonl/.test(x)), [], 'no per-worker file or claim left');
+});
+
+test('envstore S11: a fresh claim of another fold is left alone, an orphaned one is folded', () => {
+  const root = mk();
+  const dir = path.join(root, '.vitest-guard/run'); fs.mkdirSync(dir, { recursive: true });
+  const fresh = path.join(dir, 'env-1-1.jsonl.77-aa.folding'), orphan = path.join(dir, 'env-2-1.jsonl.88-bb.folding');
+  fs.writeFileSync(fresh, JSON.stringify({ t: 'env', file: 'a.test.ts', dom: true, env: 'jsdom' }) + '\n');
+  fs.writeFileSync(orphan, JSON.stringify({ t: 'env', file: 'b.test.ts', dom: true, env: 'jsdom' }) + '\n');
+  const old = new Date(Date.now() - 60000); fs.utimesSync(orphan, old, old);
+  const files = foldEnvRecords(root);
+  assert.ok(files['b.test.ts'] && !files['a.test.ts']);
+  assert.ok(fs.existsSync(fresh) && !fs.existsSync(orphan));
+});
