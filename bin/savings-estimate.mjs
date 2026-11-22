@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { summary, table, painter, colorEnabled } from '../vitest-guard/src/ui.mjs';
+import { sanitize } from '../vitest-guard/src/safety.mjs';
 
 const HELP = `vto savings estimate – projected monthly savings of vto (affected tests + fast pools)
 
@@ -110,6 +111,8 @@ function readMeasured(dir, since) {
   try { text = fs.readFileSync(file, 'utf8'); } catch { throw new Error(`no measured runs: ${file} does not exist (run tests with \`vto run\` first)`); }
   const recs = text.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } });
   const m = measuredFrom(recs, { since });
+  // a committed .vto/metrics.jsonl is untrusted: its pool label must not drive the terminal (security review 3 S3)
+  if (m.suitePool != null) m.suitePool = sanitize(String(m.suitePool), 80);
   if (!m.runs) throw new Error(`no finished runs in ${file} within ${since}`);
   return m;
 }

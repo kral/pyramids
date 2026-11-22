@@ -5,6 +5,31 @@ import path from 'node:path';
 
 const GLOB_META = /[*?[\]{}()!+@]/;
 
+// C0 (incl. ESC, \n, \t), DEL, C1 (incl. U+009B CSI, U+009D OSC), soft hyphen, Arabic letter mark, zero-width and bidi
+// marks/embeddings/overrides/isolates, word joiner and invisible operators, BOM, interlinear annotations, line/paragraph
+// separators, Unicode tag characters and lone surrogates
+const UNSAFE = /[\x00-\x1f\x7f-\x9f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb]|\udb40[\udc00-\udc7f]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
+const hex = (ch) => [...ch].map((c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0')).join('');
+/**
+ * One printable line for a name that does not come from vitest-guard itself (test file names, test titles, project
+ * names, env keys, labels read from committed state): terminal controls (C0, ESC, C1, DEL) and invisible / bidi
+ * characters are shown as visible `\uXXXX` escapes, so they can neither drive the terminal nor spoof the display.
+ * Not for paths that are used: only for what is printed.
+ */
+export function sanitize(value, maxLen = 300) {
+  let s = typeof value === 'string' ? value : String(value);
+  if (s.length > maxLen * 2) s = s.slice(0, maxLen * 2);
+  s = s.replace(UNSAFE, hex);
+  return s.length > maxLen ? s.slice(0, maxLen) + '…' : s;
+}
+
+const SGR = /(\x1b\[[0-9;]*m)/;
+/** Multi-line console text (CLI messages that embed names or Vitest output): like sanitize(), but keeps "\n", "\t" and plain SGR colours. */
+export function sanitizeText(value) {
+  const s = (typeof value === 'string' ? value : String(value)).replace(/\r\n/g, '\n');
+  return s.split(SGR).map((part, i) => (i % 2 ? part : part.replace(UNSAFE, (ch) => (ch === '\n' || ch === '\t' ? ch : hex(ch))))).join('');
+}
+
 /**
  * F9: paths coming from committed / environment-supplied data (.vitest-guard/incompatible.json, conflicts.json,
  * pollution.json, durations.json, VITEST_GUARD_LANE_FILE) end up as Vitest `include` entries or decide what runs
@@ -21,8 +46,8 @@ export function validateTestPaths(root, entries, { include, exclude = [], label 
     else if (!ok.includes(entry)) ok.push(entry);
   }
   if (warn && rejected.length) {
-    for (const r of rejected.slice(0, 20)) console.warn(`[vitest-guard] ignoring ${label} entry ${JSON.stringify(String(r.entry)).slice(0, 200)}: ${r.reason}`);
-    if (rejected.length > 20) console.warn(`[vitest-guard] ... and ${rejected.length - 20} more ignored ${label} entries`);
+    for (const r of rejected.slice(0, 20)) console.warn(`[vitest-guard] ignoring ${sanitize(label)} entry ${sanitize(JSON.stringify(String(r.entry)), 200)}: ${r.reason}`);
+    if (rejected.length > 20) console.warn(`[vitest-guard] ... and ${rejected.length - 20} more ignored ${sanitize(label)} entries`);
   }
   return { ok, rejected };
 }

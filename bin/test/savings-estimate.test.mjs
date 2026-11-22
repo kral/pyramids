@@ -42,3 +42,19 @@ test('savings estimate --from-measured: aggregates metrics, explicit flags win, 
   assert.equal(m.localDays, 4);
   assert.equal(measuredFrom(recs, { since: '1h', now }).runs, 0);
 });
+
+test('savings estimate --from-measured: a committed metrics.jsonl cannot put terminal escapes into the output (security review 3 S3)', async () => {
+  const fs = await import('node:fs'), os = await import('node:os'), path = await import('node:path');
+  const { main } = await import('../savings-estimate.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vto-sav-'));
+  fs.mkdirSync(path.join(dir, '.vto'));
+  const pool = 'forks\x1b]8;;https://evil.example/x\x07 (click here)\x1b]8;;\x07\x1b[2J\x1b]0;pwned\x07\u009b31m‮';
+  fs.writeFileSync(path.join(dir, '.vto', 'metrics.jsonl'), JSON.stringify({ t: 'run', at: new Date().toISOString(), kind: 'full', status: 'done', pool, testsRun: 10, suiteTotal: 10, wallMs: 600000 }) + '\n');
+  const o = parse(['--from-measured', dir]);
+  assert.doesNotMatch(o.sources['suite-min'], /[\x00-\x1f\x7f-\x9f‮]/);
+  assert.match(o.sources['suite-min'], /forks\\u001b\]8;;https:\/\/evil\.example/);
+  let out = '';
+  const log = console.log; console.log = (...a) => { out += a.join(' ') + '\n'; };
+  try { assert.equal(main(['--from-measured', dir]), 0); } finally { console.log = log; }
+  assert.doesNotMatch(out.replace(/\x1b\[[0-9;]*m/g, ''), /[\x07\x1b\u009b‮]/); // only our own colours remain
+});
