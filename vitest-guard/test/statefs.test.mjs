@@ -113,6 +113,22 @@ test('S3: migrateState leaves a committed durations.json / pollution.json in pla
   assert.doesNotMatch(r2.out, /left untouched/);
 });
 
+test('migrate hint for a committed durations.json is printed once per set of affected files', { skip: !hasGit && 'git not available' }, () => {
+  const root = mk({ 'package.json': '{}' });
+  w(root, '.vitest-guard/durations.json', '{}\n');
+  assert.equal(git(root, 'init', '-q').status, 0);
+  git(root, 'add', '.vitest-guard/durations.json');
+  assert.equal(git(root, 'commit', '-q', '-m', 'state').status, 0);
+  assert.match(cli(root, ['report']).out, /durations\.json is committed but this run has no --commit-state/);
+  assert.doesNotMatch(cli(root, ['report']).out, /committed but this run has no --commit-state/);
+  assert.ok(fs.existsSync(path.join(root, '.vitest-guard/run/migrate-hint.json')));
+  // the set of affected files changes: shown again
+  w(root, '.vitest-guard/pollution.json', '{}\n');
+  git(root, 'add', '.vitest-guard/pollution.json'); git(root, 'commit', '-q', '-m', 'more');
+  assert.match(cli(root, ['report']).out, /durations\.json, \.vitest-guard\/pollution\.json are committed/);
+  assert.doesNotMatch(cli(root, ['report']).out, /committed but this run has no --commit-state/);
+});
+
 test('S3: migrateState never deletes: an old copy next to a newer run/ copy stays (with a hint)', () => {
   const root = mk();
   w(root, '.vitest-guard/plan.json', '{"old":1}');

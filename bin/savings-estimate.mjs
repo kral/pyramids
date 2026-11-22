@@ -5,7 +5,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { summary, table, painter, colorEnabled } from '../vitest-guard/src/ui.mjs';
+import { spawnSync } from 'node:child_process';
 import { sanitize } from '../vitest-guard/src/safety.mjs';
+import { GIT_HARDEN, findGit, gitEnv } from '../mcp/src/git.mjs';
 
 const HELP = `vto savings estimate – projected monthly savings of vto (affected tests + fast pools)
 
@@ -120,11 +122,43 @@ export function measuredFrom(records, { since = '30d', now = Date.now() } = {}) 
   };
 }
 
-function readMeasured(dir, since) {
-  const file = path.join(path.resolve(dir), '.vto', 'metrics.jsonl');
+export const MAX_METRICS_BYTES = 64 * 1024 * 1024, MAX_LINE = 64 * 1024;
+
+/** lstat-checked read of <root>/.vto/metrics.jsonl: no link on the path below the project, bounded size */
+function readMetricsFile(root, file) {
+  const refuse = (p) => new Error(`${sanitize(p, 200)} is a symbolic link or junction: refusing to follow it (the metrics are read from a real .vto/metrics.jsonl only)`);
   let text;
-  try { text = fs.readFileSync(file, 'utf8'); } catch { throw new Error(`no measured runs: ${file} does not exist (run tests with \`vto run\` first)`); }
-  const recs = text.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } });
+  try {
+    for (const p of [path.join(root, '.vto'), file]) { const st = fs.lstatSync(p); if (st.isSymbolicLink()) throw refuse(p); }
+    const st = fs.lstatSync(file);
+    if (!st.isFile()) throw new Error(`${sanitize(file, 200)} is not a regular file`);
+    if (st.size > MAX_METRICS_BYTES) throw new Error(`${sanitize(file, 200)} is ${(st.size / 1048576).toFixed(0)} MB, over the ${MAX_METRICS_BYTES / 1048576} MB limit: rotate or trim it`);
+    const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+    try { text = fs.readFileSync(fd, 'utf8'); } finally { fs.closeSync(fd); }
+  } catch (e) {
+    if (e.code === 'ENOENT') throw new Error(`no measured runs: ${file} does not exist (run tests with \`vto run\` first)`);
+    if (e.code === 'ELOOP') throw refuse(file);
+    throw e;
+  }
+  return text;
+}
+
+/** true when git tracks the file (hardened read-only call, mcp/src/git.mjs; D4); false when unknown */
+function trackedByGit(root, file) {
+  const bin = findGit(root);
+  if (!bin) return false;
+  try {
+    const r = spawnSync(bin, ['-C', root, ...GIT_HARDEN, 'ls-files', '--error-unmatch', '--', path.relative(root, file)], { cwd: root, env: gitEnv(), windowsHide: true, shell: false, stdio: 'ignore', timeout: 10000 });
+    return r.status === 0;
+  } catch { return false; }
+}
+
+function readMeasured(dir, since) {
+  const root = path.resolve(dir);
+  const file = path.join(root, '.vto', 'metrics.jsonl');
+  const text = readMetricsFile(root, file);
+  if (trackedByGit(root, file)) console.error('note: .vto/metrics.jsonl is committed to git: these are someone else\'s measurements, not yours');
+  const recs = text.split('\n').filter((l) => l && l.length <= MAX_LINE).map((l) => { try { return JSON.parse(l); } catch { return null; } });
   const m = measuredFrom(recs, { since });
   // a committed .vto/metrics.jsonl is untrusted: its pool label must not drive the terminal (security review 3 S3)
   if (m.suitePool != null) m.suitePool = sanitize(String(m.suitePool), 80);

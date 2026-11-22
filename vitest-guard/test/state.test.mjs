@@ -46,5 +46,5 @@ test('A4: volatile files of the old layout are moved into run/, committed ones s
   try { migrateState(ctx({ _: ['check'], root })); } finally { console.log = log; }
   // without git it cannot be told whether durations.json / pollution.json are committed: they are not moved
   assert.deepEqual(fs.readdirSync(d).sort(), ['conflicts.json', 'durations.json', 'incompatible.json', 'pollution.json', 'run']);
-  assert.deepEqual(fs.readdirSync(path.join(d, 'run')).sort(), ['.gitignore', 'files-cache.json', 'plan.json', 'settings.json', 'verify-vm.json']);
+  assert.deepEqual(fs.readdirSync(path.join(d, 'run')).sort(), ['.gitignore', 'files-cache.json', 'migrate-hint.json', 'plan.json', 'settings.json', 'verify-vm.json']);
 });
