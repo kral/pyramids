@@ -18,3 +18,27 @@ test('savings estimate: model, billing rounded up per job, validation', () => {
   assert.throws(() => parse(['--suite-min', '3', '--shards', '1.5']), /whole number/);
   assert.throws(() => parse(['--suite-min', '3', '--nope', '1']), /unknown option/);
 });
+
+test('savings estimate --from-measured: aggregates metrics, explicit flags win, fast-pool full runs converted', async () => {
+  const { measuredFrom } = await import('../savings-estimate.mjs');
+  const now = Date.parse('2026-11-22T12:00:00Z');
+  const at = (d) => new Date(now - d * 864e5).toISOString();
+  const recs = [
+    { t: 'run', at: at(5), kind: 'full', status: 'done', pool: 'forks', testsRun: 100, suiteTotal: 100, wallMs: 200000 },
+    { t: 'run', at: at(4), kind: 'full', status: 'done', pool: 'vitest-guard:vm', testsRun: 100, suiteTotal: 100, wallMs: 100000 },
+    { t: 'run', at: at(1), kind: 'affected', status: 'done', pool: 'vitest-guard:vm', testsRun: 10, suiteTotal: 100, wallMs: 5000 },
+    { t: 'run', at: at(1), kind: 'affected', status: 'done', pool: 'vitest-guard:vm', testsRun: 30, suiteTotal: 100, wallMs: 9000 },
+    { t: 'run', at: at(2), kind: 'affected', status: 'done', pool: 'vitest-guard:vm', testsRun: 100, suiteTotal: 100, wallMs: 99000 }, // fell back to all
+    { t: 'run', at: at(2), kind: 'affected', status: 'error', testsRun: 1, suiteTotal: 100 },                                       // not done: ignored
+    { t: 'run', at: at(90), kind: 'full', status: 'done', pool: 'forks', testsRun: 100, suiteTotal: 100, wallMs: 1 },                // outside --since
+    { t: 'tokens', at: at(1), tokens: 5 },
+  ];
+  const m = measuredFrom(recs, { since: '30d', now });
+  assert.equal(m.runs, 5);
+  assert.equal(m.suitePool, 'vitest-guard:vm');
+  assert.equal(m.selected, 0.2);            // median of 0.1 and 0.3
+  assert.equal(Math.round(m.runAll * 1000) / 1000, 0.333);
+  assert.equal(m.poolGain, 0.5);            // 100 s vs 200 s
+  assert.equal(m.localDays, 4);
+  assert.equal(measuredFrom(recs, { since: '1h', now }).runs, 0);
+});

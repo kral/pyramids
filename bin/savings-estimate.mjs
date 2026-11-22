@@ -2,6 +2,8 @@
 // vto savings estimate – what vto would save a team, before anything is installed.
 // A transparent model, every input a flag; the measured counterpart is `vto savings measured`
 // (mcp/SAVINGS.md). No dependencies.
+import fs from 'node:fs';
+import path from 'node:path';
 import { summary, table, painter, colorEnabled } from '../vitest-guard/src/ui.mjs';
 
 const HELP = `vto savings estimate – projected monthly savings of vto (affected tests + fast pools)
@@ -28,6 +30,10 @@ AI agents (optional)
   --classic-tokens N     tokens of one full Vitest output read by the agent    (default 20000)
   --vto-tokens N         tokens of a vto answer (MCP budget 8 KB)              (default 1500)
   --usd-per-mtok USD     input price per million tokens                        (default: not priced)
+Measured inputs
+  --from-measured [DIR]  take suite time, selection share, run-all share, pool gain and local runs per day
+                         from DIR/.vto/metrics.jsonl (default: the current directory); explicit flags win
+  --since 30d            period of the measured runs                           (default 30d)
 Other
   --days N               working days per month                                (default 21)
   --json                 machine-readable result
@@ -50,6 +56,9 @@ export function parse(argv) {
     const a = argv[i];
     if (a === '--json') { o.json = true; continue; }
     if (a === '--help' || a === '-h') { o.help = true; continue; }
+    if (a === '--from-measured') { o.fromMeasured = argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[++i] : '.'; continue; }
+    if (a.startsWith('--from-measured=')) { o.fromMeasured = a.slice(16) || '.'; continue; }
+    if (a === '--since' || a.startsWith('--since=')) { const v = a.includes('=') ? a.slice(8) : argv[++i]; if (!/^\d+[dhm]$/.test(v || '')) throw new Error(`--since needs e.g. 30d, 12h, got ${JSON.stringify(String(v))}`); o.since = v; continue; }
     const m = /^--([a-z-]+)(?:=(.*))?$/.exec(a);
     if (!m || !SPEC[m[1]]) throw new Error(`unknown option ${JSON.stringify(a.slice(0, 40))}`);
     const raw = m[2] ?? argv[++i];
@@ -59,8 +68,62 @@ export function parse(argv) {
     if (SPEC[m[1]].int && !Number.isInteger(v)) throw new Error(`--${m[1]} must be a whole number, got ${raw}`);
     o[m[1]] = v;
   }
-  for (const [k, s] of Object.entries(SPEC)) if (o[k] === undefined) { if (s.req && !o.help) throw new Error(`--${k} is required`); o[k] = s.def; }
+  o.given = new Set(Object.keys(SPEC).filter((k) => o[k] !== undefined));
+  if (o.fromMeasured !== undefined && !o.help) applyMeasured(o, readMeasured(o.fromMeasured, o.since || '30d'));
+  o.sources ||= {};
+  for (const [k, s] of Object.entries(SPEC)) if (o[k] === undefined) {
+    if (s.req && !o.help) throw new Error(`--${k} is required${o.fromMeasured !== undefined ? ' (no full run in the measured data)' : ''}`);
+    o[k] = s.def;
+  }
   return o;
+}
+
+const median = (xs) => { const a = [...xs].sort((x, y) => x - y); return a.length ? (a.length % 2 ? a[(a.length - 1) / 2] : (a[a.length / 2 - 1] + a[a.length / 2]) / 2) : null; };
+
+/** aggregate .vto/metrics.jsonl (written by the daemon / vto run; mcp/src/metrics.mjs) */
+export function measuredFrom(records, { since = '30d', now = Date.now() } = {}) {
+  const m = /^(\d+)([dhm])$/.exec(since); const ms = +m[1] * (m[2] === 'd' ? 864e5 : m[2] === 'h' ? 36e5 : 6e4);
+  const runs = records.filter((r) => r?.t === 'run' && r.status === 'done' && r.suiteTotal > 0 && Date.parse(r.at) >= now - ms);
+  const full = runs.filter((r) => r.kind === 'full' && r.testsRun >= 0.95 * r.suiteTotal && r.wallMs > 0);
+  const affected = runs.filter((r) => r.kind === 'affected');
+  const fellBack = affected.filter((r) => r.testsRun >= 0.95 * r.suiteTotal);
+  const partial = affected.filter((r) => r.testsRun < 0.95 * r.suiteTotal);
+  const isGuard = (p) => /vitest-guard:(vm|shared)/.test(String(p || ''));
+  const fullOf = (pred) => median(full.filter((r) => pred(r.pool)).map((r) => r.wallMs));
+  const forks = fullOf((p) => p === 'forks' || p === 'threads'), fast = fullOf(isGuard);
+  const latestFull = full.sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0];
+  const local = runs.filter((r) => !r.ci);
+  const days = new Set(local.map((r) => String(r.at).slice(0, 10))).size;
+  return {
+    runs: runs.length, since,
+    suiteMin: latestFull ? latestFull.wallMs / 60000 : null, suitePool: latestFull?.pool ?? null,
+    selected: partial.length ? median(partial.map((r) => r.testsRun / r.suiteTotal)) : null, partialRuns: partial.length,
+    runAll: affected.length ? fellBack.length / affected.length : null, affectedRuns: affected.length,
+    poolGain: forks && fast && fast < forks ? 1 - fast / forks : null,
+    localRunsPerDay: days ? local.length / days : null, localDays: days,
+  };
+}
+
+function readMeasured(dir, since) {
+  const file = path.join(path.resolve(dir), '.vto', 'metrics.jsonl');
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch { throw new Error(`no measured runs: ${file} does not exist (run tests with \`vto run\` first)`); }
+  const recs = text.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } });
+  const m = measuredFrom(recs, { since });
+  if (!m.runs) throw new Error(`no finished runs in ${file} within ${since}`);
+  return m;
+}
+
+function applyMeasured(o, m) {
+  o.sources = {}; o.measured = m;
+  const set = (k, v, note) => { if (v == null || o.given.has(k)) return; o[k] = Math.round(v * 1000) / 1000; o.sources[k] = note; };
+  // a full run measured in a fast pool is already faster: the pool gain is in the suite time then, not on top
+  if (m.suitePool && /vitest-guard:(vm|shared)/.test(m.suitePool)) set('suite-min', m.suiteMin / (1 - (m.poolGain ?? 0)), `measured (full run, ${m.suitePool}${m.poolGain ? ', converted to forks' : ''})`);
+  else set('suite-min', m.suiteMin, `measured (latest full run${m.suitePool ? ', ' + m.suitePool : ''})`);
+  set('selected', m.selected, `measured (median of ${m.partialRuns} affected runs)`);
+  set('run-all', m.runAll, `measured (${m.affectedRuns} affected runs)`);
+  set('pool-gain', m.poolGain, 'measured (full runs: forks vs vitest-guard)');
+  set('local-runs', m.localRunsPerDay, `measured on this machine (${m.localDays} days)`);
 }
 
 const r1 = (x) => Math.round(x * 10) / 10;
@@ -109,14 +172,26 @@ export function main(argv = process.argv.slice(2)) {
   ];
   if (m.agentRuns) rows.push(['AI agents', `${n0(m.agentRuns)} runs`, `${(m.tokens / 1e6).toFixed(1)} M tokens`, m.tokenUsd == null ? p.dim('(--usd-per-mtok)') : p.green(usd(m.tokenUsd))]);
   summary({
-    tool: 'vto', title: 'savings estimate',
+    tool: 'vto', title: o.fromMeasured !== undefined ? 'savings estimate · from measured runs' : 'savings estimate',
     verdict: 'ok', label: 'ESTIMATE',
     headline: `a test run drops from ${e.perRun.before} to ${e.perRun.after} min on average (−${Math.round(e.perRun.share * 100)} %)`,
-    facts: [['selected', `${Math.round(o.selected * 100)} % of the suite per affected run, ${Math.round(o['run-all'] * 100)} % of runs run all`],
+    facts: [
+      ['suite', `${r2(o['suite-min'])} min full run`],
+      ['selected', `${Math.round(o.selected * 100)} % of the suite per affected run`],
+      ['run all', `${Math.round(o['run-all'] * 100)} % of runs`],
       ['fast pool', o['pool-gain'] ? `−${Math.round(o['pool-gain'] * 100)} %` : 'not counted (measure: vto guard compare)'],
-      ['runner price', `$${o['usd-per-min']}/min${o.shards > 1 ? `, ${o.shards} shards` : ''}`]],
+      ['local runs', `${r1(o['local-runs'])} per developer per day, ${o.devs} developer${o.devs === 1 ? '' : 's'}`],
+      ['runner price', `$${o['usd-per-min']}/min${o.shards > 1 ? `, ${o.shards} shards` : ''}`],
+    ].map(([k, v]) => {
+      const key = { suite: 'suite-min', selected: 'selected', 'run all': 'run-all', 'fast pool': 'pool-gain', 'local runs': 'local-runs' }[k];
+      const src = key && o.sources?.[key];
+      if (key === 'pool-gain' && !o['pool-gain'] && !src) return [k, v];
+      return [k, src ? `${v}  ${p.green('· ' + src)}` : key && !o.given?.has(key) && o.fromMeasured === undefined ? `${v}  ${p.dim('· assumed')}` : key && !o.given?.has(key) ? `${v}  ${p.yellow('· assumed (not in the measured data)')}` : v];
+    }),
     tableLines: table(['per month', 'runs', 'saved', 'value'], rows, ['l', 'r', 'r', 'r'], p),
-    next: ['an estimate from the inputs above: measure the selection share on your suite with `vto run`', 'realised savings over time: `vto savings measured`'],
+    next: o.fromMeasured !== undefined
+      ? [`extrapolated from ${o.measured.runs} measured runs (${o.measured.since}); team size and CI runs per day are inputs, not measured`, 'realised savings so far: `vto savings measured`']
+      : ['an estimate from the inputs above: use your own numbers with `--from-measured` after a few days of `vto run`', 'realised savings over time: `vto savings measured`'],
   });
   return 0;
 }
