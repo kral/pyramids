@@ -67,24 +67,36 @@ test('B2: a missing version counts as 1; writers always stamp the current versio
   assert.deepEqual(loadState(c, 'plan.json', null), { version: 2, lanes: [] });
 });
 
-test('B2: the config wrapper fails safe on a newer incompatible.json: every file it names runs isolated, with a warning', () => {
+test('B2 / S3 (review 3b): a newer incompatible.json stops the config (fail closed); VITEST_GUARD_NEWER_STATE=failsafe runs every file it names isolated', () => {
   const root = mk({ 'test/a.test.ts': '', 'test/b.test.ts': '', 'test/c.test.ts': '' });
   w(root, '.vitest-guard/incompatible.json', JSON.stringify({ version: 2, quarantine: [{ file: 'test/a.test.ts', modes: ['vm'] }, { file: 'test/b.test.ts', modes: ['shared'] }], note: 'x' }));
-  let q;
-  const out = quiet(() => { q = readQuarantineFile(root); });
-  assert.match(out, /has format version 2; this @jirikral\/vitest-guard .* understands version 1 - upgrade .*Failing safe: the 2 test file\(s\) it names run isolated/);
-  assert.equal(q.newer, true);
-  for (const mode of ['vm', 'shared']) assert.deepEqual(readQuarantine(root, mode).sort(), ['test/a.test.ts', 'test/b.test.ts']);
+  assert.throws(() => readQuarantineFile(root), /has format version 2; this @jirikral\/vitest-guard .* understands version 1 - upgrade .*VITEST_GUARD_NEWER_STATE=failsafe.*refuses to run/s);
+  const old = process.env.VITEST_GUARD_NEWER_STATE;
+  process.env.VITEST_GUARD_NEWER_STATE = 'failsafe';
+  try {
+    let q;
+    const out = quiet(() => { q = readQuarantineFile(root); });
+    assert.match(out, /Failing safe \(VITEST_GUARD_NEWER_STATE=failsafe\): the 2 test file\(s\) it names run isolated/);
+    assert.equal(q.newer, true);
+    for (const mode of ['vm', 'shared']) quiet(() => assert.deepEqual(readQuarantine(root, mode).sort(), ['test/a.test.ts', 'test/b.test.ts']));
+    // S3: a newer file that names no existing test file cannot fail safe: it still stops the config
+    w(root, '.vitest-guard/incompatible.json', JSON.stringify({ version: 2, entries: [{ path: './test/a.test.ts' }] }));
+    assert.throws(() => readQuarantineFile(root), /names no existing test file/);
+  } finally { if (old === undefined) delete process.env.VITEST_GUARD_NEWER_STATE; else process.env.VITEST_GUARD_NEWER_STATE = old; }
 });
 
-test('B2 end to end: plain `vitest run` with a newer incompatible.json runs the named file in isolated forks', integration, () => {
+test('B2 end to end: plain `vitest run` with a newer incompatible.json exits 1 (config error); with failsafe the named file runs in isolated forks', integration, () => {
   const probe = (name) => `import { test, expect, inject } from 'vitest';\ntest('${name}', () => { globalThis.__mode = inject('vitestGuard').mode; expect(1).toBe(1); });\ntest('${name} mode', () => { expect(globalThis.__mode).toBe(${name === 'a' ? "'isolated'" : "'vm'"}); });\n`;
   const root = project({
     'vitest.config.mjs': wrappedConfig({ include: ['test/**/*.test.mjs'], environment: 'node' }, { verifyWarning: false }),
     'test/a.test.mjs': probe('a'), 'test/b.test.mjs': probe('b'),
     '.vitest-guard/incompatible.json': JSON.stringify({ version: 3, entries: { 'test/a.test.mjs': { reason: 'x' } } }),
   });
-  const r = vitestRun(root);
+  const r0 = vitestRun(root);
+  assert.equal(r0.code, 1, r0.out);
+  assert.deepEqual(r0.status, {});
+  assert.match(r0.out, /format version 3.*refuses to run/s);
+  const r = vitestRun(root, [], { env: { VITEST_GUARD_NEWER_STATE: 'failsafe' } });
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(r.status, { 'test/a.test.mjs': 'passed', 'test/b.test.mjs': 'passed' });
   assert.match(r.out, /format version 3.*Failing safe/s);
@@ -176,7 +188,7 @@ test('S2: a symlinked / junctioned .vitest-guard/run/logs is never deleted recur
   assert.equal(fs.readFileSync(path.join(victim, 'logs', 'precious.txt'), 'utf8'), 'keep');
 });
 
-test('S2: a symlinked .vitest-guard itself is refused, also by the config wrapper (warning, no quarantine read)', () => {
+test('S2 / R3: a symlinked .vitest-guard itself is refused, also by the config wrapper (config error, never a silent fast run)', () => {
   const victim = victimDir();
   w(victim, 'incompatible.json', JSON.stringify({ vm: { 'test/a.test.ts': {} } }));
   const root = mk({ 'package.json': '{}', 'test/a.test.ts': '' });
@@ -184,10 +196,8 @@ test('S2: a symlinked .vitest-guard itself is refused, also by the config wrappe
   const r = cli(root, ['report']);
   assert.equal(r.code, 2, r.out);
   assert.match(r.out, /\.vitest-guard is a symbolic link or junction/);
-  let q;
-  const out = quiet(() => { q = readQuarantine(root, 'vm'); });
-  assert.deepEqual(q, []);
-  assert.match(out, /is a symbolic link or junction - refusing to follow it.*the quarantine is not read/);
+  // R3 (review 3b): the config wrapper does not run quarantined files fast either: it refuses to load (Vitest exits 1)
+  assert.throws(() => readQuarantine(root, 'vm'), /is a symbolic link or junction - refusing to follow it.*refuses to run/s);
 });
 
 test('S2: state files: no write, append or read through a symlinked file; private modes', { skip: WIN && 'file symlinks need a privilege on Windows (directory junctions are covered above)' }, () => {

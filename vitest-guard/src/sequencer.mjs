@@ -39,7 +39,12 @@ export default class VitestGuardSequencer {
     const raw = JSON.parse(fs.readFileSync(laneFile, 'utf8'));
     const order = Array.isArray(raw) ? raw : Array.isArray(raw?.files) ? raw.files : [];
     const rank = new Map(order.map((f, i) => [f, i]));
-    const key = (s) => { const r = path.relative(s.project.config.root, s.moduleId).split(path.sep).join('/'); return rank.has(r) ? rank.get(r) : 1e9; };
-    return [...files].sort((a, b) => key(a) - key(b));
+    // R4: lane entries are relative to the directory the CLI runs Vitest in (`base`), not to a project's own `root`
+    const base = typeof raw?.base === 'string' ? raw.base : process.cwd();
+    let realBase = base; try { realBase = fs.realpathSync(base); } catch {}
+    const relOf = (s) => { const r = path.relative(base, s.moduleId).split(path.sep).join('/'); return rank.has(r) ? r : path.relative(realBase, s.moduleId).split(path.sep).join('/'); };
+    const missing = files.filter((s) => !rank.has(relOf(s)));
+    if (missing.length) throw new Error(`[vitest-guard] sequencer: ${missing.length} test file(s) are not in the lane file ${laneFile} (e.g. ${relOf(missing[0])}): the lane order cannot be applied`);
+    return [...files].sort((a, b) => rank.get(relOf(a)) - rank.get(relOf(b)));
   }
 }

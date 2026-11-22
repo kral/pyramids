@@ -61,10 +61,29 @@ const gate = (c, n, v, file, d) => {
   return VOLATILE_VERSIONS[n] && versionProblem(n, v) ? d : v;
 };
 export const loadState = (c, n, d) => load(c, n, d);
+// R3: a committed file that is not JSON (merge-conflict markers) or has the wrong shape is a state error (exit 2):
+// never read as "no quarantine" and never overwritten by the next save
+const stateInvalid = (msg) => Object.assign(new Error(msg), { code: 'E_STATE_INVALID' });
+const SHAPES = {
+  'incompatible.json': (v) => (!v || typeof v !== 'object' || Array.isArray(v) ? 'is not a JSON object' : ['vm', 'shared'].map((m) => (v[m] !== undefined && (!v[m] || typeof v[m] !== 'object' || Array.isArray(v[m])) ? `"${m}" must be an object { "<test file>": {...} }` : null)).find(Boolean) || null),
+  'conflicts.json': (v) => (!v || typeof v !== 'object' || Array.isArray(v) ? 'is not a JSON object' : v.edges !== undefined && !Array.isArray(v.edges) ? '"edges" must be an array' : null),
+};
+const readJsonStrict = (c, n, file) => {
+  const txt = readStateFile(file);
+  if (txt === null) return undefined;
+  if (!STATE_VERSIONS[n]) { try { return JSON.parse(txt); } catch { return undefined; } } // volatile: re-created
+  let v;
+  try { v = JSON.parse(txt); } catch (e) { throw stateInvalid(`[vitest-guard] ${relOf(c, file)} is not valid JSON (${/^(<{7}|={7}|>{7})/m.test(txt) ? 'merge-conflict markers' : String(e.message).slice(0, 120)}): resolve it by hand, it is never read as empty or overwritten`); }
+  return v;
+};
 const load = (c, n, d) => {
-  let file = P(c, n), v = readStateJson(file, undefined);
-  if (v === undefined && OPT_IN.has(n)) { file = path.join(c.dir, n); v = readStateJson(file, undefined); }
-  return v === undefined ? d : gate(c, n, v, file, d);
+  let file = P(c, n), v = readJsonStrict(c, n, file);
+  if (v === undefined && OPT_IN.has(n)) { file = path.join(c.dir, n); v = readJsonStrict(c, n, file); }
+  if (v === undefined) return d;
+  v = gate(c, n, v, file, d);
+  const bad = SHAPES[n]?.(v);
+  if (bad) throw stateInvalid(`[vitest-guard] ${relOf(c, file)} ${bad}: fix it by hand, it is never read as empty or overwritten`);
+  return v;
 };
 export const saveState = (c, n, v) => save(c, n, v);
 const save = (c, n, v) => {
@@ -72,7 +91,10 @@ const save = (c, n, v) => {
   if (file.startsWith(c.stateDir + path.sep)) ensureStateDir(c.stateDir); else safeDir(c.dir); // S12: with the separator
   let old = null; try { old = readStateFile(file); } catch (e) { if (e?.code === 'E_UNSAFE_STATE') throw e; }
   if (old === txt) return; // unchanged content: do not touch the file
-  if (old !== null && STATE_VERSIONS[n]) { let cur; try { cur = JSON.parse(old); } catch {} if (cur) assertStateVersion(n, cur, relOf(c, file)); } // never downgrade a newer file
+  if (old !== null && STATE_VERSIONS[n]) { // never downgrade a newer file, never replace one that is not JSON (R3)
+    let cur; try { cur = JSON.parse(old); } catch { throw stateInvalid(`[vitest-guard] ${relOf(c, file)} is not valid JSON: not overwritten (resolve it by hand)`); }
+    if (cur) assertStateVersion(n, cur, relOf(c, file));
+  }
   writeStateFile(file, txt);
 };
 /**
@@ -90,6 +112,8 @@ export function checkState(c) {
   } catch (e) {
     if (e?.code === 'E_UNSAFE_STATE') return `${e.message}. Nothing was run or written.`;
     if (e?.code === 'E_STATE_VERSION') return `${e.message} (unknown fields are kept, a newer format is never misread or rewritten). Nothing was run or written.`;
+    if (e?.code === 'E_STATE_INVALID') return `${e.message}. Nothing was run or written.`;
+    if (e?.code === 'EACCES' || e?.code === 'EPERM' || e?.code === 'EISDIR') return `[vitest-guard] a state file in ${relOf(c, c.dir)} cannot be read (${e.code}): ${e.message}. Nothing was run or written.`;
     throw e;
   }
   return null;
@@ -125,6 +149,54 @@ function listSpecsUncached(c) {
   try { return JSON.parse(txt).map((x) => ({ file: path.relative(c.root, x.file).split(path.sep).join('/'), project: (x.projectName || '').replace(/:isolated$/, '') })).sort((a, b) => a.file.localeCompare(b.file) || a.project.localeCompare(b.project)); } catch { throw new Error('cannot list test files:\n' + r.stdout + r.stderr); }
 }
 const projectOf = (c, file) => listSpecs(c).find((x) => x.file === file)?.project ?? '';
+
+/**
+ * R6: the quarantine as the config applies it. `vitest list` in the run's own mode: a quarantined file must be listed
+ * only in an isolated project (a `:isolated` sibling, or an auto group that runs isolated). Returns the keys of `q`
+ * (for the buckets of `mode`) that name a listed file the config would still run in a fast mode, and the config's
+ * `[vitest-guard]` lines (why it rejected them).
+ */
+export function unappliedQuarantine(c, q, mode, files) {
+  const groups = mode === 'auto' ? load(c, 'auto.json', {}).groups || {} : null;
+  const buckets = mode === 'auto' ? ['vm', 'shared'] : isFast(mode) ? [mode] : [];
+  const listed = new Set(files);
+  const keys = buckets.flatMap((b) => Object.keys(q[b] || {}).filter((f) => listed.has(f)).map((f) => ({ f, b })));
+  if (!keys.length) return { bad: [], hints: [] };
+  const r = spawnSync(process.execPath, [vitestBin(c.root), 'list', '--filesOnly', '--json', ...(c.config ? ['--config', c.config] : [])], { cwd: c.root, env: { ...process.env, VITEST_GUARD_MODE: mode, VITEST_GUARD_CLI: '1', VITEST_GUARD_DIAG: '0' }, encoding: 'utf8', maxBuffer: 64 << 20 });
+  const m = /^\[\s*$|^\[\]|^\[\{/m.exec(r.stdout || '');
+  let specs;
+  try { specs = JSON.parse(m ? r.stdout.slice(m.index) : '').map((x) => ({ file: path.relative(c.root, x.file).split(path.sep).join('/'), project: x.projectName || '' })); }
+  catch { return { bad: keys.map((k) => k.f), hints: [`cannot list the test files in mode ${mode}: ${((r.stdout || '') + (r.stderr || '')).slice(-400)}`] }; }
+  const isolatedProject = (p) => /:isolated$/.test(p) || (groups && groups[p] === 'isolated');
+  const fastIn = (p, b) => !isolatedProject(p) && (!groups || groups[p] === b);
+  const bad = [...new Set(keys.filter(({ f, b }) => specs.some((s) => s.file === f && fastIn(s.project, b))).map((k) => k.f))].sort();
+  const hints = ((r.stdout || '') + (r.stderr || '')).split('\n').filter((l) => l.includes('[vitest-guard]') && /ignoring|spelled differently/.test(l)).slice(0, 10);
+  return { bad, hints };
+}
+
+const fold = (x) => String(x).normalize('NFC').toLowerCase();
+/**
+ * Review 3 item 3 / N2: quarantine keys that name no listed file. A key that equals exactly one listed file
+ * case-insensitively after NFC normalization is re-spelled to it (the config already applies it there, with a
+ * warning); the rest is stale. Returns { respelled: [[from, to, bucket]], stale: [[key, bucket]] } and updates `q`.
+ */
+function normalizeQuarantineKeys(q, files) {
+  const respelled = [], stale = [];
+  const byFold = new Map();
+  for (const f of files) { const k = fold(f); byFold.set(k, byFold.has(k) ? null : f); }
+  const listed = new Set(files);
+  for (const b of ['vm', 'shared']) {
+    if (!q[b] || typeof q[b] !== 'object') continue;
+    for (const key of Object.keys(q[b])) {
+      if (listed.has(key)) continue;
+      const to = byFold.get(fold(key));
+      if (to && !q[b][to]) { q[b][to] = q[b][key]; delete q[b][key]; respelled.push([key, to, b]); }
+      else if (to) { delete q[b][key]; respelled.push([key, to, b]); } // both spellings present: the on-disk one stays
+      else stale.push([key, b]);
+    }
+  }
+  return { respelled, stale };
+}
 
 // pollution.json: { residual: {file: kinds}  – survived the reset hooks: drives conflict edges,
 //                   mitigated: {file: kinds} – undone by the reset hooks: only used to order polluters last }
@@ -184,7 +256,7 @@ export async function cmdPlan(c, o, files = listFiles(c)) {
 async function runLane(c, files, tag, project = null, mode = 'shared') {
   const laneFile = path.join(c.runDir, `lane-${tag}.json`);
   ensureStateDir(c.stateDir);
-  writeStateFile(laneFile, JSON.stringify({ project: project || null, files }));
+  writeStateFile(laneFile, JSON.stringify({ project: project || null, base: c.root, files })); // R4: entries relative to base
   return runVitest({ root: c.root, config: c.config, mode, laneFile, verbose: c.verbose, tag });
 }
 
@@ -315,6 +387,26 @@ export async function cmdCheck(c, o) {
   clearRunLogs(c.runDir);
   const q = load(c, 'incompatible.json', { version: 1, vm: {}, shared: {} });
   for (const m of auto ? ['vm', 'shared'] : [mode]) q[m] ||= {};
+  // item 3 / N2 / R6: keys spelled differently from the file on disk are rewritten (exit 4); stale keys are reported,
+  // a stale false-green entry fails the check until --prune removes it
+  let respelled = 0, staleFg = [];
+  if (!c.filters.length) {
+    const nk = normalizeQuarantineKeys(q, expectedFiles);
+    for (const [from, to, b] of nk.respelled) say(`RE-SPELLED quarantine key (${b}): ${from} -> ${to} (the name on disk differs in case or Unicode form)`);
+    respelled = nk.respelled.length;
+    for (const [key, b] of nk.stale) {
+      const fg = !!q[b][key]?.falseGreen;
+      if (o.prune) { delete q[b][key]; respelled++; say(`REMOVED stale quarantine entry (${b}, no such test file): ${key}`); continue; }
+      say(`STALE quarantine entry (${b}): ${key} names no test file Vitest lists${fg ? ' - it guarded a false green: check where the test went, then `vitest-guard check --prune` removes it (exit 1 until then)' : ' (`vitest-guard check --prune` removes it)'}`);
+      if (fg) staleFg.push(`${key} (stale false-green quarantine entry: names no listed test file)`);
+    }
+    if (respelled) save(c, 'incompatible.json', q);
+  }
+  // R6: every quarantined file must be run isolated by the config itself (what a plain \`vitest run\` does)
+  const unapplied = unappliedQuarantine(c, q, mode, expectedFiles);
+  for (const f of unapplied.bad) say(`QUARANTINE NOT APPLIED: ${f} is in .vitest-guard/incompatible.json, but the config still runs it in a fast mode`);
+  if (unapplied.bad.length && unapplied.hints.length) say('  ' + unapplied.hints.join('\n  '));
+  const notApplied = [...staleFg, ...unapplied.bad.map((f) => `${f} (quarantined, but the config does not run it isolated)`)];
   let first;
   if (mode === 'shared' && o.plan !== false) first = await cmdRunPlanned(c, { ...o, clean: false }, await cmdPlan(c, o));
   else { first = await runVitest({ root: c.root, config: c.config, mode: runMode, files: c.filters, verbose: c.verbose, tag: 'check' }); const w = readRunLogs(c.runDir); updateDurations(P(c, 'durations.json'), w); if (mode === 'shared') aggregatePollution(c, w); }
@@ -326,14 +418,14 @@ export async function cmdCheck(c, o) {
   // B1/B2: every file Vitest lists must have produced a result; a file that did not run never passed
   const notRun = expectedFiles.filter((f) => !first.files.has(f));
   if (notRun.length && !first.missing?.length) sayMissing(`the ${mode} run`, notRun, first.log);
-  const notRunNote = notRun.map((f) => `${f} (listed by Vitest, but produced no result in the ${mode} run)`);
+  const notRunNote = [...notRun.map((f) => `${f} (listed by Vitest, but produced no result in the ${mode} run)`), ...notApplied];
   let pruned = 0;
   if (o.prune) for (const m of auto ? ['vm', 'shared'] : [mode]) pruned += await prune(c, q, m);
   if (!failing.length) {
-    if (notRun.length) return checkSummary(c, mode, { files: first.files.size, failing: notRun.length, unexplained: notRunNote }, report(c, workers, EXIT.FAIL));
+    if (notRunNote.length) { for (const s2 of notApplied) say(`UNEXPLAINED failure: ${s2}`); return checkSummary(c, mode, { files: first.files.size, failing: notRunNote.length, unexplained: notRunNote, pruned, rewritten: respelled }, report(c, workers, EXIT.FAIL)); }
     if (first.code) { say(`Vitest exited with code ${first.code} although no file failed (unhandled error?):\n` + (first.log || '').slice(-2000)); return checkSummary(c, mode, { files: first.files.size, unhandled: true }, report(c, workers, EXIT.FAIL)); }
     // S8: released quarantine entries changed incompatible.json: exit 4 (commit and re-run)
-    return checkSummary(c, mode, { files: first.files.size, pruned }, report(c, workers, pruned ? EXIT.NEW_QUARANTINE : EXIT.OK));
+    return checkSummary(c, mode, { files: first.files.size, pruned, rewritten: respelled }, report(c, workers, pruned || respelled ? EXIT.NEW_QUARANTINE : EXIT.OK));
   }
 
   const iso = await runVitest({ root: c.root, config: c.config, mode: 'isolated', files: failing, verbose: c.verbose, tag: 'isolated' });
@@ -372,14 +464,14 @@ export async function cmdCheck(c, o) {
   if (newQ.length || conflicts.length) say(`quarantine/conflict state changed: commit ${changedStateFiles({ newQ, conflicts })} and re-run (exit 4)`);
   // D3: 1 (failures, incl. flaky/unexplained) wins over 4 (new quarantine); 0 only when nothing failed
   const code = genuine.length || flaky.length || unexplained.length ? EXIT.FAIL : newQ.length || conflicts.length ? EXIT.NEW_QUARANTINE : EXIT.FAIL /* a file failed and nothing explains it */;
-  return checkSummary(c, mode, { files: first.files.size, failing: failing.length + notRun.length, genuine, newQ, conflicts, flaky, unexplained, pruned }, report(c, workers, code));
+  return checkSummary(c, mode, { files: first.files.size, failing: failing.length + notRun.length, genuine, newQ, conflicts, flaky, unexplained, pruned, rewritten: respelled }, report(c, workers, code));
 }
 
 /** Only the committed state files this run actually changed (pruning releases entries of incompatible.json). */
 function changedStateFiles(d) {
   const n = (a) => (a ? a.length : 0);
   const files = [];
-  if (n(d.newQ) || d.pruned) files.push('.vitest-guard/incompatible.json');
+  if (n(d.newQ) || d.pruned || d.rewritten) files.push('.vitest-guard/incompatible.json');
   if (n(d.conflicts)) files.push('.vitest-guard/conflicts.json');
   return files.join(' and ') || '.vitest-guard/incompatible.json and/or conflicts.json';
 }
@@ -388,7 +480,7 @@ function checkSummary(c, mode, d, code) {
   const quarantined = Object.values(load(c, 'incompatible.json', {}) || {}).reduce((s, m) => s + (m && typeof m === 'object' ? Object.keys(m).length : 0), 0);
   const headline = code === EXIT.OK ? `${d.files} files passed in ${mode} mode`
     : d.unhandled ? `no file failed, but Vitest exited with an error (unhandled error?)`
-    : code === EXIT.NEW_QUARANTINE && !n(d.newQ) && !n(d.conflicts) && d.pruned ? `${d.files} files passed in ${mode} mode; ${d.pruned} quarantine entr${d.pruned === 1 ? 'y' : 'ies'} released`
+    : code === EXIT.NEW_QUARANTINE && !n(d.newQ) && !n(d.conflicts) && (d.pruned || d.rewritten) ? `${d.files} files passed in ${mode} mode; ${d.pruned ? `${d.pruned} quarantine entr${d.pruned === 1 ? 'y' : 'ies'} released` : ''}${d.pruned && d.rewritten ? ', ' : ''}${d.rewritten ? `${d.rewritten} quarantine key(s) re-spelled or removed as stale` : ''}`
     : code === EXIT.NEW_QUARANTINE ? `${n(d.newQ) + n(d.conflicts)} ${mode}-only failure(s) explained and recorded`
     : `${n(d.genuine) || d.failing} of ${d.files} files fail`;
   const next = [];
@@ -399,7 +491,7 @@ function checkSummary(c, mode, d, code) {
   if (code === EXIT.OK && mode === 'shared') next.push('shared realms can hide failures: confirm with `vitest-guard verify --mode shared`');
   summary({ title: `check · ${mode}`, verdict: verdictOf(code), label: code === EXIT.NEW_QUARANTINE ? 'QUARANTINE' : undefined, headline,
     facts: [['real failures', n(d.genuine) || undefined, 'red'], ['newly quarantined', n(d.newQ) || undefined, 'yellow'], ['conflicts', n(d.conflicts) || undefined, 'yellow'],
-      ['flaky', n(d.flaky) || undefined, 'yellow'], ['unexplained', n(d.unexplained) || undefined, 'red'], ['released from quarantine', d.pruned || undefined, 'yellow'], ['quarantine size', quarantined || undefined], ['exit code', code]],
+      ['flaky', n(d.flaky) || undefined, 'yellow'], ['unexplained', n(d.unexplained) || undefined, 'red'], ['released from quarantine', d.pruned || undefined, 'yellow'], ['quarantine keys rewritten', d.rewritten || undefined, 'yellow'], ['quarantine size', quarantined || undefined], ['exit code', code]],
     next });
   return code;
 }
@@ -489,6 +581,7 @@ export async function cmdVerify(c, o) {
   clearRunLogs(c.runDir);
   const runs = [];
   const incomplete = []; // S1: orders in which a file that was put into the run produced no result
+  const laneRuns = []; // R4: { order, lane, files } of every single-worker lane run
   for (const order of orders) {
     if (order === 'gate') { const r = await runVitest({ root: c.root, config: c.config, mode, files: complete ? [] : sample, verbose: c.verbose, tag: 'verify-gate' }); runs.push({ order, r, expected: sample }); continue; }
     if (order === 'planned') { const r = await cmdRunPlanned(c, { ...o, clean: false }, await cmdPlan(c, o, sample)); runs.push({ order, r, expected: sample }); continue; }
@@ -500,20 +593,35 @@ export async function cmdVerify(c, o) {
       let files = pf.filter((f) => !q[m][f]).sort(); // quarantined files run in forks in the gate: nothing to compare
       if (order === 'reversed') files.reverse();
       if (order === 'shuffle') files = files.map((f) => [rnd(), f]).sort((a, b) => a[0] - b[0]).map((x) => x[1]);
-      if (files.length) { parts.push(await runLane(c, files, `verify-${order}-${i++}`, project, m)); expected.push(files); }
+      if (files.length) { const tag = `verify-${order}-${i++}`; parts.push(await runLane(c, files, tag, project, m)); expected.push(files); laneRuns.push({ order, lane: `lane-${tag}.json`, files }); }
     }
     runs.push({ order, r: merge(parts, expected), laneOnly: true, expected: expected.flat() });
   }
+  // R4: a lane must really have run in the requested order (a sequencer that ignored it compares one order twice)
+  { const logged = readRunLogs(c.runDir);
+    const anyLog = logged.some((w) => w.files.length);
+    for (const l of laneRuns) {
+      const ws = logged.filter((w) => w.files.some((f) => f.lane === l.lane));
+      const ran = ws.flatMap((w) => w.files.filter((f) => f.lane === l.lane).map((f) => f.file));
+      if (!anyLog) continue; // run logs are off (log: false): the order cannot be checked
+      // files of different environments run in separate workers (no shared realm between them): within each worker
+      // the files must have run in the requested relative order
+      const pos = new Map(l.files.map((f, k) => [f, k]));
+      const inOrder = ws.every((w) => { const p = w.files.filter((f) => f.lane === l.lane).map((f) => pos.get(f.file) ?? -1); return p.every((x, k) => x >= 0 && (k === 0 || x > p[k - 1])); });
+      const sameOrder = inOrder && new Set(ran).size === ran.length; // a file that failed before its setup ran has no record (its result counts elsewhere)
+      if (!sameOrder) { incomplete.push(`${l.order}: files did not run in the requested order`); say(`ORDER MISMATCH in verify order ${l.order}: requested ${l.files.slice(0, 8).join(' -> ')}${l.files.length > 8 ? ' ...' : ''}, ran ${ws.map((w) => w.files.filter((f) => f.lane === l.lane).map((f) => f.file).slice(0, 8).join(' -> ')).join(' | ') || '(nothing recorded)'}`); }
+    }
+  }
   for (const { order, r, expected } of runs) {
     const missing = expected.filter((f) => !r.files.has(f));
-    if (missing.length) { incomplete.push(`${order}: ${missing.length} file(s)`); if (order !== 'planned') sayMissing(`verify order ${order}`, missing, r.log); }
+    if (missing.length) { incomplete.push(`${order}: ${missing.length} file(s) without a result`); if (order !== 'planned') sayMissing(`verify order ${order}`, missing, r.log); }
   }
   const ref0 = await runVitest({ root: c.root, config: c.config, mode: 'isolated', files: sample, verbose: c.verbose, tag: 'verify-ref' });
   if (ref0.error && !ref0.files.size) { console.error('[vitest-guard] verify: the isolated reference run produced no report\n' + ref0.log.slice(-3000)); return EXIT.FAIL; }
   // S10: the filters are substrings and can run more files than the sample; compare the sample only
   const ref = { ...ref0, files: new Map([...ref0.files].filter(([f]) => sample.includes(f))) };
   const refMissing = sample.filter((f) => !ref.files.has(f));
-  if (refMissing.length) { incomplete.push(`isolated reference: ${refMissing.length} file(s)`); sayMissing('the isolated reference run', refMissing, ref0.log); }
+  if (refMissing.length) { incomplete.push(`isolated reference: ${refMissing.length} file(s) without a result`); sayMissing('the isolated reference run', refMissing, ref0.log); }
 
   const green = new Map(), red = new Map(); // "file > test" -> orders
   const fileOf = new Map();
@@ -573,12 +681,20 @@ export async function cmdVerify(c, o) {
     if (quarantined.length) {
       save(c, 'incompatible.json', q);
       for (const f of quarantined) say(`QUARANTINED: ${f} :: ${(q.vm[f] || q.shared[f]).signature}`);
-      say('these files run in isolated forks from now on (commit .vitest-guard/incompatible.json). A false-green file FAILS there: that failure is real, fix the test.');
+      // R6: say "from now on" only when the config really applies it
+      const ua = unappliedQuarantine(c, q, mode, all);
+      const notApplied = ua.bad.filter((f) => quarantined.includes(f));
+      if (notApplied.length) {
+        for (const f of notApplied) say(`QUARANTINE NOT APPLIED: the config still runs ${f} in a fast mode`);
+        if (ua.hints.length) say('  ' + ua.hints.join('\n  '));
+        incomplete.push(`quarantine not applied by the config: ${notApplied.length} file(s)`);
+      }
+      say(`${notApplied.length ? 'the other quarantined files' : 'these files'} run in isolated forks from now on (commit .vitest-guard/incompatible.json). A false-green file FAILS there: that failure is real, fix the test.`);
     }
   }
   const gateRed = falseRed.filter((k) => red.get(k).includes('gate'));
   if (gateRed.length) say(`${new Set(gateRed.map((k) => fileOf.get(k))).size} file(s) fail in the gate order but pass isolated: run \`vitest-guard check${mode === 'vm' ? '' : ' --mode ' + mode}\` (it tells flaky from ${mode}-incompatible and quarantines)`);
-  if (incomplete.length) say(`INCOMPLETE: not every file produced a result (${incomplete.join('; ')}): this verify proves nothing for those files (exit 1, no clean record written)`);
+  if (incomplete.length) say(`INCOMPLETE: ${incomplete.join('; ')}: this verify proves nothing for those files (exit 1, no clean record written)`);
   // S1: an incomplete comparison is never recorded as a verify (the shared-mode warning of `vitest run` stays)
   if (!incomplete.length) {
     const record = { at: new Date().toISOString(), mode, head: gitHead(c.root), configKey: configKey(c.root, c.config), orders, sample: sample.length, of: all.length, complete, falseGreen, falseRed, knownRed, quarantined };
@@ -592,7 +708,7 @@ export async function cmdVerify(c, o) {
   const code = falseGreen.length ? EXIT.FALSE_GREEN : incomplete.length || gateRed.length || unrecorded.length ? EXIT.FAIL : quarantined.length ? EXIT.NEW_QUARANTINE : EXIT.OK;
   summary({ title: `verify · ${mode}`, verdict: verdictOf(code), label: code === EXIT.FALSE_GREEN ? 'FALSE GREEN' : code === EXIT.NEW_QUARANTINE ? 'QUARANTINE' : code === EXIT.FAIL ? (incomplete.length ? 'INCOMPLETE' : 'FAIL') : 'SAFE',
     headline: code === EXIT.OK ? `${mode} matches isolated forks on ${sample.length}${complete ? '' : ` of ${all.length}`} files${bothFail.size ? ` (${bothFail.size} test(s) fail in both)` : ''}` : code === EXIT.FALSE_GREEN ? `${falseGreen.length} test(s) pass in ${mode} but fail in isolated forks`
-      : code === EXIT.FAIL && incomplete.length ? `not every file produced a result (${incomplete.join('; ')})` : code === EXIT.FAIL && gateRed.length ? `${gateRed.length} test(s) fail in the gate order but pass isolated` : `${falseRed.length} test(s) fail in ${mode} only (order-dependent)`,
+      : code === EXIT.FAIL && incomplete.length ? `the comparison is incomplete (${incomplete.join('; ')})` : code === EXIT.FAIL && gateRed.length ? `${gateRed.length} test(s) fail in the gate order but pass isolated` : `${falseRed.length} test(s) fail in ${mode} only (order-dependent)`,
     facts: [['orders', orders.join(', ')], ['files compared', complete ? `${sample.length} (all)` : `${sample.length} of ${all.length}`, complete ? undefined : 'yellow'],
       ['false green', falseGreen.length, falseGreen.length ? 'red' : 'green'], ['false red', falseRed.length, falseRed.length ? 'yellow' : 'green'], ['fail in both modes', bothFail.size || undefined, 'yellow'],
       ['known conflicts', knownRed.length || undefined], ['quarantined now', quarantined.length || undefined, 'yellow'], ['exit code', code]],

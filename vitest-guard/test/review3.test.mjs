@@ -180,5 +180,5 @@ test('trial S1: mode auto on a single-project config uses a compare result store
   const r = cli(root, ['check']);
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /auto: resolved mode per group: node -> shared/);
-  assert.deepEqual(readJson(path.join(root, '.vitest-guard/run/auto.json')).groups, { node: 'shared' });
+  assert.deepEqual(readJson(path.join(root, '.vitest-guard/run/auto.json')).groups, { node: 'shared', 'auto:rest': 'isolated' });
 });

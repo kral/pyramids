@@ -5,8 +5,8 @@ import v8 from 'node:v8';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import VitestGuardSequencer from './sequencer.mjs';
-import { validateTestPaths, sanitize, escapeGlob, isInside } from './safety.mjs';
-import { readStateJson, writeStateFile } from './statefs.mjs';
+import { validateTestPaths, sanitize, escapeGlob, isInside, globProjectFiles } from './safety.mjs';
+import { readStateJson, readStateFile, writeStateFile } from './statefs.mjs';
 import { versionProblem } from './stateformat.mjs';
 import { listTestFiles, classifyFiles, readModes, DEFAULT_AUTO_MODES, DOM_ENVS } from './auto.mjs';
 import { verifyStatus, findConfigFile } from './verifystate.mjs';
@@ -78,32 +78,61 @@ function filesIn(root, q) {
   return validateTestPaths(root, [...out], { warn: false }).ok;
 }
 
+/** R3: a quarantine that cannot be used is a configuration error (Vitest exits 1); it never silently runs files fast. */
+function quarantineError(file, why) {
+  const e = new Error(`[vitest-guard] ${sanitize(file)}: ${why}. The quarantine cannot be applied, so vitest-guard refuses to run rather than run quarantined files in a fast mode (fail closed). ` +
+    'Fix or remove the file (`vitest-guard check` reports the same problem with exit 2), or run unguarded with VITEST_GUARD_MODE=isolated.');
+  e.code = 'E_QUARANTINE';
+  return e;
+}
+
 /**
  * Raw quarantine file { version, vm: {file: info}, shared: {file: info} } (validate before use: F9).
- * B2: a newer format version is not misread as v1. It fails safe instead: every existing file the newer file names
- * (anywhere in it) is treated as quarantined for both fast modes, i.e. runs isolated, and a warning says to upgrade.
- * A symlinked `.vitest-guard/` or quarantine file is not followed (security review 3 S2): warning, no quarantine.
+ * R3 (fail closed): a symlinked `.vitest-guard/` or quarantine file (security review 3 S2: never followed), an
+ * unreadable file, text that is not JSON (merge-conflict markers), a non-object top level and a `vm` / `shared` that
+ * is not an object throw: the config does not load and Vitest exits 1.
+ * B2 / S3: a newer format version throws as well. VITEST_GUARD_NEWER_STATE=failsafe (teams in the middle of an
+ * upgrade) instead treats every existing test file the newer file names (anywhere in it) as quarantined for both fast
+ * modes, i.e. runs it isolated; a newer file that names no existing test file still throws.
  */
 export function readQuarantineFile(root, file = '.vitest-guard/incompatible.json') {
+  let txt;
+  try { txt = readStateFile(path.resolve(root, file)); }
+  catch (e) { throw quarantineError(file, e?.code === 'E_UNSAFE_STATE' ? String(e.message).replace(/^\[vitest-guard\] /, '') : `cannot be read (${e?.code || e?.message})`); }
+  if (txt === null) return {};
   let q;
-  try { q = readStateJson(path.resolve(root, file), {}); }
-  catch (e) { if (e?.code !== 'E_UNSAFE_STATE') throw e; warnOnce(`${e.message}; the quarantine is not read`); return {}; }
-  if (!q || typeof q !== 'object' || Array.isArray(q)) return {};
+  try { q = JSON.parse(txt); } catch (e) { throw quarantineError(file, `is not valid JSON (${/^(<{7}|={7}|>{7})/m.test(txt) ? 'merge-conflict markers' : sanitize(e.message, 120)})`); }
+  if (!q || typeof q !== 'object' || Array.isArray(q)) throw quarantineError(file, 'is not a JSON object { "version": 1, "vm": {...}, "shared": {...} }');
   const problem = versionProblem('incompatible.json', q, sanitize(file));
   if (problem) {
+    if (process.env.VITEST_GUARD_NEWER_STATE !== 'failsafe') throw quarantineError(file, `${problem} (or set VITEST_GUARD_NEWER_STATE=failsafe to run every test file it names isolated)`);
     const files = filesIn(root, q);
-    warnOnce(`[vitest-guard] ${problem}. Failing safe: the ${files.length} test file(s) it names run isolated (forks) in every mode.`);
+    if (!files.length) throw quarantineError(file, `${problem}; VITEST_GUARD_NEWER_STATE=failsafe, but it names no existing test file that could be run isolated`);
+    warnOnce(`[vitest-guard] ${problem}. Failing safe (VITEST_GUARD_NEWER_STATE=failsafe): the ${files.length} test file(s) it names run isolated (forks) in every mode.`);
     const all = Object.fromEntries(files.map((f) => [f, { failSafe: true }]));
     return { version: q.version, newer: true, vm: all, shared: all };
   }
+  for (const m of ['vm', 'shared']) if (q[m] !== undefined && (!q[m] || typeof q[m] !== 'object' || Array.isArray(q[m]))) throw quarantineError(file, `"${m}" must be an object { "<test file>": {...} }, got ${Array.isArray(q[m]) ? 'an array' : q[m] === null ? 'null' : typeof q[m]}`);
   return q;
 }
 
-/** Quarantine list for a mode, validated against include/exclude (F9). */
+/** Quarantine list for a mode, validated against the files Vitest globs for include/exclude (F9, R6). */
 export function readQuarantine(root, mode, file = '.vitest-guard/incompatible.json', { include = DEFAULT_INCLUDE, exclude = DEFAULT_EXCLUDE, warn = true } = {}) {
   const q = readQuarantineFile(root, file);
   const keys = q[mode] && typeof q[mode] === 'object' && !Array.isArray(q[mode]) ? Object.keys(q[mode]) : [];
-  return validateTestPaths(root, keys, { include, exclude, label: `${file} (${mode})`, warn: warn && !q.newer }).ok;
+  if (!keys.length) return [];
+  return validateTestPaths(root, keys, { include, exclude, files: globProjectFiles(root, include, exclude), label: `${file} (${mode})`, warn: warn && !q.newer }).ok;
+}
+
+/**
+ * R6: quarantine keys are relative to the config root (where the CLI runs); a project with its own `root` globs
+ * relative to that root. Returns [{ key, rel }] for the keys inside the project (rel = relative to the project root).
+ */
+function keysForProject(root, projRoot, keys) {
+  const pr = path.relative(root, projRoot).split(path.sep).join('/');
+  if (!pr) return keys.map((key) => ({ key, rel: key }));
+  if (pr.startsWith('..') || path.isAbsolute(pr)) return [];
+  return keys.filter((k) => typeof k === 'string' && k.startsWith(pr + '/')).map((key) => ({ key, rel: key.slice(pr.length + 1) }));
 }
 
 /**
@@ -169,6 +198,8 @@ function poolFor(mode, keepPool, projTest, rootTest, g) {
  * @param {object} [g]
  * @param {'vm'|'shared'} [g.mode='vm']
  */
+/** R5: name of mode auto's catch-all project (files neither group lists; runs isolated) */
+export const AUTO_REST = 'auto:rest';
 const POOL_OF = { vm: { pool: 'vmThreads' }, shared: { pool: 'threads', isolate: false }, isolated: { pool: 'forks', isolate: true } };
 
 /**
@@ -223,6 +254,10 @@ function autoConfig(userConfig, g, root) {
   const nodeEnv = DOM_ENVS.has(test.environment) || !test.environment ? 'node' : test.environment;
   if (dom.length) { groups.dom = pick('dom', true); projects.push({ extends: true, test: { name: 'dom', include: dom.map(escapeGlob), ...POOL_OF[groups.dom], provide: { vitestGuardAuto: 'dom' } } }); }
   if (node.length) { groups.node = pick('node', false); projects.push({ extends: true, test: { name: 'node', environment: nodeEnv, include: node.map(escapeGlob), ...POOL_OF[groups.node], provide: { vitestGuardAuto: 'node', vitestGuardAutoHeal: optIn } } }); }
+  // R5 (fail closed): every file Vitest globs that is in neither group (a listing that differs from Vitest's) still
+  // runs, in isolated forks with the configured environment: the user's include minus the two groups' literal files
+  groups[AUTO_REST] = 'isolated';
+  projects.push({ extends: true, test: { name: AUTO_REST, include, exclude: [...exclude, ...files.map(escapeGlob)], ...POOL_OF.isolated } });
   record();
   if (process.env.VITEST_GUARD_AUTO_VERBOSE) console.log(`[vitest-guard] auto: dom ${dom.length} files (${projects.find((p) => p.test.name === 'dom')?.test.pool ?? '-'}), node ${node.length} files (${projects.find((p) => p.test.name === 'node')?.test.pool ?? '-'})`);
   const { include: _i, ...rootRest } = base; // root include would be merged into the projects (extends: true)
@@ -309,8 +344,10 @@ function buildConfig(userConfig, g) {
     const rootInclude = test.include, rootExclude = test.exclude;
     const projects = [];
     let anyVm = false;
-    const qRaw = ignoreQ ? {} : readQuarantineFile(root, quarantineFile);
+    let qRaw = null; // read only when a project runs in a fast mode (an isolated run needs no quarantine)
+    const quarantine = () => (qRaw ??= ignoreQ ? {} : readQuarantineFile(root, quarantineFile));
     const claimed = new Set();
+    const remaps = [];
     for (const p of test.projects) {
       if (!p || typeof p !== 'object' || typeof p === 'function') {
         console.warn(`[vitest-guard] project ${typeof p === 'string' ? sanitize(JSON.stringify(p)) : '(function)'} is not an inline config and is not guarded: wrap that config with defineVitestGuardConfig itself.`);
@@ -337,18 +374,30 @@ function buildConfig(userConfig, g) {
         projects.push({ ...p, test: { ...pt, ...pool, ...seq, include: files.map(escapeGlob), exclude, setupFiles, provide: provide(mode) } });
         continue;
       }
-      const qKeys = mode !== 'isolated' && qRaw[mode] && typeof qRaw[mode] === 'object' ? Object.keys(qRaw[mode]) : [];
-      const quarantined = validateTestPaths(root, qKeys, { include, exclude, warn: false }).ok;
-      quarantined.forEach((f) => claimed.add(f));
+      const qm = mode !== 'isolated' ? quarantine()[mode] : null;
+      const qKeys = qm && typeof qm === 'object' ? Object.keys(qm) : [];
+      let quarantined = [];
+      if (qKeys.length) {
+        // R6: relative to the project's own root, checked against the files Vitest itself globs for the project
+        const projRoot = path.resolve(root, typeof (pt.root ?? p.root) === 'string' ? pt.root ?? p.root : '.');
+        const pairs = keysForProject(root, projRoot, qKeys);
+        const v = validateTestPaths(projRoot, pairs.map((x) => x.rel), { include, exclude, files: globProjectFiles(projRoot, include, exclude), warn: false });
+        quarantined = v.ok;
+        for (const x of pairs) if (v.map.has(x.rel)) { claimed.add(`${mode}\0${x.key}`); if (v.map.get(x.rel) !== x.rel) remaps.push({ mode, key: x.key, to: x.key.slice(0, x.key.length - x.rel.length) + v.map.get(x.rel) }); }
+      }
       projects.push({ ...p, test: { ...pt, ...pool, ...seq, include, exclude: [...exclude, ...quarantined.map(escapeGlob)], setupFiles, provide: provide(mode) } });
       if (quarantined.length) projects.push({ ...p, test: { ...pt, name: `${name || 'project'}:isolated`, pool: 'forks', isolate: true, include: quarantined.map(escapeGlob), exclude, setupFiles: isoSetup, provide: provide('isolated') } });
     }
     // F9: report quarantine entries that no project accepted
+    // (only entries of a mode some project runs in: an entry of the other fast mode is not this run's business)
+    const used = new Set(projects.map((x) => x?.test?.provide?.vitestGuard?.mode).filter(Boolean));
     for (const m of ['vm', 'shared']) {
+      if (!qRaw || !used.has(m)) continue;
       const keys = qRaw[m] && typeof qRaw[m] === 'object' ? Object.keys(qRaw[m]) : [];
-      const stray = keys.filter((k) => !claimed.has(k));
-      if (stray.length && !qRaw.newer) validateTestPaths(root, stray, { include: [], label: `${quarantineFile} (${m}): no project includes it;` }); // label/entries are sanitized by validateTestPaths
+      const stray = keys.filter((k) => !claimed.has(`${m}\0${k}`));
+      for (const k of stray.slice(0, 20)) if (!qRaw.newer) warnOnce(`[vitest-guard] ignoring ${sanitize(quarantineFile)} (${m}) entry ${sanitize(JSON.stringify(String(k)), 200)}: no project runs it in mode ${m} (stale entry? \`vitest-guard check --prune\` removes it)`);
     }
+    for (const r of remaps) warnOnce(`[vitest-guard] ${sanitize(quarantineFile)} (${r.mode}) entry ${sanitize(JSON.stringify(r.key), 200)} is spelled differently on disk (case or Unicode form): applied to ${sanitize(JSON.stringify(r.to), 200)}; re-spell the key (\`vitest-guard check\` rewrites it)`);
     if (anyVm) out.test.vmMemoryLimit = vmLimit();
     out.test.projects = projects;
     return out;

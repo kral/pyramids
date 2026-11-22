@@ -40,7 +40,13 @@ export function runVitest({ root, config, mode, files = [], laneFile, args = [],
           const failedTest = f.assertionResults.find((t) => t.status === 'failed');
           // N8: Vitest marks the file failed when a hook of a nested suite throws although every test passed
           const status = f.status === 'passed' ? 'passed' : f.status !== 'failed' && f.assertionResults.length && f.assertionResults.every((t) => t.status !== 'failed') && !f.message ? 'passed' : 'failed';
-          res.files.set(rel, { status, tests, message: f.message || failedTest?.failureMessages?.[0] || (status === 'failed' ? 'failed outside any test (a suite hook?)' : '') });
+          const entry = { status, tests, message: f.message || failedTest?.failureMessages?.[0] || (status === 'failed' ? 'failed outside any test (a suite hook?)' : '') };
+          // S1: the same file in two projects: fold pessimistically (failed if any project's run failed, per test too)
+          const prev = res.files.get(rel);
+          if (prev) {
+            for (const [t, st] of tests) { const p0 = prev.tests.get(t); if (p0 === undefined || (p0 === 'passed' && st !== 'passed') || (p0 !== 'failed' && st === 'failed')) prev.tests.set(t, st); }
+            if (prev.status === 'passed' && entry.status !== 'passed') { prev.status = entry.status; prev.message = entry.message; }
+          } else res.files.set(rel, entry);
         }
       } catch (e) { res.error = 'no JSON report: ' + e.message; }
       tmp.cleanup();
