@@ -137,3 +137,31 @@ test('S12: a quarantine key whose case differs from the file on disk is rejected
   assert.deepEqual(r.ok, ['src/button.test.js']);
   assert.equal(r.rejected.length, 1); // 'file does not exist' (case-sensitive FS) or 'spelled differently' (NTFS / APFS)
 });
+
+test('N5 unit: a verify that ran only some of the default orders is not a clean verify', () => {
+  const root = P({ 'src/a.test.js': pass });
+  const cfg = path.join(root, 'vitest.config.mjs');
+  fs.mkdirSync(path.join(root, '.vitest-guard/run'), { recursive: true });
+  const rec = (mode, orders) => fs.writeFileSync(path.join(root, `.vitest-guard/run/verify-${mode}.json`), JSON.stringify({ at: 'T', mode, orders, head: gitHead(root), configKey: configKey(root, cfg), complete: true, falseGreen: [] }));
+  rec('shared', ['gate']);
+  assert.match(verifyStatus(root, 'shared', { configFile: cfg }).reason, /ran only the orders gate/);
+  rec('shared', ['gate', 'forward', 'reversed']);
+  assert.equal(verifyStatus(root, 'shared', { configFile: cfg }).ok, true);
+  rec('vm', ['gate', 'reversed']);
+  assert.equal(verifyStatus(root, 'vm', { configFile: cfg }).ok, true);
+});
+
+test('N7/N8: a hook of a nested suite that throws fails the file; verify says how many tests fail in both modes', integration, async () => {
+  const { runVitest } = await import('../src/runner.mjs');
+  const root = P({
+    'src/h.test.js': `import { describe, test, afterAll, expect } from 'vitest'; describe('s', () => { afterAll(() => { throw new Error('hook'); }); test('t', () => { expect(1).toBe(1); }); });\n`,
+    'src/f.test.js': `import { test, expect } from 'vitest'; test('bad', () => { expect(1).toBe(2); });\n`,
+  });
+  const r = await runVitest({ root, mode: 'isolated', tag: 'n8' });
+  assert.equal(r.files.get('src/h.test.js').status, 'failed');
+  assert.match(r.files.get('src/h.test.js').message, /outside any test/);
+  const v = cli(root, ['verify', '--mode', 'shared']);
+  assert.equal(v.code, 0, v.out);
+  assert.match(v.out, /SAFE .*\(1 test\(s\) fail in both\)/);
+  assert.match(v.out, /fail in both modes\s+1/);
+});

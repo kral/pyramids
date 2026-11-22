@@ -511,6 +511,7 @@ export async function cmdVerify(c, o) {
   const fileOf = new Map();
   const note = (map, key, order) => { const a = map.get(key) || []; a.push(order); map.set(key, a); };
   const FILE_LEVEL = '(file: outside any test - collection, hooks, setup)';
+  const bothFail = new Set(); // N7: "matches isolated forks" is not "the suite is green"
   for (const { order, r, laneOnly } of runs) {
     for (const [file, rr] of ref.files) {
       const fz = r.files.get(file);
@@ -522,6 +523,7 @@ export async function cmdVerify(c, o) {
         fileOf.set(key, file);
         if (st === 'failed' && fs2 === 'passed') { note(green, key, order); differs = true; }
         if (st === 'passed' && fs2 !== 'passed') { note(red, key, order); differs = true; }
+        if (st === 'failed' && fs2 === 'failed') bothFail.add(key);
       }
       // B4: a file can fail in forks before or outside any test (import-time error, beforeAll): compare the file status too
       if (!differs && fz && rr.status !== fz.status) {
@@ -581,10 +583,10 @@ export async function cmdVerify(c, o) {
   const unrecorded = falseRed.filter((k) => !red.get(k).includes('gate') && !quarantined.includes(fileOf.get(k)));
   const code = falseGreen.length ? EXIT.FALSE_GREEN : incomplete.length || gateRed.length || unrecorded.length ? EXIT.FAIL : quarantined.length ? EXIT.NEW_QUARANTINE : EXIT.OK;
   summary({ title: `verify · ${mode}`, verdict: verdictOf(code), label: code === EXIT.FALSE_GREEN ? 'FALSE GREEN' : code === EXIT.NEW_QUARANTINE ? 'QUARANTINE' : code === EXIT.FAIL ? (incomplete.length ? 'INCOMPLETE' : 'FAIL') : 'SAFE',
-    headline: code === EXIT.OK ? `${mode} matches isolated forks on ${sample.length}${complete ? '' : ` of ${all.length}`} files` : code === EXIT.FALSE_GREEN ? `${falseGreen.length} test(s) pass in ${mode} but fail in isolated forks`
+    headline: code === EXIT.OK ? `${mode} matches isolated forks on ${sample.length}${complete ? '' : ` of ${all.length}`} files${bothFail.size ? ` (${bothFail.size} test(s) fail in both)` : ''}` : code === EXIT.FALSE_GREEN ? `${falseGreen.length} test(s) pass in ${mode} but fail in isolated forks`
       : code === EXIT.FAIL && incomplete.length ? `not every file produced a result (${incomplete.join('; ')})` : code === EXIT.FAIL && gateRed.length ? `${gateRed.length} test(s) fail in the gate order but pass isolated` : `${falseRed.length} test(s) fail in ${mode} only (order-dependent)`,
     facts: [['orders', orders.join(', ')], ['files compared', complete ? `${sample.length} (all)` : `${sample.length} of ${all.length}`, complete ? undefined : 'yellow'],
-      ['false green', falseGreen.length, falseGreen.length ? 'red' : 'green'], ['false red', falseRed.length, falseRed.length ? 'yellow' : 'green'],
+      ['false green', falseGreen.length, falseGreen.length ? 'red' : 'green'], ['false red', falseRed.length, falseRed.length ? 'yellow' : 'green'], ['fail in both modes', bothFail.size || undefined, 'yellow'],
       ['known conflicts', knownRed.length || undefined], ['quarantined now', quarantined.length || undefined, 'yellow'], ['exit code', code]],
     next: [...(falseGreen.length ? ['false-green files now run in isolated forks, where they FAIL: that failure is real, fix the test'] : []),
       ...(quarantined.length ? ['commit .vitest-guard/incompatible.json'] : []),

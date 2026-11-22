@@ -38,7 +38,9 @@ export function runVitest({ root, config, mode, files = [], laneFile, args = [],
           // B7: duplicate full names (test.each without placeholders) get an occurrence suffix instead of overwriting each other
           for (const t of f.assertionResults) { const name = [...t.ancestorTitles, t.title].join(' > '); let k = name; for (let i = 2; tests.has(k); i++) k = `${name} #${i}`; tests.set(k, t.status); }
           const failedTest = f.assertionResults.find((t) => t.status === 'failed');
-          res.files.set(rel, { status: f.status === 'passed' ? 'passed' : f.assertionResults.length && f.assertionResults.every((t) => t.status !== 'failed') && !f.message ? 'passed' : 'failed', tests, message: f.message || failedTest?.failureMessages?.[0] || '' });
+          // N8: Vitest marks the file failed when a hook of a nested suite throws although every test passed
+          const status = f.status === 'passed' ? 'passed' : f.status !== 'failed' && f.assertionResults.length && f.assertionResults.every((t) => t.status !== 'failed') && !f.message ? 'passed' : 'failed';
+          res.files.set(rel, { status, tests, message: f.message || failedTest?.failureMessages?.[0] || (status === 'failed' ? 'failed outside any test (a suite hook?)' : '') });
         }
       } catch (e) { res.error = 'no JSON report: ' + e.message; }
       tmp.cleanup();
