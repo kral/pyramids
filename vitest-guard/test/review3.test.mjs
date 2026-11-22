@@ -113,6 +113,22 @@ test('B6: check --prune keeps a false-green entry that still fails in forks; S8:
   const r = cli(ok, ['check', '--prune']);
   assert.equal(r.code, 4, r.out);
   assert.deepEqual(readJson(path.join(ok, '.vitest-guard/incompatible.json')).vm, {});
+  // the next steps name only the file that changed
+  assert.match(r.out, /commit \.vitest-guard\/incompatible\.json, then re-run/);
+  assert.doesNotMatch(r.out, /conflicts\.json/);
+});
+
+test('check --root from another cwd: the quarantine signature has root-relative paths, not <path>', integration, () => {
+  const root = P({ 'src/a.test.js': pass, 'src/mo.test.js': '' });
+  fs.writeFileSync(path.join(root, 'src/mo.test.js'), `import { test } from 'vitest'; import { isMainThread } from 'node:worker_threads'; import path from 'node:path';\ntest('vm-only', () => { if (!isMainThread) throw new Error('cannot load ' + path.join(process.cwd(), 'src/data.json')); });\n`);
+  const other = project({});
+  const r = cli(other, ['check', '--mode', 'vm', '--root', root]);
+  assert.equal(r.code, 4, r.out);
+  const sig = readJson(path.join(root, '.vitest-guard/incompatible.json')).vm['src/mo.test.js'].signature;
+  assert.match(sig, /cannot load src\/data\.json/);
+  assert.doesNotMatch(sig, /<path>/);
+  assert.match(r.out, /commit \.vitest-guard\/incompatible\.json, then re-run/);
+  assert.doesNotMatch(r.out, /conflicts\.json/);
 });
 
 test('B7: duplicate test titles do not hide a false green', integration, () => {

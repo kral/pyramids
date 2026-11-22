@@ -355,7 +355,7 @@ export async function cmdCheck(c, o) {
     if (!isFast(bucket)) { if (!real) unexplained.push(`${f} (failed in the ${mode} run, passes on its own in forks; its group already runs isolated)`); continue; }
     if (q[bucket][f]) { if (!real) unexplained.push(`${f} (quarantined, but failed in the ${mode} run)`); continue; }
     const v = verdict.get(f) || { kind: 'alone', note: 'some tests also fail isolated' };
-    const sig = signature(fr.message) + (modeOnly.length ? ` [${modeOnly.length} test(s): ${modeOnly.slice(0, 3).join(' | ')}]` : '');
+    const sig = signature(fr.message, { root: c.root }) + (modeOnly.length ? ` [${modeOnly.length} test(s): ${modeOnly.slice(0, 3).join(' | ')}]` : '');
     if (v.kind === 'flaky') { flaky.push(f); say(`FLAKY (failed in ${bucket}, passed in forks and on a ${bucket} re-run under the same conditions: ${v.note}): ${f}`); continue; }
     if (v.kind === 'order' && bucket === 'shared') { addConflicts(c, f, v.polluters, sig); conflicts.push(`${f} <- ${v.polluters.join(' + ')} (${v.runs} runs)`); continue; }
     q[bucket][f] = { signature: sig, tests: modeOnly.slice(0, 20), firstSeen: today, pool: bucket === 'vm' ? 'vmThreads' : 'threads isolate:false',
@@ -369,12 +369,20 @@ export async function cmdCheck(c, o) {
   for (const s of conflicts) say(`CONFLICT recorded: ${s}`);
   for (const s of unexplained) say(`UNEXPLAINED failure: ${s}`);
   if (flaky.length) say(`${flaky.length} flaky file(s): not quarantined; exit 1 (a failure that was not explained is never reported as ok)`);
-  if (newQ.length || conflicts.length) say('quarantine/conflict state changed: commit .vitest-guard/incompatible.json / conflicts.json and re-run (exit 4)');
+  if (newQ.length || conflicts.length) say(`quarantine/conflict state changed: commit ${changedStateFiles({ newQ, conflicts })} and re-run (exit 4)`);
   // D3: 1 (failures, incl. flaky/unexplained) wins over 4 (new quarantine); 0 only when nothing failed
   const code = genuine.length || flaky.length || unexplained.length ? EXIT.FAIL : newQ.length || conflicts.length ? EXIT.NEW_QUARANTINE : EXIT.FAIL /* a file failed and nothing explains it */;
   return checkSummary(c, mode, { files: first.files.size, failing: failing.length + notRun.length, genuine, newQ, conflicts, flaky, unexplained, pruned }, report(c, workers, code));
 }
 
+/** Only the committed state files this run actually changed (pruning releases entries of incompatible.json). */
+function changedStateFiles(d) {
+  const n = (a) => (a ? a.length : 0);
+  const files = [];
+  if (n(d.newQ) || d.pruned) files.push('.vitest-guard/incompatible.json');
+  if (n(d.conflicts)) files.push('.vitest-guard/conflicts.json');
+  return files.join(' and ') || '.vitest-guard/incompatible.json and/or conflicts.json';
+}
 function checkSummary(c, mode, d, code) {
   const n = (a) => (a ? a.length : 0);
   const quarantined = Object.values(load(c, 'incompatible.json', {}) || {}).reduce((s, m) => s + (m && typeof m === 'object' ? Object.keys(m).length : 0), 0);
@@ -387,7 +395,7 @@ function checkSummary(c, mode, d, code) {
   if (n(d.genuine)) next.push('fix the failing tests: they also fail in isolated forks, so the failure is real');
   if (n(d.flaky)) next.push(`${n(d.flaky)} flaky file(s): re-run; vitest-guard never reports an unexplained failure as ok`);
   if (n(d.unexplained)) next.push('unexplained failures: re-run with --verbose, or `vitest-guard hunt <file>`');
-  if (code === EXIT.NEW_QUARANTINE) next.push('commit .vitest-guard/incompatible.json and conflicts.json, then re-run');
+  if (code === EXIT.NEW_QUARANTINE) next.push(`commit ${changedStateFiles(d)}, then re-run`);
   if (code === EXIT.OK && mode === 'shared') next.push('shared realms can hide failures: confirm with `vitest-guard verify --mode shared`');
   summary({ title: `check · ${mode}`, verdict: verdictOf(code), label: code === EXIT.NEW_QUARANTINE ? 'QUARANTINE' : undefined, headline,
     facts: [['real failures', n(d.genuine) || undefined, 'red'], ['newly quarantined', n(d.newQ) || undefined, 'yellow'], ['conflicts', n(d.conflicts) || undefined, 'yellow'],
@@ -705,6 +713,14 @@ export async function cmdScan(c, o) {
 // A4 migration: volatile files that older versions wrote next to the committed ones move into .vitest-guard/run/.
 // Architecture review 3 S3: nothing is ever deleted here, and a file git tracks is never moved (a teammate or CI step
 // without --commit-state must not "un-commit" durations.json / pollution.json): it only gets a hint.
+/** The tracked-state hint is shown once per set of affected files: a marker in the private run dir remembers it. */
+function hintShown(c, tracked) {
+  const key = [...tracked].sort().join(',');
+  const marker = path.join(c.stateDir, 'migrate-hint.json');
+  try { if (readStateJson(marker, {})?.shown === key) return true; } catch {}
+  try { ensureStateDir(c.stateDir); writeStateFile(marker, JSON.stringify({ shown: key }) + '\n'); } catch {}
+  return false;
+}
 /** Paths below `.vitest-guard/` that git tracks (root-relative, `/`); null when git is unavailable or this is no repo. */
 function trackedState(c) {
   const git = findGitBinary();
@@ -741,16 +757,16 @@ export function migrateState(c) {
   }
   try { for (const n of listStateDir(c.stateDir)) if (/^(w-.*\.jsonl|lane-.*\.json)$/.test(n)) removeState(path.join(c.stateDir, n)); } catch {}
   if (moved.length) say(`moved ${moved.length} volatile file(s) from .vitest-guard/ to .vitest-guard/run/ (git-ignored): ${moved.join(', ')}. Only incompatible.json and conflicts.json${c.commitState ? ', durations.json and pollution.json' : ''} are meant to be committed.`);
-  if (tracked.length) say(`.vitest-guard/${tracked.join(', .vitest-guard/')} ${tracked.length > 1 ? 'are' : 'is'} committed but this run has no --commit-state: left untouched and not updated (updates go to .vitest-guard/run/). Pass --commit-state to keep ${tracked.length > 1 ? 'them' : 'it'} current, or \`git rm\` ${tracked.length > 1 ? 'them' : 'it'}.`);
+  if (tracked.length && !hintShown(c, tracked)) say(`.vitest-guard/${tracked.join(', .vitest-guard/')} ${tracked.length > 1 ? 'are' : 'is'} committed but this run has no --commit-state: left untouched and not updated (updates go to .vitest-guard/run/). Pass --commit-state to keep ${tracked.length > 1 ? 'them' : 'it'} current, or \`git rm\` ${tracked.length > 1 ? 'them' : 'it'}.`);
   if (kept.length) say(`.vitest-guard/${kept.join(', .vitest-guard/')}: a newer copy exists in .vitest-guard/run/; the old one was left in place - delete it.`);
 }
 
-const EXIT_HELP = `exit codes (contracts/DECISIONS.md D3):
+const EXIT_HELP = `exit codes (docs/vitest-guard/cli.md#exit-codes):
   0  ok
   1  test failures (genuine, flaky or unexplained failures; a refuted claim)
   2  usage or config error (bad arguments, config not wrapped with defineVitestGuardConfig, missing vitest)
   3  run all (not returned by vitest-guard; reserved for the selection tools of vto)
-  4  new quarantine: .vitest-guard/incompatible.json / conflicts.json changed - commit it and re-run
+  4  new quarantine: incompatible.json and/or conflicts.json in .vitest-guard/ changed - commit the changed file(s) and re-run
   5  false green: a test passes in the fast mode and fails in isolated forks (verify)`;
 const GLOBAL_OPTS = `global options:
   --mode vm|shared|auto   fast mode to run (default: the config's mode, else vm); isolated forks are the reference run
