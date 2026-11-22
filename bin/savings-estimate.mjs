@@ -100,7 +100,12 @@ export function measuredFrom(records, { since = '30d', now = Date.now() } = {}) 
   const basis = clean.length ? clean : full;
   const fullOf = (pred) => median(basis.filter((r) => pred(r.pool)).map((r) => r.wallMs));
   const forks = fullOf((p) => p === 'forks' || p === 'threads'), fast = fullOf(isFastPool);
-  const latestFull = [...basis].sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0];
+  const newest = (rs) => [...rs].sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0];
+  // the baseline of the model is a classic (forks/threads) full run: prefer it, else the latest full run of any pool
+  const latestFull = newest(basis.filter((r) => r.pool === 'forks' || r.pool === 'threads')) || newest(basis);
+  // fixed cost of an affected run: its wall time minus the share of a full run of the same pool it executed (never negative)
+  const fullWall = (pool) => median(basis.filter((r) => r.pool === pool).map((r) => r.wallMs));
+  const over = partial.filter((r) => r.wallMs > 0 && fullWall(r.pool)).map((r) => Math.max(0, r.wallMs - (r.testsRun / r.suiteTotal) * fullWall(r.pool)) / 60000);
   const local = runs.filter((r) => !r.ci);
   const days = new Set(local.map((r) => String(r.at).slice(0, 10))).size;
   return {
@@ -108,6 +113,7 @@ export function measuredFrom(records, { since = '30d', now = Date.now() } = {}) 
     suiteMin: latestFull ? latestFull.wallMs / 60000 : null, suitePool: latestFull?.pool ?? null, suiteInstrumented: latestFull ? latestFull.instrumented !== false : null,
     selected: partial.length ? median(partial.map((r) => r.testsRun / r.suiteTotal)) : null, partialRuns: partial.length,
     runAll: affected.length ? fellBack.length / affected.length : null, affectedRuns: affected.length,
+    overhead: over.length ? median(over) : null, overheadRuns: over.length,
     poolGain: forks && fast && fast < forks ? 1 - fast / forks : null,
     localRunsPerDay: days ? local.length / days : null, localDays: days,
   };
@@ -130,8 +136,9 @@ function applyMeasured(o, m) {
   // (an explicit --pool-gain wins for the conversion too, so the two never disagree)
   const gain = o.given.has('pool-gain') ? o['pool-gain'] : m.poolGain;
   const instr = m.suiteInstrumented ? ', instrumented: includes collector overhead' : '';
-  if (isFastPool(m.suitePool)) set('suite-min', m.suiteMin / (1 - (gain ?? 0)), `measured (full run, ${m.suitePool}${gain ? ', converted to forks' : ''}${instr})`);
+  if (isFastPool(m.suitePool)) set('suite-min', m.suiteMin / (1 - (gain ?? 0)), `measured (full run, ${m.suitePool}${gain ? ', converted to forks' : ', no forks full run to compare: the saving of the pool itself is not counted, run `vto guard compare` and pass --suite-min/--pool-gain'}${instr})`);
   else set('suite-min', m.suiteMin, `measured (latest full run${m.suitePool ? ', ' + m.suitePool : ''}${instr})`);
+  set('overhead', m.overhead, `measured (median over ${m.overheadRuns} affected runs: wall time minus their share of a full run)`);
   set('selected', m.selected, `measured (median of ${m.partialRuns} affected runs)`);
   set('run-all', m.runAll, `measured (${m.affectedRuns} affected runs)`);
   set('pool-gain', m.poolGain, 'measured (full runs: forks vs vitest-guard)');
@@ -191,11 +198,12 @@ export function main(argv = process.argv.slice(2)) {
       ['suite', `${r2(o['suite-min'])} min full run`],
       ['selected', `${Math.round(o.selected * 100)} % of the suite per affected run`],
       ['run all', `${Math.round(o['run-all'] * 100)} % of runs`],
+      ['overhead', `${r2(o.overhead)} min per affected run`],
       ['fast pool', o['pool-gain'] ? `−${Math.round(o['pool-gain'] * 100)} %` : 'not counted (measure: vto guard compare)'],
       ['local runs', `${r1(o['local-runs'])} per developer per day, ${o.devs} developer${o.devs === 1 ? '' : 's'}`],
       ['runner price', `$${o['usd-per-min']}/min${o.shards > 1 ? `, ${o.shards} shards` : ''}`],
     ].map(([k, v]) => {
-      const key = { suite: 'suite-min', selected: 'selected', 'run all': 'run-all', 'fast pool': 'pool-gain', 'local runs': 'local-runs' }[k];
+      const key = { suite: 'suite-min', selected: 'selected', 'run all': 'run-all', overhead: 'overhead', 'fast pool': 'pool-gain', 'local runs': 'local-runs' }[k];
       const src = key && o.sources?.[key];
       if (key === 'pool-gain' && !o['pool-gain'] && !src) return [k, v];
       return [k, src ? `${v}  ${p.green('· ' + src)}` : key && !o.given?.has(key) && o.fromMeasured === undefined ? `${v}  ${p.dim('· assumed')}` : key && !o.given?.has(key) ? `${v}  ${p.yellow('· assumed (not in the measured data)')}` : v];
