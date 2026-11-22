@@ -3,6 +3,12 @@
 # Trigger: push a tag `vitest-guard-v<version>` whose version equals vitest-guard/package.json.
 # Safety: the publish job runs in the protected environment `npm-publish`. Nothing is published until
 # a required reviewer approves the job in the GitHub UI.
+# Two jobs (security review 3 S1, architecture review 3 S7/S8):
+#   build   – no id-token: npm ci, the test suite on every OS, the committed setup bundle must be what the
+#             sources produce, npm pack, the tarball installed into a fresh project (bin --version + a tiny
+#             `check`), the tarball + its sha256 uploaded as an artifact.
+#   publish – id-token: write, no checkout, no npm ci, no tests, no scripts: downloads exactly the tested
+#             tarball, checks its sha256, name and version, and publishes it with provenance.
 #
 # One-time setup (repository Settings → Environments → New environment "npm-publish"):
 #   1. Required reviewers: add yourself.   2. Deployment branches and tags: only tags `vitest-guard-v*`.
@@ -12,8 +18,11 @@
 #      a) npm trusted publishing (preferred, no token): on npmjs.com → package settings → Trusted
 #         publisher → GitHub Actions, repository kral/pyramids, workflow publish-vitest-guard.yml,
 #         environment npm-publish. (npm may require the package to exist first – see b.)
-#      b) a granular npm token (publish-only, short expiry) as environment secret NPM_TOKEN; delete it
-#         once trusted publishing is set up.
+#      b) a granular npm token (publish-only, short expiry) as environment secret NPM_TOKEN, needed for
+#         the first publish (the package must exist before a trusted publisher can be configured). Delete
+#         it once trusted publishing works (then remove NODE_AUTH_TOKEN below and, on npmjs.com, set
+#         "Require two-factor authentication and disallow tokens"). Trusted publishing needs npm CLI
+#         >= 11.5.1 and Node >= 22.14 – the publish job checks both.
 name: publish-vitest-guard
 
 on:
@@ -24,29 +33,83 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    # vitest-guard's own suite on every OS and the Node lower bound (independent of the other packages)
-    name: test vitest-guard (${{ matrix.os }}, node ${{ matrix.node }})
+  build:
+    # vitest-guard's own suite on every OS and the Node lower bound, then the packed tarball as users get it
+    name: build vitest-guard (${{ matrix.os }}, node ${{ matrix.node }})
     strategy:
       fail-fast: true
       matrix:
         os: [ubuntu-24.04, macos-15, windows-2025]
         node: ['22.22.2', '24']
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { persist-credentials: false }
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version: '${{ matrix.node }}' }
+      - name: committed setup bundle is up to date
+        working-directory: vitest-guard
+        run: npm run check:bundle
       - name: npm ci + test
         working-directory: vitest-guard
         run: |
           npm ci --ignore-scripts
           npm test
+      - name: the tests did not change what is published
+        shell: bash
+        run: |
+          set -euo pipefail
+          node vitest-guard/scripts/bundle-setup.mjs
+          git diff --exit-code -- vitest-guard/
+          test -z "$(git status --porcelain --untracked-files=all -- vitest-guard/src vitest-guard/bin vitest-guard/scripts)"
+      - name: pack
+        id: pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/vg-pack"
+          cd vitest-guard
+          npm pack --dry-run
+          tgz="$(npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/vg-pack" | tail -n 1)"
+          echo "tgz=$tgz" >> "$GITHUB_OUTPUT"
+          cd "$RUNNER_TEMP/vg-pack"
+          node -e "const c=require('crypto'),f=require('fs');f.writeFileSync(process.argv[1]+'.sha256',c.createHash('sha256').update(f.readFileSync(process.argv[1])).digest('hex')+'  '+process.argv[1]+'\n')" "$tgz"
+          cat "$tgz.sha256"
+      - name: smoke test of the tarball in a fresh project
+        shell: bash
+        env:
+          TGZ: ${{ steps.pack.outputs.tgz }}
+        run: |
+          set -euo pipefail
+          P="$RUNNER_TEMP/vg-smoke"
+          mkdir -p "$P/test"
+          cp bench/trial/package.json bench/trial/package-lock.json "$P/"
+          cd "$P"
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm install --no-save --ignore-scripts --no-audit --no-fund "$RUNNER_TEMP/vg-pack/$TGZ"
+          want="$(node -p "require('./node_modules/@jirikral/vitest-guard/package.json').name + ' ' + require('./node_modules/@jirikral/vitest-guard/package.json').version")"
+          have="$(./node_modules/.bin/vitest-guard --version)"
+          [ "$have" = "$want" ] || { echo "::error::vitest-guard --version printed '$have', expected '$want'"; exit 1; }
+          printf '%s\n' "import { defineConfig } from 'vitest/config';" "import { defineVitestGuardConfig } from '@jirikral/vitest-guard';" \
+            "export default defineVitestGuardConfig(defineConfig({ test: { include: ['test/**/*.test.mjs'], environment: 'node' } }));" > vitest.config.mjs
+          printf '%s\n' "import { test, expect } from 'vitest';" "test('adds', () => { expect(1 + 1).toBe(2); });" > test/a.test.mjs
+          printf '%s\n' "import { test, expect } from 'vitest';" "test('globals', () => { expect(typeof globalThis.structuredClone).toBe('function'); });" > test/b.test.mjs
+          ./node_modules/.bin/vitest-guard check
+          node --input-type=module -e "await import('@jirikral/vitest-guard'); await import('@jirikral/vitest-guard/envstore'); console.log('exports ok')"
+      - name: upload the tested tarball
+        if: ${{ matrix.os == 'ubuntu-24.04' && matrix.node == '24' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vitest-guard-tarball
+          path: |
+            ${{ runner.temp }}/vg-pack/*.tgz
+            ${{ runner.temp }}/vg-pack/*.tgz.sha256
+          if-no-files-found: error
+          retention-days: 7
 
   publish:
-    needs: test
+    needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: npm-publish
@@ -54,39 +117,50 @@ jobs:
       contents: read
       id-token: write    # npm provenance + trusted publishing (OIDC)
     steps:
+      # no checkout, no npm ci, no tests, no lifecycle scripts: nothing but npm itself runs with the OIDC token
       - name: environment must be protected
         if: ${{ vars.PUBLISH_ENV_PROTECTED != 'yes' }}
         run: |
           echo "::error::Environment npm-publish is not configured (see the header of this workflow). Refusing to publish."
           exit 1
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with: { persist-credentials: false }
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version: 24, registry-url: 'https://registry.npmjs.org' }
-      - name: tag matches package version
+      - name: Node >= 22.14 and npm >= 11.5.1 (trusted publishing)
         shell: bash
         run: |
           set -euo pipefail
+          node -e "const [a,b]=process.versions.node.split('.').map(Number); if (a<22||(a===22&&b<14)) { console.error('::error::Node '+process.version+' < 22.14'); process.exit(1) }"
+          ok() { node -e "const v=process.argv[1].split('.').map(Number); process.exit(v[0]>11||(v[0]===11&&(v[1]>5||(v[1]===5&&v[2]>=1)))?0:1)" "$(npm --version)"; }
+          if ! ok; then npm install -g --ignore-scripts --no-audit --no-fund npm@11.6.2; fi
+          ok || { echo "::error::npm $(npm --version) < 11.5.1"; exit 1; }
+          echo "node $(node --version), npm $(npm --version)"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with: { name: vitest-guard-tarball, path: dist }
+      - name: tarball checksum, name and tag match
+        id: check
+        working-directory: dist
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          tgzs=(*.tgz)
+          [ "${#tgzs[@]}" = 1 ] || { echo "::error::expected exactly one tarball, found ${#tgzs[@]}"; exit 1; }
+          tgz="${tgzs[0]}"
+          sha256sum -c "$tgz.sha256"
+          tar -xzOf "$tgz" package/package.json > pkg.json
+          name="$(node -p "require('./pkg.json').name")"
+          have="$(node -p "require('./pkg.json').version")"
           want="${GITHUB_REF_NAME#vitest-guard-v}"
-          have="$(node -p "require('./vitest-guard/package.json').version")"
-          name="$(node -p "require('./vitest-guard/package.json').name")"
           [ "$name" = "@jirikral/vitest-guard" ] || { echo "::error::unexpected package name $name"; exit 1; }
           [ "$want" = "$have" ] || { echo "::error::tag $GITHUB_REF_NAME does not match package.json version $have"; exit 1; }
-      - name: install and test the package itself
-        working-directory: vitest-guard
-        run: |
-          npm ci --ignore-scripts
-          npm test
-      - name: dry run (contents)
-        working-directory: vitest-guard
-        run: npm pack --dry-run
+          tag=latest; case "$have" in *-*) tag=next;; esac
+          echo "tgz=$tgz" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
       - name: publish with provenance
-        working-directory: vitest-guard
+        working-directory: dist
         shell: bash
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          set -euo pipefail
-          version="$(node -p "require('./package.json').version")"
-          tag=latest; case "$version" in *-*) tag=next;; esac
-          npm publish --provenance --access public --tag "$tag"
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}   # first publish only; empty once the secret is deleted -> OIDC
+          TGZ: ${{ steps.check.outputs.tgz }}
+          DIST_TAG: ${{ steps.check.outputs.tag }}
+        run: npm publish "./$TGZ" --provenance --access public --tag "$DIST_TAG" --ignore-scripts
