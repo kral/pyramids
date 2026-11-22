@@ -83,6 +83,44 @@ const real = step('fault: real failure → check = 1', ['check', 'test/zz-trial-
 if (!/FAIL \(also isolated\)/.test(real.stdout)) { failed++; console.log('FAIL the real failure was not reported as "FAIL (also isolated)"'); results.at(-1).ok = false; }
 fs.rmSync(bad, { recursive: true, force: true });
 
+// B1: files under paths with `@` / brackets / parentheses and under a dot directory must really run in shared lanes
+const odd = ['test/zz-trial-@core/x.test.tsx', 'test/zz-trial-[id]/(grp)/y.test.tsx', 'test/.zz-trial-dot/z.test.tsx'];
+for (const f of odd) { fs.mkdirSync(path.dirname(path.join(proj, f)), { recursive: true }); fs.writeFileSync(path.join(proj, f), `import { test, expect } from 'vitest';
+test('broken on purpose', () => { expect(1 + 1).toBe(3); });
+`); }
+const oddRun = step('fault: broken files under @ / [id] / (grp) / dot dir → check --mode shared = 1', ['check', '--mode', 'shared', 'zz-trial-'], { expect: [1] });
+for (const f of odd) if (!oddRun.stdout.includes(`FAIL (also isolated): ${f}`)) { failed++; results.at(-1).ok = false; console.log(`FAIL ${f} did not run and fail in the shared lanes`); }
+fs.rmSync(path.join(proj, 'test/zz-trial-@core'), { recursive: true, force: true });
+fs.rmSync(path.join(proj, 'test/zz-trial-[id]'), { recursive: true, force: true });
+fs.rmSync(path.join(proj, 'test/.zz-trial-dot'), { recursive: true, force: true });
+
+// B4: a file that fails in beforeAll only in forks (needs state an earlier file leaves in the shared worker)
+const hook = path.join(proj, 'test', 'zz-trial-hook');
+fs.mkdirSync(hook, { recursive: true });
+fs.writeFileSync(path.join(hook, 'a-provides.test.tsx'), `import { test, expect } from 'vitest';
+(globalThis as any).__vgTrialHelper = () => 1;
+test('provides a helper for the next file', () => { expect(true).toBe(true); });
+`);
+fs.writeFileSync(path.join(hook, 'b-hook.test.tsx'), `import { test, expect, beforeAll } from 'vitest';
+let v = 0;
+beforeAll(() => { v = (globalThis as any).__vgTrialHelper(); });
+test('uses the helper', () => { expect(v).toBe(1); });
+`);
+step('fault: beforeAll fails only in forks → verify shared = false green', ['verify', '--mode', 'shared', '--no-quarantine', 'test/zz-trial-hook'], { expect: [5] });
+fs.rmSync(hook, { recursive: true, force: true });
+
+// B7: duplicate test titles (test.each without a placeholder) must not hide a false green
+const dup = path.join(proj, 'test', 'zz-trial-dup');
+fs.mkdirSync(dup, { recursive: true });
+fs.writeFileSync(path.join(dup, 'a-sets.test.tsx'), `import { test, expect } from 'vitest';
+test('sets a global for the next file', () => { (globalThis as any).__vgTrialDup = 1; expect(true).toBe(true); });
+`);
+fs.writeFileSync(path.join(dup, 'b-dup.test.tsx'), `import { test, expect } from 'vitest';
+test.each([1, 2])('same title', (n) => { if (n === 1) expect((globalThis as any).__vgTrialDup).toBe(1); });
+`);
+step('fault: duplicate titles with a false green → verify shared = 5', ['verify', '--mode', 'shared', '--no-quarantine', '--orders', 'forward', 'test/zz-trial-dup'], { expect: [5] });
+fs.rmSync(dup, { recursive: true, force: true });
+
 // state left by the trial (for the artifact)
 for (const f of ['incompatible.json', 'conflicts.json']) {
   const p = path.join(proj, '.vitest-guard', f);
