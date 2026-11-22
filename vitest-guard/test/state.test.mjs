@@ -35,7 +35,7 @@ test('A4: unchanged content does not touch the committed file', async () => {
   assert.equal(Math.floor(fs.statSync(f).mtimeMs / 1000), Math.floor(old.getTime() / 1000));
 });
 
-test('A4: volatile files of the old layout are moved into run/, committed ones stay', async () => {
+test('A4: volatile files of the old layout are moved into run/, committed ones stay (S3: no git = history files stay too)', async () => {
   const { ctx, migrateState } = await import('../src/cli.mjs');
   const root = mk();
   const d = path.join(root, '.vitest-guard');
@@ -44,6 +44,7 @@ test('A4: volatile files of the old layout are moved into run/, committed ones s
   fs.writeFileSync(path.join(d, 'run', 'w-1-1.jsonl'), '');
   const log = console.log; console.log = () => {};
   try { migrateState(ctx({ _: ['check'], root })); } finally { console.log = log; }
-  assert.deepEqual(fs.readdirSync(d).sort(), ['conflicts.json', 'incompatible.json', 'run']);
-  assert.deepEqual(fs.readdirSync(path.join(d, 'run')).sort(), ['.gitignore', 'durations.json', 'files-cache.json', 'plan.json', 'pollution.json', 'settings.json', 'verify-vm.json']);
+  // without git it cannot be told whether durations.json / pollution.json are committed: they are not moved
+  assert.deepEqual(fs.readdirSync(d).sort(), ['conflicts.json', 'durations.json', 'incompatible.json', 'pollution.json', 'run']);
+  assert.deepEqual(fs.readdirSync(path.join(d, 'run')).sort(), ['.gitignore', 'files-cache.json', 'plan.json', 'settings.json', 'verify-vm.json']);
 });

@@ -1,13 +1,14 @@
 // Reads the per-worker run logs written by setup.mjs (.vitest-guard/run/w-<pid>-<tid>.jsonl).
-import fs from 'node:fs';
 import path from 'node:path';
+import { safeDir, listStateDir, readStateFile, readStateJson, writeStateFile, createStateFile, removeState } from './statefs.mjs';
+import { assertStateVersion, stamp } from './stateformat.mjs';
 
 export function readRunLogs(runDir) {
   const workers = [];
   let names = [];
-  try { names = fs.readdirSync(runDir).filter((n) => n.startsWith('w-') && n.endsWith('.jsonl')); } catch { return workers; }
+  names = listStateDir(runDir).filter((n) => n.startsWith('w-') && n.endsWith('.jsonl')); // refuses a linked run/ or logs/
   for (const n of names) {
-    const recs = fs.readFileSync(path.join(runDir, n), 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    const recs = (readStateFile(path.join(runDir, n)) ?? '').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
     const files = new Map();
     for (const r of recs) {
       if (r.t === 'volatile') { (workers.volatile ??= new Set()).add(r.module); continue; }
@@ -22,7 +23,7 @@ export function readRunLogs(runDir) {
 }
 
 export function clearRunLogs(runDir) {
-  fs.rmSync(runDir, { recursive: true, force: true }); // .vitest-guard/run/logs only: state next to it survives
+  removeState(runDir, { recursive: true }); // .vitest-guard/run/logs only: state next to it survives; never through a link
 }
 
 /** Files that ran before `file` in the same worker (most recent last). */
@@ -37,17 +38,18 @@ export function predecessors(workers, file) {
 /** durations.json: exponential moving average of measured per-file durations. */
 /** .vitest-guard/run/ holds only volatile state: make git ignore all of it (A4). */
 export function ensureStateDir(dir) {
-  fs.mkdirSync(dir, { recursive: true });
-  const gi = path.join(dir, '.gitignore');
-  try { if (!fs.existsSync(gi)) fs.writeFileSync(gi, '# vitest-guard volatile state (logs, plan, caches, durations): never commit\n*\n'); } catch {}
+  safeDir(dir); // creates .vitest-guard/run 0700; refuses a symlinked / junctioned component
+  createStateFile(path.join(dir, '.gitignore'), '# vitest-guard volatile state (logs, plan, caches, durations): never commit\n*\n');
 }
 
 export function updateDurations(file, workers) {
-  let d = {};
-  try { d = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
+  let d = readStateJson(file, {});
+  if (!d || typeof d !== 'object' || Array.isArray(d)) d = {};
+  assertStateVersion('durations.json', d, file); // never rewrite a newer format in the old shape
   for (const w of workers) for (const f of w.files) if (typeof f.durationMs === 'number' && f.durationMs >= 0) d[f.file] = d[f.file] ? Math.round((0.5 * d[f.file] + 0.5 * f.durationMs) * 10) / 10 : f.durationMs;
-  ensureStateDir(path.dirname(file));
-  fs.writeFileSync(file, JSON.stringify(d, null, 1) + '\n');
+  if (path.basename(path.dirname(file)) === 'run') ensureStateDir(path.dirname(file));
+  d = stamp('durations.json', d);
+  writeStateFile(file, JSON.stringify(d, null, 1) + '\n');
   return d;
 }
 

@@ -5,7 +5,9 @@ import v8 from 'node:v8';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import VitestGuardSequencer from './sequencer.mjs';
-import { validateTestPaths } from './safety.mjs';
+import { validateTestPaths, sanitize } from './safety.mjs';
+import { readStateJson, writeStateFile } from './statefs.mjs';
+import { versionProblem } from './stateformat.mjs';
 import { listTestFiles, classifyFiles, readModes, DEFAULT_AUTO_MODES, DOM_ENVS } from './auto.mjs';
 import { verifyStatus, findConfigFile } from './verifystate.mjs';
 
@@ -60,22 +62,53 @@ export function readJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
 }
 
-/** Raw quarantine file { version, vm: {file: info}, shared: {file: info} } (validate before use: F9). */
+const warnedState = new Set();
+const warnOnce = (msg) => { if (!warnedState.has(msg)) { warnedState.add(msg); console.warn(msg); } };
+
+/** Every string (key or value, a few levels deep) of an unknown quarantine layout that names an existing test file. */
+function filesIn(root, q) {
+  const out = new Set();
+  const walk = (v, depth) => {
+    if (depth > 4 || v === null) return;
+    if (typeof v === 'string') { out.add(v); return; }
+    if (Array.isArray(v)) { for (const x of v.slice(0, 100000)) walk(x, depth + 1); return; }
+    if (typeof v === 'object') for (const [k, x] of Object.entries(v)) { out.add(k); walk(x, depth + 1); }
+  };
+  walk(q, 0);
+  return validateTestPaths(root, [...out], { warn: false }).ok;
+}
+
+/**
+ * Raw quarantine file { version, vm: {file: info}, shared: {file: info} } (validate before use: F9).
+ * B2: a newer format version is not misread as v1. It fails safe instead: every existing file the newer file names
+ * (anywhere in it) is treated as quarantined for both fast modes, i.e. runs isolated, and a warning says to upgrade.
+ * A symlinked `.vitest-guard/` or quarantine file is not followed (security review 3 S2): warning, no quarantine.
+ */
 export function readQuarantineFile(root, file = '.vitest-guard/incompatible.json') {
-  const q = readJson(path.resolve(root, file), {});
-  return q && typeof q === 'object' && !Array.isArray(q) ? q : {};
+  let q;
+  try { q = readStateJson(path.resolve(root, file), {}); }
+  catch (e) { if (e?.code !== 'E_UNSAFE_STATE') throw e; warnOnce(`${e.message}; the quarantine is not read`); return {}; }
+  if (!q || typeof q !== 'object' || Array.isArray(q)) return {};
+  const problem = versionProblem('incompatible.json', q, sanitize(file));
+  if (problem) {
+    const files = filesIn(root, q);
+    warnOnce(`[vitest-guard] ${problem}. Failing safe: the ${files.length} test file(s) it names run isolated (forks) in every mode.`);
+    const all = Object.fromEntries(files.map((f) => [f, { failSafe: true }]));
+    return { version: q.version, newer: true, vm: all, shared: all };
+  }
+  return q;
 }
 
 /** Quarantine list for a mode, validated against include/exclude (F9). */
 export function readQuarantine(root, mode, file = '.vitest-guard/incompatible.json', { include = DEFAULT_INCLUDE, exclude = DEFAULT_EXCLUDE, warn = true } = {}) {
   const q = readQuarantineFile(root, file);
   const keys = q[mode] && typeof q[mode] === 'object' && !Array.isArray(q[mode]) ? Object.keys(q[mode]) : [];
-  return validateTestPaths(root, keys, { include, exclude, label: `${file} (${mode})`, warn }).ok;
+  return validateTestPaths(root, keys, { include, exclude, label: `${file} (${mode})`, warn: warn && !q.newer }).ok;
 }
 
 /** VITEST_GUARD_LANE_FILE: legacy array of files or { project, files }. */
 function readLane(laneFile) {
-  const raw = readJson(laneFile, null);
+  const raw = readStateJson(laneFile, null);
   if (Array.isArray(raw)) return { project: null, files: raw };
   if (raw && typeof raw === 'object' && Array.isArray(raw.files)) return { project: typeof raw.project === 'string' ? raw.project : null, files: raw.files };
   throw new Error(`[vitest-guard] VITEST_GUARD_LANE_FILE ${laneFile}: expected a JSON array of test files or { project, files }`);
@@ -147,11 +180,11 @@ function autoConfig(userConfig, g, root) {
   const record = () => {
     // for the CLI: `check` on an auto config runs in auto mode and calibrates first when modes.json is missing
     try {
-      const dir = path.join(root, '.vitest-guard', 'run'), f = path.join(dir, 'auto.json');
+      const f = path.join(root, '.vitest-guard', 'run', 'auto.json');
       const txt = JSON.stringify({ auto: true, groups, nodeEnvironment: g.nodeEnvironment ?? null });
-      let old = null; try { old = fs.readFileSync(f, 'utf8'); } catch {}
-      if (old !== txt) { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(f, txt); }
-    } catch {}
+      let old = null; try { old = JSON.stringify(readStateJson(f, null)); } catch {}
+      if (old !== txt) writeStateFile(f, txt); // refuses a symlinked .vitest-guard/ or run/
+    } catch (e) { if (e?.code === 'E_UNSAFE_STATE') warnOnce(`${e.message}; auto.json is not written`); }
   };
   if (Array.isArray(test.projects)) {
     test.projects = test.projects.map((p) => {
@@ -260,7 +293,7 @@ function buildConfig(userConfig, g) {
     const claimed = new Set();
     for (const p of test.projects) {
       if (!p || typeof p !== 'object' || typeof p === 'function') {
-        console.warn(`[vitest-guard] project ${typeof p === 'string' ? JSON.stringify(p) : '(function)'} is not an inline config and is not guarded: wrap that config with defineVitestGuardConfig itself.`);
+        console.warn(`[vitest-guard] project ${typeof p === 'string' ? sanitize(JSON.stringify(p)) : '(function)'} is not an inline config and is not guarded: wrap that config with defineVitestGuardConfig itself.`);
         projects.push(p);
         continue;
       }
@@ -293,7 +326,7 @@ function buildConfig(userConfig, g) {
     for (const m of ['vm', 'shared']) {
       const keys = qRaw[m] && typeof qRaw[m] === 'object' ? Object.keys(qRaw[m]) : [];
       const stray = keys.filter((k) => !claimed.has(k));
-      if (stray.length) validateTestPaths(root, stray, { include: [], label: `${quarantineFile} (${m}): no project includes it;` });
+      if (stray.length && !qRaw.newer) validateTestPaths(root, stray, { include: [], label: `${quarantineFile} (${m}): no project includes it;` }); // label/entries are sanitized by validateTestPaths
     }
     if (anyVm) out.test.vmMemoryLimit = vmLimit();
     out.test.projects = projects;

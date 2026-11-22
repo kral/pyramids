@@ -11,6 +11,8 @@ import { createRequire } from 'node:module';
 import { threadId } from 'node:worker_threads';
 import { getOuterGlobal, installHasInstanceShims, installMissingGlobals, createRealmEqualityTester, DOM_KEYS } from './realm.mjs';
 import * as fp from './fingerprint.mjs';
+import * as sfs from './statefs.mjs';
+import * as safety from './safety.mjs';
 
 const T0 = performance.now(); // self-time accounting (logged as selfMs per file)
 const PROF = process.env.VITEST_GUARD_PROFILE ? {} : null;
@@ -44,8 +46,18 @@ const envName = () => { try { return globalThis.__vitest_worker__?.environment?.
 // ---- mode 'auto': DOM probe (dom group) and DOM-miss detector (node group) ----
 // Records go to .vitest-guard/run/env-<pid>-<tid>.jsonl; the next config load folds them into env.json and
 // re-classifies (a node-group file that touched the DOM moves to the dom group: self-healing).
+// state writes never follow a symlink / junction in .vitest-guard/ (security review 3 S2): refused once per worker, with a warning
+function stateWrite(fn) {
+  if (worker.stateRefused) return;
+  try { fn(); } catch (e) {
+    if (e?.code !== 'E_UNSAFE_STATE') return;
+    worker.stateRefused = true;
+    console.warn(`${e.message}; this worker writes no vitest-guard state`);
+  }
+}
+const GITIGNORE = '# vitest-guard volatile state (logs, plan, caches, durations): never commit\n*\n';
 function envRecord(rec) {
-  try { fs.mkdirSync(stateDir, { recursive: true }); fs.appendFileSync(path.join(stateDir, `env-${process.pid}-${threadId}.jsonl`), JSON.stringify(rec) + '\n'); } catch {}
+  stateWrite(() => sfs.appendStateFile(path.join(stateDir, `env-${process.pid}-${threadId}.jsonl`), JSON.stringify(rec) + '\n'));
 }
 let domTouched = false, domVia = null;
 const probeSaved = [];
@@ -96,13 +108,13 @@ function collectErrors(task, out = []) {
 // ---- run log (one jsonl per worker) ----
 function log(rec) {
   if (opts.log === false) return;
-  try {
+  stateWrite(() => {
     if (!worker.out) {
-      fs.mkdirSync(runDir, { recursive: true });
-      try { const gi = path.join(stateDir, '.gitignore'); if (!fs.existsSync(gi)) fs.writeFileSync(gi, '# vitest-guard volatile state (logs, plan, caches, durations): never commit\n*\n'); } catch {}
+      sfs.safeDir(runDir);
+      sfs.createStateFile(path.join(stateDir, '.gitignore'), GITIGNORE);
       worker.out = path.join(runDir, `w-${process.pid}-${threadId}.jsonl`); }
-    fs.appendFileSync(worker.out, JSON.stringify(rec) + '\n');
-  } catch {}
+    sfs.appendStateFile(worker.out, JSON.stringify(rec) + '\n');
+  });
 }
 const rel = (f) => (f ? path.relative(root, f).split(path.sep).join('/') : f);
 
@@ -276,7 +288,7 @@ async function beforeAllBody() {
   if (!worker.base) {
     worker.base = { outer: outerNow, ...(ctx || {}) };
     log({ t: 'start', file, seq: worker.seq, mode, pid: process.pid, tid: threadId });
-    if (mode === 'shared') { try { { const f = path.join(stateDir, 'settings.json'), t = JSON.stringify({ resetModules: !!opts.resetModules }); let old = null; try { old = fs.readFileSync(f, 'utf8'); } catch {} if (old !== t) fs.writeFileSync(f, t); } } catch {} }
+    if (mode === 'shared') stateWrite(() => { const f = path.join(stateDir, 'settings.json'), t = JSON.stringify({ resetModules: !!opts.resetModules }); let old = null; try { old = sfs.readStateFile(f); } catch {} if (old !== t) sfs.writeStateFile(f, t); });
     return;
   }
   const dirty = fp.diffOuter(worker.base.outer, outerNow, { ignoreListeners: opts.ignoreListeners || [] });
@@ -309,7 +321,7 @@ async function beforeAllBody() {
   }
   log({ t: 'start', file, seq: worker.seq, mode, pid: process.pid, tid: threadId, prev: worker.prev, dirty: dirty.length ? dirty : undefined });
   if (dirty.length && onDirty !== 'silent') {
-    const msg = `[vitest-guard] ${file} starts with state left by ${worker.prev}: ` + dirty.map((d) => `${d.kind} [${d.keys.join(', ')}]`).join('; ');
+    const msg = `[vitest-guard] ${safety.sanitize(file)} starts with state left by ${safety.sanitize(worker.prev)}: ` + dirty.map((d) => `${d.kind} [${d.keys.map((k) => safety.sanitize(k, 120)).join(', ')}]`).join('; ');
     if (onDirty === 'error') throw new Error(msg);
     console.warn(msg);
   }
@@ -331,7 +343,7 @@ afterAll(async ({}, suite) => { // Vitest 5: fixtures first (must be destructure
     if (key) {
       const f = rel(expect.getState().testPath);
       envRecord({ t: 'env-miss', file: f, env: envName(), key });
-      const hint = `[vitest-guard] auto: ${f} touched the DOM global '${key}' but was classified as pure node (no DOM import/usage found statically). ` +
+      const hint = `[vitest-guard] auto: ${safety.sanitize(f)} touched the DOM global '${safety.sanitize(key, 80)}' but was classified as pure node (no DOM import/usage found statically). ` +
         'It is recorded in .vitest-guard/run/env.json and runs in the dom group from the next run on (or add `// @vitest-environment jsdom`).';
       console.error(hint);
       pendingHint = hint; // thrown at the end of this hook so it shows up in every reporter

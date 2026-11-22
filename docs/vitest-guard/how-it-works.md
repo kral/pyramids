@@ -126,5 +126,40 @@ is `modes.json`. It is sample based ([limitations.md](limitations.md)).
 | `.vitest-guard/durations.json`, `pollution.json` | only with `--commit-state` | else in `run/` |
 | `.vitest-guard/run/` (git-ignored by its own `.gitignore`) | no | `logs/`, `plan.json`, `files-cache.json`, `settings.json`, `verify-<mode>.json`, `compare.json`, `modes.json`, `auto.json`, `env.json`, `env-*.jsonl`, lane files |
 
+### Format versions
+
+`incompatible.json`, `conflicts.json`, `pollution.json` and `durations.json` (the files a team can commit) are
+format version **1**. The `version` field comes first. A file without it counts as version 1, so hand-written
+files still work. vitest-guard always writes the version it supports. Its rules:
+
+- **Unknown fields are kept.** A load/save round trip preserves them, so a later minor version can add fields
+  without breaking older copies.
+- **A higher (or invalid) version is refused.** It is never misread as version 1, and it is never rewritten in the
+  version 1 layout.
+  - The CLI exits 2 before it runs or writes anything: `.vitest-guard/incompatible.json has format version 2; this
+    @jirikral/vitest-guard (…) understands version 1 - upgrade @jirikral/vitest-guard`.
+  - The config wrapper (a plain `vitest run`) warns and fails safe. Every existing test file named anywhere in a
+    newer `incompatible.json` runs isolated (forks) in every mode, so nothing that a newer version quarantined runs
+    fast.
+- Volatile files in `run/` that carry a version (`plan.json`, version 2) are ignored and re-created when they are
+  newer.
+
+`migrateState` (run before every command) moves files that older versions kept next to the committed ones into
+`run/`. It never deletes anything. It never moves a file that git tracks: a committed `durations.json` or
+`pollution.json` stays where it is when a run has no `--commit-state`, and the run prints a hint. Without git it
+cannot tell whether a file is committed, so these two files stay where they are.
+
+### Symlinks
+
+vitest-guard does not follow links in `.vitest-guard/`. These rules are the same as for vto's `.vto/`:
+
+- **Symlinks and junctions are refused.** This covers `.vitest-guard`, `run/`, `run/logs/` and any link inside
+  them. The CLI exits 2 and runs nothing. Test workers and the config wrapper print a warning and write no state.
+- **Directories are created private.** `.vitest-guard`, `run/` and `run/logs/` get mode 0700 on POSIX.
+- **Files are written safely.** Each one is created with mode 0600 through an exclusive temp file and then renamed
+  into place. Appends use `O_NOFOLLOW`.
+- **Recursive deletes check first.** A recursive delete (`run/logs/` before a run) checks the whole chain before
+  and after. It never starts at a link.
+
 The `vitest list` result is cached in `files-cache.json` until the test directories' mtimes, the config's mtime
 or the filters change.

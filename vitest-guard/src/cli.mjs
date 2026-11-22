@@ -7,8 +7,9 @@ import { runVitest, signature, vitestBin, childCpuSeconds } from './runner.mjs';
 import { readRunLogs, clearRunLogs, predecessors, updateDurations, heapReport, selfTime, ensureStateDir } from './logs.mjs';
 import { buildGraph, planLanes, readVto } from './plan.mjs';
 import { scanFile } from './scan.mjs';
-import { readJson } from './index.mjs';
-import { validEdges, pickKnown, privateTmp } from './safety.mjs';
+import { validEdges, pickKnown, privateTmp, sanitizeText } from './safety.mjs';
+import { safeDir, readStateJson, readStateFile, writeStateFile, listStateDir, removeState } from './statefs.mjs';
+import { STATE_VERSIONS, VOLATILE_VERSIONS, assertStateVersion, versionProblem, stamp } from './stateformat.mjs';
 import { findConfigFile, gitHead, configKey } from './verifystate.mjs';
 import { summary, table, painter, colorEnabled, verdictOf } from './ui.mjs';
 import { startSwan } from './swan.mjs';
@@ -43,23 +44,57 @@ export function ctx(o) {
   // (git-ignored), run logs in .vitest-guard/run/logs/. --commit-state keeps durations/pollution next to the
   // committed files for teams that want stable plans across machines.
   const stateDir = path.join(dir, 'run');
-  return { root, dir, stateDir, runDir: path.join(stateDir, 'logs'), commitState: !!o['commit-state'], config, mode: o.mode || (readJson(path.join(stateDir, 'auto.json'), {}).auto ? 'auto' : 'vm'), verbose: !!o.verbose, lanes: Number(o.lanes || Math.max(1, os.availableParallelism() - 1)), filters: o._[0] === 'hunt' ? [] : o._.slice(1) };
+  return { root, dir, stateDir, runDir: path.join(stateDir, 'logs'), commitState: !!o['commit-state'], config, mode: o.mode || (readAuto(stateDir).auto ? 'auto' : 'vm'), verbose: !!o.verbose, lanes: Number(o.lanes || Math.max(1, os.availableParallelism() - 1)), filters: o._[0] === 'hunt' ? [] : o._.slice(1) };
 }
+const readAuto = (stateDir) => { try { return readStateJson(path.join(stateDir, 'auto.json'), {}) || {}; } catch { return {}; } };
 const COMMITTED = new Set(['incompatible.json', 'conflicts.json']);
 const OPT_IN = new Set(['durations.json', 'pollution.json']); // others (auto.json, modes.json, env.json, …) live in run/
 export const statePath = (c, n) => P(c, n);
 const P = (c, n) => (COMMITTED.has(n) || (c.commitState && OPT_IN.has(n)) ? path.join(c.dir, n) : path.join(c.stateDir, n));
 // reads fall back to the pre-A4 location (.vitest-guard/<name>) only for the two history files that older versions
 // kept there (N9: a committed file must not be able to stand in for run state such as modes.json)
-const load = (c, n, d) => { const v = readJson(P(c, n), undefined); return v !== undefined ? v : OPT_IN.has(n) ? readJson(path.join(c.dir, n), d) : d; };
+// B2: a committed (or --commit-state) file with a newer format version throws StateVersionError (exit 2); a newer
+// volatile file in run/ is ignored (it is re-created). Reads and writes never follow a link (statefs.mjs).
+const relOf = (c, f) => path.relative(c.root, f).split(path.sep).join('/');
+const gate = (c, n, v, file, d) => {
+  if (STATE_VERSIONS[n]) return assertStateVersion(n, v, relOf(c, file));
+  return VOLATILE_VERSIONS[n] && versionProblem(n, v) ? d : v;
+};
+export const loadState = (c, n, d) => load(c, n, d);
+const load = (c, n, d) => {
+  let file = P(c, n), v = readStateJson(file, undefined);
+  if (v === undefined && OPT_IN.has(n)) { file = path.join(c.dir, n); v = readStateJson(file, undefined); }
+  return v === undefined ? d : gate(c, n, v, file, d);
+};
 export const saveState = (c, n, v) => save(c, n, v);
 const save = (c, n, v) => {
-  const file = P(c, n), txt = JSON.stringify(v, null, 2) + '\n';
-  if (file.startsWith(c.stateDir)) ensureStateDir(c.stateDir); else fs.mkdirSync(c.dir, { recursive: true });
-  try { if (fs.readFileSync(file, 'utf8') === txt) return; } catch {} // unchanged content: do not touch the file
-  fs.writeFileSync(file, txt);
+  const file = P(c, n), txt = JSON.stringify(stamp(n, v), null, 2) + '\n'; // writers always write the current version
+  if (file.startsWith(c.stateDir)) ensureStateDir(c.stateDir); else safeDir(c.dir);
+  let old = null; try { old = readStateFile(file); } catch (e) { if (e?.code === 'E_UNSAFE_STATE') throw e; }
+  if (old === txt) return; // unchanged content: do not touch the file
+  if (old !== null && STATE_VERSIONS[n]) { let cur; try { cur = JSON.parse(old); } catch {} if (cur) assertStateVersion(n, cur, relOf(c, file)); } // never downgrade a newer file
+  writeStateFile(file, txt);
 };
-const say = (...a) => console.log('[vitest-guard]', ...a);
+/**
+ * Before any command touches state: refuse a symlinked / junctioned `.vitest-guard`, `run/`, `run/logs/` or a linked
+ * entry in them (security review 3 S2), and a committed state file with a newer format version (B2).
+ * @returns {string|null} the message for exit 2
+ */
+export function checkState(c) {
+  try {
+    for (const d of [c.dir, c.stateDir, c.runDir]) for (const n of listStateDir(d)) {
+      let st; try { st = fs.lstatSync(path.join(d, n)); } catch { continue; }
+      if (st.isSymbolicLink()) return `[vitest-guard] ${relOf(c, path.join(d, n))} is a symbolic link or junction - refusing to follow it (vitest-guard state must be real files and directories; remove the link). Nothing was run or written.`;
+    }
+    for (const n of Object.keys(STATE_VERSIONS)) load(c, n, null);
+  } catch (e) {
+    if (e?.code === 'E_UNSAFE_STATE') return `${e.message}. Nothing was run or written.`;
+    if (e?.code === 'E_STATE_VERSION') return `${e.message} (unknown fields are kept, a newer format is never misread or rewritten). Nothing was run or written.`;
+    throw e;
+  }
+  return null;
+}
+const say = (...a) => console.log('[vitest-guard]', ...a.map((x) => (typeof x === 'string' ? sanitizeText(x) : x))); // names come from the project (H1)
 
 // `vitest list` costs a full config load (~1 s CPU): cache it. Valid while the directories holding test
 // files (and their ancestors up to the root) keep their mtime - adding/removing/renaming a test file
@@ -73,12 +108,12 @@ function dirsOf(root, files) {
 /** [{ file, project }] from `vitest list` (authoritative: only what Vitest itself would run). */
 export function listSpecs(c) {
   const cacheFile = P(c, 'files-cache.json');
-  const cached = readJson(cacheFile, null);
+  let cached = null; try { cached = readStateJson(cacheFile, null); } catch {}
   const cfg = c.config ? mtime(c.config) : 0;
   if (cached && cached.v === 3 && cached.wrapped === true && cached.cfg === cfg && JSON.stringify(cached.filters) === JSON.stringify(c.filters) && Object.entries(cached.dirs).every(([d, m]) => mtime(d) === m)) { c.wrapped = cached.wrapped; return cached.specs; }
   const specs = listSpecsUncached(c);
   const files = [...new Set(specs.map((x) => x.file))];
-  if (c.wrapped) try { ensureStateDir(c.stateDir); fs.writeFileSync(cacheFile, JSON.stringify({ v: 3, wrapped: c.wrapped, cfg, filters: c.filters, dirs: Object.fromEntries(dirsOf(c.root, files).map((d) => [d, mtime(d)])), specs })); } catch {}
+  if (c.wrapped) try { ensureStateDir(c.stateDir); writeStateFile(cacheFile, JSON.stringify({ v: 3, wrapped: c.wrapped, cfg, filters: c.filters, dirs: Object.fromEntries(dirsOf(c.root, files).map((d) => [d, mtime(d)])), specs })); } catch {}
   return specs;
 }
 export function listFiles(c) {
@@ -155,8 +190,8 @@ export async function cmdPlan(c, o, files = listFiles(c)) {
 
 async function runLane(c, files, tag, project = null, mode = 'shared') {
   const laneFile = path.join(c.runDir, `lane-${tag}.json`);
-  ensureStateDir(c.stateDir); fs.mkdirSync(c.runDir, { recursive: true });
-  fs.writeFileSync(laneFile, JSON.stringify({ project: project || null, files }));
+  ensureStateDir(c.stateDir);
+  writeStateFile(laneFile, JSON.stringify({ project: project || null, files }));
   return runVitest({ root: c.root, config: c.config, mode, laneFile, verbose: c.verbose, tag });
 }
 
@@ -586,20 +621,47 @@ export async function cmdScan(c, o) {
   return EXIT.OK;
 }
 
-// A4 migration: volatile files that older versions wrote next to the committed ones move into .vitest-guard/run/
-export function migrateState(c) {
-  let moved = 0;
-  let names = [];
-  try { names = fs.readdirSync(c.dir); } catch { return; }
-  for (const n of names) {
-    const volatile = ['plan.json', 'files-cache.json', 'settings.json', 'compare.json'].includes(n) || /^verify-.*\.json$/.test(n) || (!c.commitState && OPT_IN.has(n));
-    if (!volatile) continue;
-    ensureStateDir(c.stateDir);
-    const to = path.join(c.stateDir, n);
-    try { if (!fs.existsSync(to)) fs.renameSync(path.join(c.dir, n), to); else fs.rmSync(path.join(c.dir, n)); moved++; } catch {}
+// A4 migration: volatile files that older versions wrote next to the committed ones move into .vitest-guard/run/.
+// Architecture review 3 S3: nothing is ever deleted here, and a file git tracks is never moved (a teammate or CI step
+// without --commit-state must not "un-commit" durations.json / pollution.json): it only gets a hint.
+/** Paths below `.vitest-guard/` that git tracks (root-relative, `/`); null when git is unavailable or this is no repo. */
+function trackedState(c) {
+  const git = findGitBinary();
+  if (!git) return null;
+  const r = spawnSync(git, ['-C', c.root, 'ls-files', '-z', '--', '.vitest-guard'], { encoding: 'utf8', timeout: 10000, windowsHide: true, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } });
+  if (r.status !== 0 || typeof r.stdout !== 'string') return null;
+  return new Set(r.stdout.split('\0').filter(Boolean));
+}
+/** git from PATH, never from the project directory (security review H4: a repo can ship its own git.exe). */
+function findGitBinary() {
+  const exts = process.platform === 'win32' ? (process.env.PATHEXT || '.EXE;.CMD;.BAT').split(';').filter(Boolean) : [''];
+  for (const dir of (process.env.PATH || '').split(path.delimiter)) {
+    if (!dir || !path.isAbsolute(dir)) continue;
+    for (const ext of exts) { const f = path.join(dir, 'git' + ext.toLowerCase()); try { if (fs.statSync(f).isFile()) return f; } catch {} }
   }
-  try { for (const n of fs.readdirSync(c.stateDir)) if (/^(w-.*\.jsonl|lane-.*\.json)$/.test(n)) fs.rmSync(path.join(c.stateDir, n)); } catch {}
-  if (moved) say(`moved ${moved} volatile file(s) from .vitest-guard/ to .vitest-guard/run/ (git-ignored); commit the removal. Only incompatible.json and conflicts.json${c.commitState ? ', durations.json and pollution.json' : ''} are meant to be committed.`);
+  return null;
+}
+export function migrateState(c) {
+  let names = [];
+  try { names = listStateDir(c.dir); } catch { return; } // a linked chain is reported by checkState
+  const candidates = names.filter((n) => ['plan.json', 'files-cache.json', 'settings.json', 'compare.json'].includes(n) || /^verify-.*\.json$/.test(n) || (!c.commitState && OPT_IN.has(n)));
+  const moved = [], tracked = [], kept = [];
+  if (candidates.length) {
+    const inGit = trackedState(c);
+    for (const n of candidates) {
+      if (inGit === null ? OPT_IN.has(n) : inGit.has(`.vitest-guard/${n}`)) { tracked.push(n); continue; } // no git: keep the history files
+      const to = path.join(c.stateDir, n);
+      try {
+        ensureStateDir(c.stateDir);
+        if (fs.existsSync(to)) { kept.push(n); continue; }
+        fs.renameSync(path.join(c.dir, n), to); moved.push(n);
+      } catch {}
+    }
+  }
+  try { for (const n of listStateDir(c.stateDir)) if (/^(w-.*\.jsonl|lane-.*\.json)$/.test(n)) removeState(path.join(c.stateDir, n)); } catch {}
+  if (moved.length) say(`moved ${moved.length} volatile file(s) from .vitest-guard/ to .vitest-guard/run/ (git-ignored): ${moved.join(', ')}. Only incompatible.json and conflicts.json${c.commitState ? ', durations.json and pollution.json' : ''} are meant to be committed.`);
+  if (tracked.length) say(`.vitest-guard/${tracked.join(', .vitest-guard/')} ${tracked.length > 1 ? 'are' : 'is'} committed but this run has no --commit-state: left untouched and not updated (updates go to .vitest-guard/run/). Pass --commit-state to keep ${tracked.length > 1 ? 'them' : 'it'} current, or \`git rm\` ${tracked.length > 1 ? 'them' : 'it'}.`);
+  if (kept.length) say(`.vitest-guard/${kept.join(', .vitest-guard/')}: a newer copy exists in .vitest-guard/run/; the old one was left in place - delete it.`);
 }
 
 const EXIT_HELP = `exit codes (contracts/DECISIONS.md D3):
@@ -734,6 +796,8 @@ export async function main(argv) {
   if (o['reset-modules'] === false) process.env.VITEST_GUARD_OPTS = JSON.stringify({ ...JSON.parse(process.env.VITEST_GUARD_OPTS || '{}'), resetModules: false }); // planner then adds transitive vi.mock edges
   const c = ctx(o);
   try { vitestBin(c.root); } catch (e) { console.error(`[vitest-guard] ${e.message}\nsee --help`); return EXIT.USAGE; }
+  const unsafe = checkState(c);
+  if (unsafe) { console.error(unsafe); return EXIT.USAGE; }
   migrateState(c);
   if (NEEDS_WRAP.has(o._[0])) {
     let err;
@@ -745,7 +809,7 @@ export async function main(argv) {
       if (!o.mode && c.mode !== 'auto') {
         // the config writes .vitest-guard/run/auto.json when it uses mode 'auto'; make sure it has been loaded once
         try { listSpecs(c); } catch {}
-        if (readJson(path.join(c.stateDir, 'auto.json'), {}).auto) c.mode = 'auto';
+        if (readAuto(c.stateDir).auto) c.mode = 'auto';
       } const code = await cmdCheck(c, o); if (o.compare) await cmdCompare(c, o); return code; }
     case 'compare': return cmdCompare(c, o);
     case 'calibrate': return cmdCompare(c, { ...o, sample: o.sample ?? 20 });

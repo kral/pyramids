@@ -5,6 +5,7 @@
 // (the real-world suite, full suite, CPU: dom project vm −53.5 %, node project vm +9–10 % vs forks, shared −57 %).
 import fs from 'node:fs';
 import path from 'node:path';
+import { readStateJson } from './statefs.mjs';
 import { stripComments } from './scan.mjs';
 import { foldEnvRecords, DOM_ENVS } from './envstore.mjs';
 
@@ -93,7 +94,7 @@ export function classifyFiles(root, files, userEnv, { nodeEnvironment = null, ev
 export function readModes(root) {
   // N9: a data file must not be able to inject anything but one of the three known modes
   try {
-    const m = JSON.parse(fs.readFileSync(path.join(root, '.vitest-guard', 'run', 'modes.json'), 'utf8'));
+    const m = readStateJson(path.join(root, '.vitest-guard', 'run', 'modes.json'), null); // never through a symlink (S2)
     const out = {};
     if (m && typeof m === 'object' && m.modes && typeof m.modes === 'object' && !Array.isArray(m.modes)) for (const [k, v] of Object.entries(m.modes)) if (v === 'vm' || v === 'shared' || v === 'isolated') out[k] = v;
     return out;
