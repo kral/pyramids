@@ -10,11 +10,12 @@ vto makes a Vitest suite answer in seconds instead of minutes, for people and fo
 - **Small answers for agents** (`vto mcp`): compact results within a token budget.
 - **Overlap report** (`vto report overlap`): tests that cover the same code, verified by mutation testing.
 
-Status: **alpha**, nothing is published to npm yet. Linux, macOS and Windows are tested in CI
+Status: **alpha**. `@jirikral/vitest-guard` is on npm under the dist-tag `next` (`npm i -D @jirikral/vitest-guard@next`);
+vto itself is used from source. Linux, macOS and Windows are tested in CI
 (Node `^22.22.2 || >=24.15.0`, Vitest 5.1).
 
 > Do not run `npx vto` or `npx vitest-guard`: those unscoped npm names are not ours, and whoever owns them would
-> run their code on your machine. Use the local copy as shown below.
+> run their code on your machine. Use the local copy as shown below; vitest-guard alone: install it from npm as above.
 
 ## Quickstart (from source, about 5 minutes)
 
@@ -48,6 +49,9 @@ Wrap your config once, then let vitest-guard measure and decide:
 import { defineVitestGuardConfig } from '@jirikral/vitest-guard';
 export default defineVitestGuardConfig({ test: { environment: 'jsdom' } }, { mode: 'auto' });
 ```
+
+(`vto` = `node /path/to/vto/bin/vto.mjs`; with the npm package alone use `npm run guard -- <command>` instead of `vto guard <command>`;
+see [getting-started.md](docs/vitest-guard/getting-started.md).)
 
 ```sh
 vto guard compare --sample all   # forks vs vm vs shared per project, CPU time, result mismatches

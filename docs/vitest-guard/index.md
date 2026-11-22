@@ -3,7 +3,10 @@
 vitest-guard makes Vitest's two fast execution modes safe enough to use as the default for a whole suite. This page is
 the one-page overview; the other pages go deeper.
 
-> Status: the package is `@jirikral/vitest-guard`, version 0.1.0, **not published to npm yet**. Do not run `npx vitest-guard`: the unscoped name is not ours, and whoever registers it would run their code on your machine. Use the local copy (`node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs`) or an npm script.
+> Status: pre-release `0.1.0-alpha.2`, published on npm under the dist-tag `next`: `npm i -D @jirikral/vitest-guard@next`
+> (pnpm: `pnpm add -D @jirikral/vitest-guard@next`, yarn: `yarn add -D @jirikral/vitest-guard@next`). Run the CLI through
+> an npm script or `node node_modules/@jirikral/vitest-guard/bin/vitest-guard.mjs`. **Never run `npx vitest-guard`**: the
+> unscoped name `vitest-guard` is not ours, and whoever owns it would run their code on your machine.
 
 ## The problem
 
@@ -31,8 +34,10 @@ Used bare, these modes either fail tests that pass in forks (false red) or, wors
    failure: genuine, fast-mode-only (quarantine it in `.vitest-guard/incompatible.json`), caused by another file
    (conflict edge in `.vitest-guard/conflicts.json`), or flaky. `vitest-guard verify` compares pass/fail per test between
    the fast mode (in several file orders) and isolated forks to catch false greens.
-4. You commit the two small JSON files. Plain `vitest run` then gives you fast mode with the problem files in forks.
-5. A periodic isolated run (`VITEST_GUARD_MODE=isolated vitest run`) plus `verify` stays as the reference.
+4. You commit the two small JSON files. Plain `vitest run` then gives you fast mode with the quarantined files (`incompatible.json`)
+   in forks. Conflict edges (`conflicts.json`, shared mode) are applied only by the planner, i.e. by `vitest-guard run` and
+   `check --mode shared`, not by plain `vitest run` ([getting-started.md](getting-started.md) step 5).
+5. A periodic isolated run (`VITEST_GUARD_MODE=isolated vitest run`; PowerShell: `$env:VITEST_GUARD_MODE='isolated'; npx vitest run`) plus `verify` stays as the reference.
 
 Mode `auto` splits the suite into a DOM group and a node group and picks the best mode for each, using
 measurements (`vitest-guard calibrate`).

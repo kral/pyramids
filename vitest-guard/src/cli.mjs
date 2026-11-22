@@ -543,7 +543,7 @@ export async function cmdCompare(c, o) {
     const tl = table(['project', 'files', `forks (${unit})`, 'vm', 'shared', 'recommend'],
       rows.map((r) => [r.project, `${r.files}/${r.of}`, String(r.isolated), cell(r.vm, r.isolated, r.vmMismatch), cell(r.shared, r.isolated, r.sharedMismatch), p.bold(r.recommend)]), ['l', 'r', 'r', 'r', 'r', 'l'], p);
     const mism = rows.some((r) => r.vmMismatch || r.sharedMismatch);
-    summary({ title: 'compare', verdict: 'ok', label: 'MEASURED', headline: `${rows.length} project(s); ⚠n = tests whose result differs from forks`, tableLines: tl,
+    summary({ title: 'compare', verdict: 'ok', label: 'MEASURED', headline: `${rows.length} project(s); ⚠N = N tests whose result differs from forks`, facts: [['exit code', EXIT.OK]], tableLines: tl,
       next: [...(Number.isFinite(n) ? ['a sample can miss the CPU-heavy files: decide with `--sample all`'] : []), ...(mism ? ['mismatching modes are never recommended; see `vitest-guard verify`'] : []),
         ...rows.filter((r) => r.recommend === 'shared').map((r) => `${r.project}: gate on shared only after a clean \`vitest-guard verify --mode shared\``)] });
   }

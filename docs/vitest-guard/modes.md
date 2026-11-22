@@ -1,13 +1,13 @@
 # Modes
 
 `mode` selects how test files are executed. All numbers are CPU seconds (user+sys of the whole process tree)
-from `vitest-guard/README.md`, `VALIDATION-real-suite.md` ("the real-world suite") and `perf/RESULTS.md` (the lab).
+from `vitest-guard/README.md`, `VALIDATION-real-suite.md` ("the real-world suite") and `perf/RESULTS.md` (the lab); the last two are files of the source repository, not part of the npm package.
 They are measurements of those suites on a shared 2-core box, not promises for yours: measure with
 `vitest-guard compare --sample all`.
 
 | mode | Vitest configuration | source of the config value |
 |---|---|---|
-| `isolated` | `pool: 'forks'`, `isolate: true` (Vitest default) plus the guard layer's timing log | `mode: 'isolated'` or `VITEST_GUARD_MODE=isolated` |
+| `isolated` | `pool: 'forks'`, `isolate: true` (Vitest default) plus the guard layer's timing log | `mode: 'isolated'` or `VITEST_GUARD_MODE=isolated` (PowerShell: `$env:VITEST_GUARD_MODE='isolated'`) |
 | `vm` | `pool: 'vmThreads'` + `vmMemoryLimit` | default |
 | `shared` | `pool: 'threads'` (or `'forks'` with `sharedPool`), `isolate: false`, setup files in list order, `vi.resetModules()` after every file | `mode: 'shared'` |
 | `auto` | generated `dom` and `node` projects (or your projects), each in its own mode | `mode: 'auto'` |

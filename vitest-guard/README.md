@@ -1,6 +1,14 @@
 # vitest-guard
 
-> **Warning:** `@jirikral/vitest-guard` is not published to npm yet. Do not run `npx vitest-guard`: the unscoped name is not ours, and whoever registers it would run their code on your machine. Use the local copy (`node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs`) or an npm script.
+> **Install (pre-release, dist-tag `next`):** `npm i -D @jirikral/vitest-guard@next` (pnpm: `pnpm add -D @jirikral/vitest-guard@next`,
+> yarn: `yarn add -D @jirikral/vitest-guard@next`). Run the CLI through your project's own install: add the script
+> `"guard": "vitest-guard"` to `package.json` and call `npm run guard -- check`, or
+> `node node_modules/@jirikral/vitest-guard/bin/vitest-guard.mjs check`.
+>
+> **Never run `npx vitest-guard`:** the unscoped name `vitest-guard` is not ours, and whoever owns it would run their code on your machine.
+>
+> Unreleased changes: `npm pack` in a checkout of the repository's `vitest-guard/` directory, then
+> `npm i -D ./jirikral-vitest-guard-<version>.tgz` (a real copy, no symlink).
 
 
 *Czech version: [README.cs.md](README.cs.md).*
@@ -54,7 +62,7 @@ export default defineVitestGuardConfig(
   one of react / react-dom is inlined;
 - warns about `test.poolOptions` (removed in Vitest 4 and silently ignored).
 
-Switches: `VITEST_GUARD_MODE=vm|shared|isolated|off`, `VITEST_GUARD_OPTS='{"realm":false}'` (JSON options),
+Switches (bash syntax; PowerShell: `$env:VITEST_GUARD_MODE='vm'`, cmd: `set VITEST_GUARD_MODE=vm`): `VITEST_GUARD_MODE=vm|shared|isolated|off`, `VITEST_GUARD_OPTS='{"realm":false}'` (JSON options),
 `VITEST_GUARD_DIAG=1` (diagnostics), `VITEST_GUARD_PROFILE=1` (section timings in the run log),
 `VITEST_GUARD_IGNORE_QUARANTINE=1`.
 
@@ -153,15 +161,15 @@ and picks a mode per group:
 ## CLI
 
 ```
-node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs check  [--mode vm|shared] [--prune] [filters…]
-node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs verify [--mode vm|shared] [--sample N|all] [--seed s]
-node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs plan   [--lanes N] [--vto-raw <dir>] [--no-reset-modules]
-node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs run    [--lanes N] [--no-heal] [--no-diag] [--no-reset-modules]
-node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs hunt   <file> [--before a,b,c]
-node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs scan   [--quarantine]
-node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs report
-node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs compare   [--sample N|all] [--project a,b] [--no-write]
-node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs calibrate [--sample N]
+npm run guard -- check  [--mode vm|shared] [--prune] [filters…]
+npm run guard -- verify [--mode vm|shared] [--sample N|all] [--seed s]
+npm run guard -- plan   [--lanes N] [--vto-raw <dir>] [--no-reset-modules]
+npm run guard -- run    [--lanes N] [--no-heal] [--no-diag] [--no-reset-modules]
+npm run guard -- hunt   <file> [--before a,b,c]
+npm run guard -- scan   [--quarantine]
+npm run guard -- report
+npm run guard -- compare   [--sample N|all] [--project a,b] [--no-write]
+npm run guard -- calibrate [--sample N]
 ```
 
 - **check**: runs the suite in the fast mode and re-runs failing files isolated in `forks`, comparing **per test**.
@@ -368,15 +376,17 @@ of them pass with a longer timeout; they are load-induced.
 
 ## Recommended rollout
 
-0. `node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs compare --sample all` to pick the mode per project (vm for DOM projects, shared or forks for
+(`npm run guard --` is the `guard` script from the install note at the top.)
+
+0. `npm run guard -- compare --sample all` to pick the mode per project (vm for DOM projects, shared or forks for
    pure-node ones).
-1. `VITEST_GUARD_MODE=vm node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs verify --sample all` locally; review false greens and false reds.
-2. `node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs check --mode vm` and commit `.vitest-guard/incompatible.json`.
+1. `npm run guard -- verify --mode vm --sample all` locally; review false greens and false reds.
+2. `npm run guard -- check --mode vm` and commit `.vitest-guard/incompatible.json`.
 3. PR pipeline: plain `vitest run` with `defineVitestGuardConfig` (vm + quarantine in forks). Exit 4 from `check` on a
    PR means someone added a vm-incompatible test.
-4. Nightly: `VITEST_GUARD_MODE=isolated vitest run` (whole suite isolated), plus `node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs verify --sample 500`
-   (exit 5 = false green), plus `node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs check --prune`. Security gates always run isolated.
-5. Shared mode for local and pre-push runs: `node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs scan`, then `node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs run`. Promote it to CI once a
+4. Nightly: `VITEST_GUARD_MODE=isolated vitest run` (PowerShell: `$env:VITEST_GUARD_MODE='isolated'; npx vitest run`; cmd: `set VITEST_GUARD_MODE=isolated && npx vitest run`) (whole suite isolated), plus `npm run guard -- verify --sample 500`
+   (exit 5 = false green), plus `npm run guard -- check --prune`. Security gates always run isolated.
+5. Shared mode for local and pre-push runs: `npm run guard -- scan`, then `npm run guard -- run`. Promote it to CI once a
    nightly `verify --mode shared --sample all` has stayed clean for a while.
 
 **Per project**: run `vitest-guard compare --sample all` once. jsdom/happy-dom projects usually gain most in vm;

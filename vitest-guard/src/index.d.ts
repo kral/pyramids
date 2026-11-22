@@ -21,7 +21,6 @@ export interface VitestGuardOptions {
   onDirty?: 'warn' | 'error' | 'silent';
   /** duplicate React check: true = throw (default), 'warn', false */
   react?: boolean | 'warn';
-  /** realm shims (default true) */
   /** extra packages (besides the built-in list: react-dom, @testing-library/react, @tanstack/react-query, ...) whose own `react` copy the duplicate-React check compares with the root's */
   reactPackages?: string[];
   /** realm shims in vm mode (default true) */
@@ -52,7 +51,7 @@ export interface VitestGuardOptions {
   sharedPool?: 'threads' | 'forks';
   /** emit test.projects even without quarantine (default false: projects cost ~4 % CPU) */
   alwaysProjects?: boolean;
-  /** 'file' (default): vitest-guard adds its setup file first; 'import': your first setup file starts with `import 'vitest-guard/setup'` (one module less per test file) */
+  /** 'file' (default): vitest-guard adds its setup file first; 'import': your first setup file starts with `import '@jirikral/vitest-guard/setup'` (one module less per test file) */
   setup?: 'file' | 'import';
 }
 export declare function defineVitestGuardConfig(config: ViteUserConfig, options?: VitestGuardOptions): ViteUserConfig;

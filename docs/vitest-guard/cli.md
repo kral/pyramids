@@ -10,12 +10,12 @@ node node_modules/@jirikral/vitest-guard/bin/vitest-guard.mjs <command> [options
 Everything below is also printed by `vitest-guard --help` and `vitest-guard <command> --help` (also `vitest-guard help <command>`).
 
 Commands `check verify compare calibrate plan run hunt` refuse a config that is not wrapped with
-`defineVitestGuardConfig` (exit 2, nothing run or written). `scan` and `report` do not need a wrapped config. The
+`defineVitestGuardConfig` (exit 2, nothing run or written). `scan` and `report` do not need a wrapped config (they still need Vitest installed in `--root`). The
 CLI runs your project's own Vitest (it must be installed in `--root`).
 
 ## Exit codes
 
-From `contracts/DECISIONS.md` D3:
+Exit codes are stable across commands:
 
 | code | meaning | returned by vitest-guard |
 |---|---|---|
@@ -31,9 +31,29 @@ errors print one message plus "see --help" on stderr.
 
 ## Output
 
-`check`, `verify` and `compare` end with a summary block: a verdict (`OK`, `QUARANTINE`, `SAFE`, `FALSE GREEN`, `FAIL`, `MEASURED`), the key numbers, the exit code and the suggested next step. `compare` prints the mode comparison as a table.
+`check`, `verify` and `compare` end with a summary block: a verdict (`OK`, `QUARANTINE`, `SAFE`, `FALSE GREEN`, `FAIL`, `MEASURED`), the key numbers, the exit code (`compare` always `0`) and the suggested next step. `compare` prints the mode comparison as a table; `⚠N` in a cell means N tests whose result differs from forks.
 
 Colour is used only on an interactive terminal. `NO_COLOR=1` turns it off, `FORCE_COLOR=1` turns it on (for example in a CI log viewer that renders ANSI). In CI, pipes and files the output is plain text, and the `[vitest-guard] …` lines above the summary stay unchanged, so existing log greps keep working.
+
+### Animated swan (`compare`, calibration)
+
+While `compare` measures (also `check --compare` and the automatic calibration of mode `auto`), a small animated swan is
+drawn on **stderr**, after 0.4 s, so quick runs never flash it. It is only drawn on an interactive terminal: never in CI
+(`CI`, `GITHUB_ACTIONS` or `TF_BUILD` set, any non-empty value), when stderr is redirected to a file or pipe, or with
+`TERM=dumb`. Because it uses stderr only, `compare | tee log` in a terminal still shows it (stdout stays clean). It adapts to
+the terminal: on narrow terminals the water shrinks and the label is cut with `…`, below about 50 columns (or a terminal
+shorter than 10 rows) a single status line replaces it. Lines printed meanwhile appear above it. Ctrl-C, SIGTERM and SIGHUP
+restore the cursor.
+
+| variable | effect |
+|---|---|
+| `VTO_NO_ANIMATION=1` | no swan at all (exactly the value `1`) |
+| `VTO_ASCII=1` | plain line art instead of block characters (also the default on the old Windows console host) |
+| `NO_COLOR=1` / `FORCE_COLOR=1` | colour off / on, as for the summary |
+
+PowerShell: `$env:VTO_NO_ANIMATION='1'; npm run guard -- compare`; cmd: `set VTO_NO_ANIMATION=1 && npm run guard -- compare`.
+Only `compare` animates; `check` and `verify` print the summary only. The same swan is used by `vto run` and
+`vto savings`.
 
 ## Global options
 
@@ -95,7 +115,15 @@ marks the record incomplete (the shared-mode warning of `vitest run` then stays)
 fast, fails isolated) -> exit 5; false red (fails fast, passes isolated) or new quarantine -> exit 4 (note: this also
 applies when the false red appeared only in the `gate` order, which is not quarantined: run `check`); otherwise 0.
 Without `--no-quarantine`, false-green files and files failing in a non-gate order are quarantined. The record goes to
-`.vitest-guard/run/verify-<mode>.json`.
+`.vitest-guard/run/verify-<mode>.json`. Defaults: `--sample all`, `--seed 1`.
+
+Shared mode and `conflicts.json`: conflict edges are applied **only by the planner**: `plan`, `run`, `check --mode shared`
+(unless `--no-plan`) and the `planned` order of `verify`. The `gate` order is plain `vitest run` and ignores them, so a
+recorded pair can still fail there: `verify --mode shared` then reports a false red in order `gate` and exits 4 even after
+`check` converged (exit 0). A pair that fails only in the single-worker orders (`forward`, `reversed`, `shuffle`) is
+reported as "known conflicts" instead. To converge, gate shared mode with `vitest-guard run` (planner) and verify it with
+`--orders planned,forward,reversed`; keep `vm` (quarantine applies to plain `vitest run`) for a PR gate that is plain
+`vitest run`.
 
 ## compare / calibrate
 
@@ -107,6 +135,11 @@ seconds where `/proc` is unavailable, i.e. not Linux), result mismatches against
 mode without mismatches, or forks when it saves less than 10 %. Writes `compare.json` and (unless `--no-write`)
 `modes.json`. A random sample can miss the few heavy files that decide the result: use `--sample all` for decisions.
 
+`modes.json` is only read by mode `auto`; with `mode: 'vm'` it is written but unused. **Filters:** `check <filter> --compare`
+(and the automatic calibration of `auto`) compares only the filtered files / the small sample and **overwrites `modes.json`**
+from them, replacing an earlier `compare --sample all` result. For decisions run `compare --sample all` and, if you do not want
+the file changed, pass `--no-write` to `compare` (`check --compare` has no such switch).
+
 ## plan / run
 
 `vitest-guard plan [--lanes N] [--vto-raw dir]`: builds the conflict graph and lanes per project, writes
@@ -116,7 +149,8 @@ module graphs and durations.
 `vitest-guard run [--no-heal] [--no-replan] [--lanes N] ...`: always shared mode. Executes the plan (one Vitest process
 per lane plus one for the isolated bucket). By default self-healing, identical to `check --mode shared` (so all
 `check` options apply). `--no-heal` only runs and reports (exit 1 on failures); `--no-replan` with `--no-heal`
-reuses the stored `plan.json`.
+reuses the stored `plan.json`. `run` is the way to apply `conflicts.json`: plain `vitest run` in shared mode does not
+separate conflicting files (see `verify` above).
 
 ## hunt
 

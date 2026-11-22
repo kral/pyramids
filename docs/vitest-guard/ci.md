@@ -7,9 +7,13 @@ Principles:
 - PRs run the fast mode. A nightly job runs the isolated reference suite and `vitest-guard verify`.
 - Quarantine files are committed and reviewed (CODEOWNERS recommended). A CI job never commits them: it fails and
   tells the developer to run `check` locally.
-- `@jirikral/vitest-guard` is not on npm yet. The jobs below check out the vto repository at a pinned commit and install
-  the tarball. Replace `<OWNER>/<VTO_REPO>` and `<VTO_SHA>`; pin actions by SHA in real use. The examples were
-  written from the CLI's documented behaviour and not executed on a hosted runner (unverified there).
+- `@jirikral/vitest-guard` is on npm under the dist-tag `next`. Install it once as a pinned dev dependency
+  (`npm i -D -E @jirikral/vitest-guard@next`, commit the lockfile); the jobs then get it from `npm ci` and need no extra
+  install step. The jobs below instead install from a tarball packed from a pinned checkout of the vto repository: use
+  that route only for changes that are not released yet. Replace `<OWNER>/<VTO_REPO>` and `<VTO_SHA>`; pin actions by SHA
+  in real use. The tarball is named `jirikral-vitest-guard-<version>.tgz`. The examples were written from the CLI's
+  documented behaviour and not executed on a hosted runner (unverified there).
+- Never run `npx vitest-guard` in a job: the unscoped npm name is not ours. Call the CLI by path, as below.
 
 Exit codes to gate on (`vitest-guard`): 0 ok, 1 failures, 2 usage/config, 4 quarantine changed, 5 false green. Treat any
 other non-zero as failure.
@@ -38,7 +42,7 @@ jobs:
         with: { repository: <OWNER>/<VTO_REPO>, ref: '${{ env.VTO_SHA }}', path: .vto-tool, persist-credentials: false }
       - run: |
           npm pack ./.vto-tool/vitest-guard --pack-destination "$RUNNER_TEMP"
-          npm i --no-save "$RUNNER_TEMP"/kral-vitest-guard-*.tgz
+          npm i --no-save "$RUNNER_TEMP"/jirikral-vitest-guard-*.tgz
       - run: npx vitest run               # exit code = the gate; wrapped config, VITEST_GUARD_MODE unset
       # optional: detect a newly vm-incompatible test (exit 4 = would change the quarantine)
       # - run: node node_modules/@jirikral/vitest-guard/bin/vitest-guard.mjs check
@@ -56,7 +60,7 @@ jobs:
         with: { repository: <OWNER>/<VTO_REPO>, ref: '${{ env.VTO_SHA }}', path: .vto-tool, persist-credentials: false }
       - run: |
           npm pack ./.vto-tool/vitest-guard --pack-destination "$RUNNER_TEMP"
-          npm i --no-save "$RUNNER_TEMP"/kral-vitest-guard-*.tgz
+          npm i --no-save "$RUNNER_TEMP"/jirikral-vitest-guard-*.tgz
       - run: npx vitest run
         env: { VITEST_GUARD_MODE: isolated }  # reference: Vitest default isolation
       - run: node node_modules/@jirikral/vitest-guard/bin/vitest-guard.mjs verify --sample all
@@ -67,7 +71,8 @@ jobs:
 
 Note: a job whose step exits non-zero fails; to turn exit 4 of the nightly into a PR instead of a red build, add
 `continue-on-error: true` to that step and upload `.vitest-guard/*.json` as an artifact. Windows and macOS runners work
-the same way (use `shell: bash` for the `$RUNNER_TEMP` lines, or PowerShell equivalents).
+the same way (use `shell: bash` for the `$RUNNER_TEMP` lines, or PowerShell equivalents). With the package installed from npm
+(`npm ci`), delete the checkout of `.vto-tool` and the `npm pack` / `npm i --no-save` step.
 
 ## Azure Pipelines
 
@@ -95,7 +100,7 @@ steps:
     workingDirectory: $(Build.SourcesDirectory)/app
   - script: |
       npm pack ../vto/vitest-guard --pack-destination "$(Agent.TempDirectory)"
-      npm i --no-save "$(Agent.TempDirectory)"/kral-vitest-guard-*.tgz
+      npm i --no-save "$(Agent.TempDirectory)"/jirikral-vitest-guard-*.tgz
     workingDirectory: $(Build.SourcesDirectory)/app
     displayName: install vitest-guard from the pinned vto checkout
   # pull request: fast mode
@@ -124,7 +129,7 @@ folder names to your repository names.
 |---|---|
 | `vitest run` (fast, wrapped config) | every PR |
 | `vitest-guard check` exit 0 | optional PR job to see that nobody added a mode-incompatible test (exit 4 = commit the new quarantine locally) |
-| `VITEST_GUARD_MODE=isolated vitest run` | nightly and before release; always for security-critical tests |
+| `VITEST_GUARD_MODE=isolated vitest run` (PowerShell: `$env:VITEST_GUARD_MODE='isolated'; npx vitest run`) | nightly and before release; always for security-critical tests |
 | `vitest-guard verify --sample all` | nightly; required before gating on `shared` (the config warns while no clean record exists for the commit) |
 | `vitest-guard check --prune` | weekly; releases files that pass fast again |
 
