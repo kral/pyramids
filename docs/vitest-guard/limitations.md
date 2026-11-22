@@ -29,7 +29,7 @@
 `check` re-runs failing files only. Decide with `--sample all`, confirm `shared` with `verify --mode shared --sample
 all`. A `verify --sample N` record is marked incomplete, so the config warning stays.
 
-## Residual risks (REVIEW-2-correctness M6, M7)
+## Residual risks (review items M6, M7)
 
 **M6, order-dependent false greens in shared mode** (reviewed: green in `vitest run` while 3 tests failed in forks;
 `verify` and `check` did not see it because the fast side ran only in the planner's order). Fixes in the code:
@@ -56,8 +56,8 @@ non-reproducible failure stays FLAKY and blocks the gate until fixed or re-run.
 - `require.cache` deletion, `Module._load` / `Module.prototype.require` hooks, `process.chdir`: quarantine only.
 - vm: `process` listeners, patched builtins and singletons stored on `process` are reported, not restored.
 - shared: state inside node_modules closures that is not visible in exports and has no probe (probes exist for
-  i18next and TanStack Query core); `resetModules` resets project modules only; assignments to globals outside the
-  ~40 watched ones are only found by `scan`.
+  i18next and TanStack Query core); `resetModules` resets project modules only; top-level assignments to globals outside the
+  ~40 watched ones are only found by `scan` (assignments inside a test or hook are not).
 - shared with `resetModules: false`: mock edges come from the static import graph only (no dynamic imports/aliases).
 - The node_modules export-state detector cannot tell scratch state from leaks (stylis is ignored by default).
 - Duplicate React detection finds physical copies only.

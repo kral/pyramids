@@ -1,6 +1,14 @@
 # vitest-guard
 
-> **Upozornění:** `@jirikral/vitest-guard` zatím není publikovaný na npm. Nespouštějte `npx vitest-guard`: název bez scope nám nepatří a kdokoli, kdo si ho zaregistruje, by spustil svůj kód na vašem stroji. Použijte lokální kopii (`node <cesta-k-vto>/vitest-guard/bin/vitest-guard.mjs`) nebo npm skript.
+> **Instalace (pre-release, dist-tag `next`):** `npm i -D @jirikral/vitest-guard@next` (pnpm: `pnpm add -D @jirikral/vitest-guard@next`,
+> yarn: `yarn add -D @jirikral/vitest-guard@next`). CLI spouštějte přes instalaci ve svém projektu: přidejte do `package.json`
+> skript `"guard": "vitest-guard"` a volejte `npm run guard -- check`, nebo
+> `node node_modules/@jirikral/vitest-guard/bin/vitest-guard.mjs check`.
+>
+> **Nikdy nespouštějte `npx vitest-guard`:** název bez scope `vitest-guard` nám nepatří a kdokoli, komu patří, by spustil svůj kód na vašem stroji.
+>
+> Nevydané změny: `npm pack` v adresáři `vitest-guard/` v checkoutu repozitáře, pak
+> `npm i -D ./jirikral-vitest-guard-<verze>.tgz` (skutečná kopie, bez symlinku).
 
 
 *English version: [README.md](README.md).*
@@ -55,7 +63,7 @@ export default defineVitestGuardConfig(
   a varuje, když je inline jen jeden z `react` / `react-dom`,
 - varuje u `test.poolOptions` (ve Vitestu 4+ odstraněno a **tiše ignorováno**, jen deprecation hláška).
 
-Přepínání bez úpravy konfigurace: `VITEST_GUARD_MODE=vm|shared|isolated|off`, volby přes `VITEST_GUARD_OPTS='{"realm":false}'`.
+Přepínání bez úpravy konfigurace (syntaxe bash; PowerShell: `$env:VITEST_GUARD_MODE='vm'`, cmd: `set VITEST_GUARD_MODE=vm`): `VITEST_GUARD_MODE=vm|shared|isolated|off`, volby přes `VITEST_GUARD_OPTS='{"realm":false}'`.
 
 ### `mode: 'auto'`: DOM skupina a node skupina, každá ve svém nejlepším režimu
 
@@ -150,15 +158,15 @@ Ověřeno na reálné sadě (projekty `dom` + `node`, oba vmThreads).
 ## CLI
 
 ```
-node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs check  [--mode vm|shared] [--prune] [filtry…]
-node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs verify [--mode vm|shared] [--sample N|all] [--seed s]
-node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs plan   [--lanes N] [--vto-raw <dir>]
-node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs run    [--lanes N] [--no-heal]          # shared režim podle plánu
-node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs hunt   <soubor> [--before a,b,c]
-node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs scan   [--quarantine]
-node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs report
-node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs compare   [--sample N|all] [--project a,b] [--no-write]
-node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs calibrate [--sample N]
+npm run guard -- check  [--mode vm|shared] [--prune] [filtry…]
+npm run guard -- verify [--mode vm|shared] [--sample N|all] [--seed s]
+npm run guard -- plan   [--lanes N] [--vto-raw <dir>]
+npm run guard -- run    [--lanes N] [--no-heal]          # shared režim podle plánu
+npm run guard -- hunt   <soubor> [--before a,b,c]
+npm run guard -- scan   [--quarantine]
+npm run guard -- report
+npm run guard -- compare   [--sample N|all] [--project a,b] [--no-write]
+npm run guard -- calibrate [--sample N]
 ```
 
 - **check**: spustí sadu v rychlém režimu. Padající soubory pustí znovu izolovaně ve `forks` a porovná je **po testech**.
@@ -404,16 +412,18 @@ Paměť (`mem/`, 120 souborů, 1 worker, vmThreads): výchozí limit nikdy nerec
 
 ## Doporučený rollout
 
-0. `node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs compare --sample all`: výběr režimu per projekt (vm pro DOM projekty, shared nebo forks pro
+(`npm run guard --` je skript `guard` z poznámky o instalaci na začátku.)
+
+0. `npm run guard -- compare --sample all`: výběr režimu per projekt (vm pro DOM projekty, shared nebo forks pro
    čistě node).
-1. **Ověření**: `VITEST_GUARD_MODE=vm node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs verify --sample all` lokálně, projít false green / false red.
-2. **check → karanténa**: `node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs check --mode vm` a commit `.vitest-guard/incompatible.json`.
+1. **Ověření**: `npm run guard -- verify --mode vm --sample all` lokálně, projít false green / false red.
+2. **check → karanténa**: `npm run guard -- check --mode vm` a commit `.vitest-guard/incompatible.json`.
    Opakovat, dokud exit není 0/1. Karanténní soubory poběží ve forks automaticky.
 3. **PR pipeline**: běžný `vitest run` s `defineVitestGuardConfig` (vm + karanténa ve forks). Exit 4 z `check`
    na PR = někdo přidal vm-nekompatibilní test, commitnout aktualizaci karantény.
-4. **Nightly forks**: `VITEST_GUARD_MODE=isolated vitest run` (celá sada izolovaně) + `node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs verify --sample 500`
-   (exit 5 = false green) + `node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs check --prune` (uvolní opravené soubory).
-5. **Shared až potom**, volitelně pro lokální/pre-push běhy: `node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs scan`, pak `node <path-to-vto>/vitest-guard/bin/vitest-guard.mjs run`
+4. **Nightly forks**: `VITEST_GUARD_MODE=isolated vitest run` (PowerShell: `$env:VITEST_GUARD_MODE='isolated'; npx vitest run`; cmd: `set VITEST_GUARD_MODE=isolated && npx vitest run`) (celá sada izolovaně) + `npm run guard -- verify --sample 500`
+   (exit 5 = false green) + `npm run guard -- check --prune` (uvolní opravené soubory).
+5. **Shared až potom**, volitelně pro lokální/pre-push běhy: `npm run guard -- scan`, pak `npm run guard -- run`
    (plán + samooprava). Commitovat `conflicts.json`. Nightly
    `verify --mode shared`.
 

@@ -16,6 +16,8 @@ const SWAN = [
 ];
 const SW = Math.max(...SWAN.map((r) => r.length));
 const WIDTH = 44;
+const MIN_WIDTH = 26;      // narrowest water the swan still fits on
+const MIN_COLUMNS = 50;    // below this (or fewer than HEIGHT + 2 rows) only a one-line status is shown
 const HEIGHT = SWAN.length + 2; // one row of bobbing room + two rows of water (the logo's arc can sit on the crests)
 
 /** water height 0..1 per column at time t: a slow swell, groups of big and small waves, fine ripples */
@@ -65,7 +67,33 @@ export function blocksSupported(env = process.env, platform = process.platform) 
   return Boolean(env.WT_SESSION || env.TERM_PROGRAM || env.ConEmuANSI === 'ON' || /xterm|256color/.test(env.TERM || ''));
 }
 
-export function swanFrame(i, label = '', { color = false, blocks = false } = {}) {
+const ANSI = /^\x1b\[[0-9;?]*[A-Za-z]/;
+/** visible width of a string without escape sequences (code points) */
+export function visibleLength(s) { let n = 0; for (let k = 0; k < s.length;) { const m = ANSI.exec(s.slice(k)); if (m) k += m[0].length; else { k += s.codePointAt(k) > 0xffff ? 2 : 1; n++; } } return n; }
+/** cut a string to `max` visible columns, ending with an ellipsis when it was cut (escape sequences are kept, a reset is appended) */
+export function truncateVisible(s, max) {
+  if (max <= 0) return '';
+  if (visibleLength(s) <= max) return s;
+  let out = '', n = 0, hasEsc = false;
+  for (let k = 0; k < s.length;) {
+    const m = ANSI.exec(s.slice(k));
+    if (m) { out += m[0]; k += m[0].length; hasEsc = true; continue; }
+    if (n >= max - 1) break;
+    const cp = String.fromCodePoint(s.codePointAt(k)); out += cp; k += cp.length; n++;
+  }
+  return out + '…' + (hasEsc ? '\x1b[0m' : '');
+}
+
+/** how the swan is laid out on a terminal of this size: { kind: 'frame', width } or { kind: 'line' } */
+export function swanLayout(columns, rows) {
+  const cols = columns > 0 ? columns : 80;
+  if (cols < MIN_COLUMNS || (rows > 0 && rows < HEIGHT + 2)) return { kind: 'line', columns: cols };
+  // keep at least ~28 columns for the label; shrink the water first
+  return { kind: 'frame', width: Math.max(MIN_WIDTH, Math.min(WIDTH, cols - 1 - 2 - 28)), columns: cols };
+}
+
+export function swanFrame(i, label = '', { color = false, blocks = false, width = WIDTH, columns = 0 } = {}) {
+  const WIDTH_ = Math.max(MIN_WIDTH, Math.min(WIDTH, width));
   const paint = {
     swan: (t) => (color ? `\x1b[38;5;69m${t}\x1b[39m` : t),
     water: (t) => (color ? `\x1b[38;5;33m${t}\x1b[39m` : t),
@@ -73,17 +101,17 @@ export function swanFrame(i, label = '', { color = false, blocks = false } = {})
     crest: (t) => (color ? `\x1b[38;5;117m${t}\x1b[39m` : t),
   };
   const t = i * 1.0;
-  const h = surface(t);
+  const h = surface(t, WIDTH_);
   const [top, bot] = blocks ? blockRows(h) : waterRows(h).map((row, r) => row.map(([c, k]) => [c, k === 2 ? 'crest' : k ? 'water' : 'none']));
   // glides from right to left and comes round again
-  const span = WIDTH - SW;
+  const span = WIDTH_ - SW;
   const x = span - (Math.floor(i / 3) % (span + 1));
   // bobs with the water under its body: up on a crest, down in a trough
   const under = h.slice(x + 3, x + 14);
   const up = under.reduce((a, b) => a + b, 0) / under.length > 0.52;
   const y0 = up ? 0 : 1;
-  const grid = Array.from({ length: HEIGHT }, () => Array.from({ length: WIDTH }, () => [' ', 'none']));
-  for (let c = 0; c < WIDTH; c++) {
+  const grid = Array.from({ length: HEIGHT }, () => Array.from({ length: WIDTH_ }, () => [' ', 'none']));
+  for (let c = 0; c < WIDTH_; c++) {
     grid[HEIGHT - 2][c] = top[c];
     grid[HEIGHT - 1][c] = bot[c];
   }
@@ -95,7 +123,7 @@ export function swanFrame(i, label = '', { color = false, blocks = false } = {})
     flush();
     return out;
   });
-  lines[HEIGHT - 1] += '  ' + label;
+  lines[HEIGHT - 1] += '  ' + (columns > 0 ? truncateVisible(label, Math.max(0, columns - 1 - WIDTH_ - 2)) : label);
   return lines;
 }
 
@@ -104,25 +132,44 @@ export function animationEnabled(stream = process.stderr, env = process.env) {
   return Boolean(stream && stream.isTTY) && env.TERM !== 'dumb';
 }
 
-// startSwan('measuring') → { update(label), stop() }; a no-op when the animation is off
+// startSwan('measuring') → { update(label), log(line), stop() }; a no-op when the animation is off.
+// Fits the terminal: the water shrinks and the label is cut with an ellipsis on narrow terminals, and below
+// ~50 columns (or a terminal shorter than the frame) a single status line replaces the swan.
 export function startSwan(label = '', { stream = process.stderr, env = process.env, delayMs = 400, intervalMs = 120 } = {}) {
   if (!animationEnabled(stream, env)) return { update() {}, stop() {}, log(line) { stream.write(line + '\n'); } };
   const color = colorEnabled(stream, env);
   const blocks = blocksSupported(env);
   const t0 = Date.now();
-  let text = label, i = 0, drawn = false, timer = null, stopped = false;
+  let text = label, i = 0, drawn = null, timer = null, stopped = false; // drawn: null | 'frame' | 'line'
   const secs = () => `${((Date.now() - t0) / 1000).toFixed(1)} s`;
   const draw = () => {
-    const lines = swanFrame(i++, `${text} ${color ? `\x1b[2m${secs()}\x1b[22m` : secs()}`, { color, blocks });
-    stream.write((drawn ? `\x1b[${HEIGHT}F` : '\x1b[?25l') + lines.map((l) => `\x1b[2K${l}`).join('\n') + '\n');
-    drawn = true;
+    const lay = swanLayout(stream.columns, stream.rows);
+    const sec = secs();
+    const room = lay.kind === 'line' ? lay.columns - 1 : lay.columns - 1 - lay.width - 2;
+    // cut the text, never the elapsed time
+    const shown = truncateVisible(text, Math.max(0, room - sec.length - 1));
+    const lab = `${shown} ${color ? `\x1b[2m${sec}\x1b[22m` : sec}`;
+    if (drawn && drawn !== lay.kind) clear();
+    if (lay.kind === 'line') {
+      stream.write((drawn ? '' : '\x1b[?25l') + '\r\x1b[2K' + truncateVisible(lab, lay.columns - 1));
+    } else {
+      const lines = swanFrame(i, lab, { color, blocks, width: lay.width, columns: lay.columns });
+      stream.write((drawn ? `\x1b[${HEIGHT}F` : '\x1b[?25l') + lines.map((l) => `\x1b[2K${l}`).join('\n') + '\n');
+    }
+    i++;
+    drawn = lay.kind;
   };
-  const clear = () => { if (drawn) stream.write(`\x1b[${HEIGHT}F\x1b[J`); drawn = false; };
+  const clear = () => {
+    if (drawn === 'frame') stream.write(`\x1b[${HEIGHT}F\x1b[J`);
+    else if (drawn === 'line') stream.write('\r\x1b[2K');
+    drawn = null;
+  };
   const restore = () => { if (!stopped) { clear(); stream.write('\x1b[?25h'); } };
   const onExit = () => restore();
-  const onSig = () => { restore(); process.exit(130); };
+  const sigs = { SIGINT: 2, SIGTERM: 15, SIGHUP: 1 };
+  const handlers = Object.entries(sigs).map(([sig, num]) => [sig, () => { restore(); process.exit(128 + num); }]);
   process.once('exit', onExit);
-  process.once('SIGINT', onSig);
+  for (const [sig, h] of handlers) process.once(sig, h);
   const start = setTimeout(() => { draw(); timer = setInterval(draw, intervalMs); timer.unref?.(); }, delayMs);
   start.unref?.();
   return {
@@ -138,7 +185,8 @@ export function startSwan(label = '', { stream = process.stderr, env = process.e
       clear();
       stream.write('\x1b[?25h');
       stopped = true;
-      process.off('exit', onExit); process.off('SIGINT', onSig);
+      process.off('exit', onExit);
+      for (const [sig, h] of handlers) process.off(sig, h);
     },
   };
 }

@@ -56,7 +56,7 @@ says how to resolve it first). The result is a config object; your own keys are 
 | `setup` | `'file' \| 'import'` | `'file'` | `'import'`: your first setup file must start with `import '@jirikral/vitest-guard/setup'` (one module less per file) |
 
 Exported helpers: `autoMemoryLimit(maxWorkers)` (min of 50 % RAM / workers and 60 % of the V8 heap limit, at least
-512 MB), `readQuarantine(root, mode, file?)`, `setupFileFor(root, file?)`, `SETUP_FILE`, `SETUP_TAIL_FILE`,
+512 MB), `readQuarantine(root, mode, file?)`, `readQuarantineFile(root, file?)`, `readJson(file, fallback)`, `setupFileFor(root, file?)`, `SETUP_FILE`, `SETUP_TAIL_FILE`,
 `DEFAULT_INCLUDE`, `DEFAULT_EXCLUDE`, `VitestGuardSequencer`. Subpath exports: `@jirikral/vitest-guard/setup`,
 `/sequencer`, `/realm`, `/envstore`.
 

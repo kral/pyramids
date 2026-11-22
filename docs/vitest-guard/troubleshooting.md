@@ -3,6 +3,9 @@
 First step for any strange result: run the same files with `VITEST_GUARD_MODE=isolated` (reference) and, to rule out
 vitest-guard completely, `VITEST_GUARD_MODE=off` (your untouched config).
 
+The `VAR=value command` form is bash/zsh. PowerShell: `$env:VITEST_GUARD_MODE='isolated'; npx vitest run` (the variable stays
+set for that session until `Remove-Item Env:VITEST_GUARD_MODE`); cmd: `set VITEST_GUARD_MODE=isolated && npx vitest run`.
+
 | symptom | cause | what to do |
 |---|---|---|
 | `vitest-guard check` exits 2: "<config> is not wrapped with defineVitestGuardConfig" | the config the CLI loads does not go through `defineVitestGuardConfig`, so `VITEST_GUARD_MODE` would have no effect | wrap it, or pass `--config vitest.guard.config.ts`. Nothing is run or written in this case |
@@ -22,7 +25,7 @@ vitest-guard completely, `VITEST_GUARD_MODE=off` (your untouched config).
 | quarantine entries ignored with a warning | entry is not a literal, repo-relative path of an existing file Vitest lists | see [security.md](security.md); fix or delete the entry |
 | files from `.vitest-guard/` showing up in `git status` | older versions wrote volatile files there | the CLI moves them into `.vitest-guard/run/`; commit the removal |
 | symlinked install: tests under jsdom cannot load vitest-guard's setup, or two copies of vitest | the package lives outside the project root | install from a tarball. vitest-guard copies its setup files to `node_modules/.vitest-guard/` and always resolves Vitest from the project root, but pnpm-style or workspace layouts were not exhaustively tested (unverified) |
-| a PowerShell/cmd path problem running the CLI | | use `node node_modules\@kral\vitest-guard\bin\vitest-guard.mjs` or an npm script |
+| a PowerShell/cmd path problem running the CLI | | use `node node_modules\@jirikral\vitest-guard\bin\vitest-guard.mjs` or an npm script |
 | `check` reports "UNEXPLAINED failure" | file failed in the fast run, passes in forks, but its group is isolated already or it is quarantined | read the failure in the fast run output (`--verbose`); usually the quarantine is stale: `check --prune` |
 
 ## Flaky or fast-mode-only?
@@ -48,7 +51,7 @@ committed quarantine. The CLI creates and maintains that quarantine and checks f
 `pollution.json` only with `--commit-state`).
 
 **How do I turn it off temporarily?** `VITEST_GUARD_MODE=off` (not guarded at all) or `isolated` (Vitest default
-isolation with the guard layer's logging).
+isolation with the guard layer's logging). PowerShell: `$env:VITEST_GUARD_MODE='off'; npx vitest run`; cmd: `set VITEST_GUARD_MODE=off && npx vitest run`.
 
 **Does it work with Vitest `projects`?** Yes, for inline project objects ([configuration.md](configuration.md)).
 

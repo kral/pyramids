@@ -10,7 +10,7 @@ import { createRequire } from 'node:module';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
-import { slash } from './platform.mjs';
+import { slash, specId } from './platform.mjs';
 import { summarizeGuard } from './guard-label.mjs';
 import { compactError } from './format.mjs';
 import { Console } from 'node:console';
@@ -262,7 +262,7 @@ async function run(msg) {
     } else {
       specs = [];
       for (const s of msg.specs) {
-        const file = slash(path.resolve(root, s.file)); // Vitest module ids use '/' on Windows too (D:/a/…); a '\\' id misses its name filter
+        const file = specId(path.resolve(root, s.file)); // Windows: '/' ids (D:/a/…), a '\\' id misses its name filter; elsewhere the exact on-disk name (no NFC)
         let projects = findProjects(file);
         if (!projects.length) projects = [vitest.getRootProject()];
         for (const p of projects) specs.push(p.createSpecification(file, s.names?.length ? { testNames: s.names } : undefined));

@@ -18,6 +18,17 @@ export const sha1 = (s) => createHash('sha1').update(s).digest('hex');
 export function slash(p) { return toPosix(p); } // + NFC (contracts/DECISIONS.md D2.3)
 
 /**
+ * The module id Vitest knows a file by (for createSpecification): the real on-disk spelling. Only on Windows are
+ * `\\` separators turned into `/` (Vitest ids use `D:/a/…` there) and the drive letter upper-cased; elsewhere the
+ * name is kept byte for byte (NFD names from a macOS checkout and names containing a literal `\\` must not change).
+ */
+export function specId(file, platform = process.platform) {
+  if (platform !== 'win32') return file;
+  const s = file.replace(/\\/g, '/');
+  return /^[a-z]:/.test(s) ? s[0].toUpperCase() + s.slice(1) : s;
+}
+
+/**
  * Is the filesystem holding `dir` case-insensitive? Detected, not assumed by OS (APFS/HFS+ default
  * insensitive, case-sensitive APFS exists; NTFS insensitive but per-directory case sensitivity
  * exists; Linux ext4 sensitive, but ciopfs/vfat/smb mounts are not).
