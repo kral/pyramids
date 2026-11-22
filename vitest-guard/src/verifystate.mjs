@@ -56,13 +56,16 @@ export const verifyFile = (root, mode) => path.join(root, '.vitest-guard', 'run'
 
 /**
  * @returns {{ ok: boolean, reason?: string, record?: object }} ok = a complete, clean verify exists for this
- * commit and this config/quarantine state.
+ * commit and this config/quarantine state (with `configMode`: an auto verify counts for an auto config only).
  */
-export function verifyStatus(root, mode, { configFile = findConfigFile(root), quarantineFile } = {}) {
+export function verifyStatus(root, mode, { configFile = findConfigFile(root), quarantineFile, configMode } = {}) {
   let rec = null;
   try { rec = JSON.parse(fs.readFileSync(verifyFile(root, mode), 'utf8')); } catch {}
   if (!rec || typeof rec !== 'object') return { ok: false, reason: 'no verify run has been recorded' };
   if (Array.isArray(rec.falseGreen) && rec.falseGreen.length) return { ok: false, record: rec, reason: `the last verify (${rec.at}) found ${rec.falseGreen.length} false green(s)` };
+  // S2: an 'auto' verify also writes verify-shared.json (its shared groups); for a config that left mode 'auto' it
+  // compared another pool layout and proves nothing
+  if (configMode && rec.mode === 'auto' && configMode !== 'auto') return { ok: false, record: rec, reason: `the last verify (${rec.at}) ran in mode ${String(rec.mode)}, the config runs in mode ${configMode}` };
   if (rec.complete === false) return { ok: false, record: rec, reason: `the last verify covered only a sample (${rec.sample} of ${rec.of} files)` };
   if (!rec.configKey || rec.configKey !== configKey(root, configFile, quarantineFile)) return { ok: false, record: rec, reason: `the config or the quarantine changed since the last verify (${rec.at})` };
   const head = gitHead(root);

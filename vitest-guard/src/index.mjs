@@ -236,6 +236,8 @@ function configModeOf(g) {
   return m === 'shared' || m === 'auto' || m === 'isolated' ? m : 'vm';
 }
 
+// S2: the mode a plain `vitest run` of this config runs in (VITEST_GUARD_MODE overrides the config)
+const effectiveMode = (g) => { const e = process.env.VITEST_GUARD_MODE; return ['vm', 'shared', 'auto', 'isolated'].includes(e) ? e : configModeOf(g); };
 let warnedVerify = false;
 const usesShared = (cfg) => [cfg?.test, ...(Array.isArray(cfg?.test?.projects) ? cfg.test.projects.map((p) => p?.test) : [])].some((t) => t?.provide?.vitestGuard?.mode === 'shared');
 
@@ -252,7 +254,7 @@ export function defineVitestGuardConfig(userConfig = {}, g = {}) {
     warnedVerify = true;
     try {
       const root = path.resolve(userConfig.root || userConfig.test?.root || process.cwd());
-      const st = verifyStatus(root, 'shared', { configFile: findConfigFile(root, process.argv.slice(2)), quarantineFile: g.quarantineFile });
+      const st = verifyStatus(root, 'shared', { configFile: findConfigFile(root, process.argv.slice(2)), quarantineFile: g.quarantineFile, configMode: effectiveMode(g) });
       if (!st.ok) console.warn(`[vitest-guard] shared mode is not verified against isolated forks: ${st.reason}. A test can pass here only because of state left by an earlier file in the same worker (false green). ` +
         'Run `vitest-guard verify --mode shared` (exit 5 = false green; records the result for this commit) and keep a periodic `VITEST_GUARD_MODE=isolated vitest run`. Silence: verifyWarning: false or VITEST_GUARD_VERIFY_WARNING=0.');
     } catch {}

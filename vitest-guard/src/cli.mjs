@@ -44,7 +44,7 @@ export function ctx(o) {
   // (git-ignored), run logs in .vitest-guard/run/logs/. --commit-state keeps durations/pollution next to the
   // committed files for teams that want stable plans across machines.
   const stateDir = path.join(dir, 'run');
-  return { root, dir, stateDir, runDir: path.join(stateDir, 'logs'), commitState: !!o['commit-state'], config, mode: o.mode || (readAuto(stateDir).auto ? 'auto' : 'vm'), verbose: !!o.verbose, lanes: Number(o.lanes || Math.max(1, os.availableParallelism() - 1)), filters: o._[0] === 'hunt' ? [] : o._.slice(1) };
+  return { root, dir, stateDir, runDir: path.join(stateDir, 'logs'), commitState: !!o['commit-state'], config, mode: o.mode || 'vm', verbose: !!o.verbose, lanes: Number(o.lanes || Math.max(1, os.availableParallelism() - 1)), filters: o._[0] === 'hunt' ? [] : o._.slice(1) };
 }
 const readAuto = (stateDir) => { try { return readStateJson(path.join(stateDir, 'auto.json'), {}) || {}; } catch { return {}; } };
 const COMMITTED = new Set(['incompatible.json', 'conflicts.json']);
@@ -889,7 +889,7 @@ export async function main(argv) {
   if (['check', 'verify'].includes(o._[0])) {
     try { listSpecs(c); } catch {}
     if (!o.mode && ['vm', 'shared', 'auto'].includes(c.configMode)) c.mode = c.configMode;
-    else if (!o.mode && c.mode !== 'auto' && readJson(path.join(c.stateDir, 'auto.json'), {}).auto) c.mode = 'auto'; // older config marker without configMode
+    else if (!o.mode && !c.configMode && readAuto(c.stateDir).auto) c.mode = 'auto'; // S2: auto.json only for an older config marker without configMode
     if (o.mode && c.configMode && c.configMode !== o.mode) say(`config mode: ${c.configMode}, ${o._[0] === 'check' ? 'checking' : 'verifying'}: ${o.mode}`);
   }
   switch (o._[0]) {
