@@ -3,7 +3,8 @@
 // Off in CI, when stderr is not a TTY, with TERM=dumb, or with VTO_NO_ANIMATION=1. Colour follows NO_COLOR/FORCE_COLOR.
 import { colorEnabled } from './ui.mjs';
 
-// the vto logo as ASCII: arched head, S-shaped neck, body rising to the right; it rides on generated waves
+// the vto logo as ASCII: arched head, S-shaped neck, body rising to the right, the arc of water below;
+// the whole logo rides on generated waves
 const SWAN = [
   '   .-.            ',
   '  /   \\           ',
@@ -11,10 +12,11 @@ const SWAN = [
   "     /         _.-'",
   "    (     _.-'    ",
   "     `--'         ",
+  "   `-.________.-'  ",   // the arc of water from the logo: part of the swan, it bobs with it
 ];
 const SW = Math.max(...SWAN.map((r) => r.length));
 const WIDTH = 44;
-const HEIGHT = SWAN.length + 2; // one row of bobbing room + two rows of water (the swan's lowest line can sit on the crests)
+const HEIGHT = SWAN.length + 2; // one row of bobbing room + two rows of water (the logo's arc can sit on the crests)
 
 /** water height 0..1 per column at time t: a slow swell, groups of big and small waves, fine ripples */
 export function surface(t, w = WIDTH) {
@@ -44,11 +46,35 @@ export function waterRows(h) {
   return [top, bot];
 }
 
-export function swanFrame(i, label = '', { color = false } = {}) {
-  const paint = { swan: (t) => (color ? `\x1b[38;5;69m${t}\x1b[39m` : t), water: (t) => (color ? `\x1b[2m\x1b[38;5;69m${t}\x1b[39m\x1b[22m` : t), crest: (t) => (color ? `\x1b[38;5;153m${t}\x1b[39m` : t) };
+const BLOCKS = ' ▁▂▃▄▅▆▇█';
+/** filled water: two rows of block elements, height in eighths of a cell (0..16) */
+export function blockRows(h) {
+  const top = [], bot = [];
+  for (const v of h) {
+    const n = Math.max(1, Math.min(16, Math.round(v * 16)));
+    bot.push([BLOCKS[Math.min(8, n)], 'deep']);
+    top.push(n > 8 ? [BLOCKS[n - 8], n >= 14 ? 'crest' : 'water'] : [' ', 'none']);
+  }
+  return [top, bot];
+}
+
+/** block elements render in every current terminal; the old Windows console host (no Windows Terminal) gets line art */
+export function blocksSupported(env = process.env, platform = process.platform) {
+  if (env.VTO_ASCII === '1') return false;
+  if (platform !== 'win32') return true;
+  return Boolean(env.WT_SESSION || env.TERM_PROGRAM || env.ConEmuANSI === 'ON' || /xterm|256color/.test(env.TERM || ''));
+}
+
+export function swanFrame(i, label = '', { color = false, blocks = false } = {}) {
+  const paint = {
+    swan: (t) => (color ? `\x1b[38;5;69m${t}\x1b[39m` : t),
+    water: (t) => (color ? `\x1b[38;5;33m${t}\x1b[39m` : t),
+    deep: (t) => (color ? `\x1b[38;5;26m${t}\x1b[39m` : t),
+    crest: (t) => (color ? `\x1b[38;5;117m${t}\x1b[39m` : t),
+  };
   const t = i * 1.0;
   const h = surface(t);
-  const [top, bot] = waterRows(h);
+  const [top, bot] = blocks ? blockRows(h) : waterRows(h).map((row, r) => row.map(([c, k]) => [c, k === 2 ? 'crest' : k ? 'water' : 'none']));
   // glides from right to left and comes round again
   const span = WIDTH - SW;
   const x = span - (Math.floor(i / 3) % (span + 1));
@@ -58,8 +84,8 @@ export function swanFrame(i, label = '', { color = false } = {}) {
   const y0 = up ? 0 : 1;
   const grid = Array.from({ length: HEIGHT }, () => Array.from({ length: WIDTH }, () => [' ', 'none']));
   for (let c = 0; c < WIDTH; c++) {
-    grid[HEIGHT - 2][c] = [top[c][0], top[c][1] === 2 ? 'crest' : top[c][1] ? 'water' : 'none'];
-    grid[HEIGHT - 1][c] = [bot[c][0], bot[c][1] ? 'water' : 'none'];
+    grid[HEIGHT - 2][c] = top[c];
+    grid[HEIGHT - 1][c] = bot[c];
   }
   SWAN.forEach((row, r) => { for (let c = 0; c < row.length; c++) if (row[c] !== ' ') grid[y0 + r][x + c] = [row[c], 'swan']; });
   const lines = grid.map((cells) => {
@@ -82,11 +108,12 @@ export function animationEnabled(stream = process.stderr, env = process.env) {
 export function startSwan(label = '', { stream = process.stderr, env = process.env, delayMs = 400, intervalMs = 120 } = {}) {
   if (!animationEnabled(stream, env)) return { update() {}, stop() {}, log(line) { stream.write(line + '\n'); } };
   const color = colorEnabled(stream, env);
+  const blocks = blocksSupported(env);
   const t0 = Date.now();
   let text = label, i = 0, drawn = false, timer = null, stopped = false;
   const secs = () => `${((Date.now() - t0) / 1000).toFixed(1)} s`;
   const draw = () => {
-    const lines = swanFrame(i++, `${text} ${color ? `\x1b[2m${secs()}\x1b[22m` : secs()}`, { color });
+    const lines = swanFrame(i++, `${text} ${color ? `\x1b[2m${secs()}\x1b[22m` : secs()}`, { color, blocks });
     stream.write((drawn ? `\x1b[${HEIGHT}F` : '\x1b[?25l') + lines.map((l) => `\x1b[2K${l}`).join('\n') + '\n');
     drawn = true;
   };

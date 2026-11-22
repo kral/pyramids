@@ -175,5 +175,15 @@ test('swan waves: varied crests, two water rows, the swan bobs with the water un
   for (let t = 0; t < 120; t++) { const [top, bot] = waterRows(surface(t)); for (const [c] of [...top, ...bot]) glyphs.add(c); tops.add(swanFrame(t, '').findIndex((l) => l.includes('.-.'))); }
   for (const c of ['^', '~', '/', '\\', '_', '-']) assert.ok(glyphs.has(c), `water uses ${c}`);
   assert.deepEqual([...tops].sort(), [0, 1], 'the swan rides up and down');
-  assert.equal(swanFrame(0, '').length, 8);
+  assert.equal(swanFrame(0, '').length, 9);
+});
+
+test('swan: filled block water where the terminal supports it, line art on the old Windows console', async () => {
+  const { swanFrame, blocksSupported } = await import('../src/swan.mjs');
+  assert.match(swanFrame(5, '', { blocks: true }).join('\n'), /[▁▂▃▄▅▆▇█]/);
+  assert.doesNotMatch(swanFrame(5, '', { blocks: false }).join('\n'), /[▁▂▃▄▅▆▇█]/);
+  assert.equal(blocksSupported({}, 'linux'), true);
+  assert.equal(blocksSupported({ VTO_ASCII: '1' }, 'linux'), false);
+  assert.equal(blocksSupported({}, 'win32'), false);
+  assert.equal(blocksSupported({ WT_SESSION: 'x' }, 'win32'), true);
 });
