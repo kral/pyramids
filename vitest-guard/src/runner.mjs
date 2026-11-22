@@ -21,7 +21,7 @@ export function runVitest({ root, config, mode, files = [], laneFile, args = [],
   // F8: report in a fresh private 0700 dir (unpredictable name), read back without following symlinks
   const tmp = privateTmp();
   const out = tmp.file(`${tag}.json`);
-  const argv = [vitestBin(root), 'run', ...(config ? ['--config', config] : []), '--reporter=json', `--outputFile=${out}`, ...(verbose ? ['--reporter=default'] : []), '--passWithNoTests', ...args, ...files];
+  const argv = [vitestBin(root), 'run', ...(config ? ['--config', config] : []), '--reporter=json', `--outputFile=${out}`, ...(verbose ? ['--reporter=default'] : []), '--passWithNoTests', '--bail=0', ...args, ...files]; // S6: a user `bail` must not truncate a comparison
   const t0 = Date.now();
   return new Promise((resolve) => {
     const child = spawn(process.execPath, argv, { cwd: root, env: { ...process.env, VITEST_GUARD_DIAG: process.env.VITEST_GUARD_DIAG ?? '1', VITEST_GUARD_CLI: '1', ...env, ...(mode ? { VITEST_GUARD_MODE: mode } : {}), ...(laneFile ? { VITEST_GUARD_LANE_FILE: laneFile } : {}) }, stdio: verbose ? ['ignore', 'inherit', 'inherit'] : ['ignore', 'pipe', 'pipe'] });
@@ -35,7 +35,8 @@ export function runVitest({ root, config, mode, files = [], laneFile, args = [],
         for (const f of j.testResults) {
           const rel = path.relative(root, f.name).split(path.sep).join('/');
           const tests = new Map();
-          for (const t of f.assertionResults) tests.set([...t.ancestorTitles, t.title].join(' > '), t.status);
+          // B7: duplicate full names (test.each without placeholders) get an occurrence suffix instead of overwriting each other
+          for (const t of f.assertionResults) { const name = [...t.ancestorTitles, t.title].join(' > '); let k = name; for (let i = 2; tests.has(k); i++) k = `${name} #${i}`; tests.set(k, t.status); }
           const failedTest = f.assertionResults.find((t) => t.status === 'failed');
           res.files.set(rel, { status: f.status === 'passed' ? 'passed' : f.assertionResults.length && f.assertionResults.every((t) => t.status !== 'failed') && !f.message ? 'passed' : 'failed', tests, message: f.message || failedTest?.failureMessages?.[0] || '' });
         }

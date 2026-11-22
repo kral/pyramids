@@ -8,22 +8,27 @@ import path from 'node:path';
 import { readStateJson } from './statefs.mjs';
 import { stripComments } from './scan.mjs';
 import { foldEnvRecords, DOM_ENVS } from './envstore.mjs';
+import { matchesGlobDot } from './safety.mjs';
 
 export { DOM_ENVS };
-const SKIP_DIRS = new Set(['node_modules', '.git', '.vitest-guard', '.vto', 'dist', 'coverage', '.next', 'build']);
+// B5: Vitest globs with `dot: true` and excludes only what the user's exclude says (default node_modules, .git):
+// a test file under build/, dist/, coverage/ or a dot directory runs there, so it must be in a group here too.
+// Only directories that never hold the user's tests are skipped.
+const SKIP_DIRS = new Set(['node_modules', '.git', '.vitest-guard']);
 
 /** Test files matching include/exclude (root-relative, '/' separators). Synchronous: runs at config time. */
 export function listTestFiles(root, include, exclude, { maxFiles = 50000 } = {}) {
   const out = [];
+  let warnedCap = false;
   const walk = (dir, rel) => {
     let ents = [];
     try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
     for (const e of ents) {
-      if (out.length >= maxFiles) return;
+      if (out.length >= maxFiles) { if (!warnedCap) { warnedCap = true; console.warn(`[vitest-guard] auto: more than ${maxFiles} test files: the rest is not in any group; use your own projects instead of mode 'auto'`); } return; }
       const r = rel ? rel + '/' + e.name : e.name;
-      if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name) && !e.name.startsWith('.')) walk(path.join(dir, e.name), r); continue; }
+      if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) walk(path.join(dir, e.name), r); continue; }
       if (!e.isFile()) continue;
-      if (include.some((g) => path.matchesGlob(r, g)) && !exclude.some((g) => path.matchesGlob(r, g))) out.push(r);
+      if (include.some((g) => matchesGlobDot(r, g)) && !exclude.some((g) => matchesGlobDot(r, g))) out.push(r);
     }
   };
   walk(root, '');

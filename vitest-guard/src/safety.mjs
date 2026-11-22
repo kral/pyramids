@@ -3,7 +3,25 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const GLOB_META = /[*?[\]{}()!+@]/;
+// B1: `[ ] { } ( ) ! + @` are everyday path characters (Next.js `app/[id]`, `(group)`, `src/@core`): accepted and
+// escaped (escapeGlob) wherever a literal path becomes an include/exclude entry. `*` and `?` stay refused.
+const GLOB_META = /[*?]/;
+
+/** A literal path as a glob that matches exactly that path (same escaping as tinyglobby's escapePath on win32/posix). */
+export function escapeGlob(p) {
+  return p.replace(/[()[\]{}|]|^!|[!+@](?=\()/g, '\\$&');
+}
+
+/**
+ * path.matchesGlob with Vitest's `dot: true` semantics (Vitest globs with tinyglobby `dot: true`, so `**` also
+ * matches `.storybook/`; path.matchesGlob does not). Dot segments are masked for a second attempt.
+ */
+export function matchesGlobDot(file, glob) {
+  if (file === glob || escapeGlob(file) === glob) return true; // literal entries (path.matchesGlob ignores \\ escapes)
+  if (path.matchesGlob(file, glob)) return true;
+  if (!/(^|\/)\./.test(file)) return false;
+  return path.matchesGlob(file.split('/').map((s) => (s.startsWith('.') ? '\uE000' + s.slice(1) : s)).join('/'), glob);
+}
 
 // C0 (incl. ESC, \n, \t), DEL, C1 (incl. U+009B CSI, U+009D OSC), soft hyphen, Arabic letter mark, zero-width and bidi
 // marks/embeddings/overrides/isolates, word joiner and invisible operators, BOM, interlinear annotations, line/paragraph
@@ -59,8 +77,8 @@ function checkEntry(root, entry, include, exclude) {
   if (path.isAbsolute(entry) || /^[a-zA-Z]:/.test(entry)) return 'absolute path';
   if (entry.split('/').some((s) => s === '..' || s === '.' || s === '')) return 'not a normalized relative path (., .. or empty segment)';
   if (GLOB_META.test(entry)) return 'glob metacharacters (only literal paths are accepted)';
-  if (include && !include.some((g) => path.matchesGlob(entry, g))) return 'does not match the include globs';
-  if (exclude.some((g) => path.matchesGlob(entry, g))) return 'matches an exclude glob';
+  if (include && !include.some((g) => matchesGlobDot(entry, g))) return 'does not match the include globs';
+  if (exclude.some((g) => matchesGlobDot(entry, g))) return 'matches an exclude glob';
   const abs = path.join(root, entry);
   let st;
   try { st = fs.lstatSync(abs); } catch { return 'file does not exist'; }

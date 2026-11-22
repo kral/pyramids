@@ -20,13 +20,15 @@ Exit codes are stable across commands:
 | code | meaning | returned by vitest-guard |
 |---|---|---|
 | 0 | ok | all commands when nothing is wrong |
-| 1 | test failures: genuine, flaky (not explained) or unexplained failures; the isolated reference run produced no report | `check`, `run` |
-| 2 | usage or config error: unknown command, bad `--mode`, missing `--config` file, vitest not installed, config not wrapped, bad `--orders`/`--sample`, `hunt` without a test file | all |
+| 1 | test failures: genuine, flaky (not explained) or unexplained failures; Vitest exited non-zero (unhandled error, crashed lane); a planned file produced no result ("NOT RUN"); the isolated reference run produced no report; `verify`: a comparison that is incomplete, red in the `gate` order, or an order-dependent failure that was not quarantined (`--no-quarantine`) | `check`, `run`, `verify` |
+| 2 | usage or config error: unknown command, bad `--mode`, missing `--config` file, vitest not installed, config not wrapped, bad `--orders`/`--sample`, `hunt` without a test file, file filters that match no test file (`check`, `verify`) | all |
 | 3 | run all | never (used by vto's selection tools) |
-| 4 | new quarantine: `incompatible.json` / `conflicts.json` changed, commit and re-run | `check`, `run`, `verify`, `hunt` |
-| 5 | false green: passes fast, fails in isolated forks | `verify` |
+| 4 | new quarantine: `incompatible.json` / `conflicts.json` changed (also entries released by `check --prune`, files added by `scan --quarantine`), commit and re-run | `check`, `run`, `verify`, `hunt`, `scan` |
+| 5 | false green: passes fast, fails in isolated forks (per test or per file: a file can fail in forks outside any test) | `verify`, `compare`, `calibrate` |
 
-Precedence inside `check`: 1 beats 4. Inside `verify`: 5 beats 4. `--help` and `--version` exit 0 on stdout; usage
+Precedence inside `check`: 1 beats 4. Inside `verify`: 5 beats 1 beats 4. Deliberate exception: `compare` /
+`calibrate` are measurements and exit 0 on false reds (a mismatching mode is simply never recommended); only a counted
+false green changes their exit code (5). `--help` and `--version` exit 0 on stdout; usage
 errors print one message plus "see --help" on stderr.
 
 ## Output
@@ -59,7 +61,7 @@ Only `compare` animates; `check` and `verify` print the summary only. The same s
 
 | option | meaning |
 |---|---|
-| `--mode vm\|shared\|auto` | fast mode to run. Default: `vm`, or `auto` when the config uses mode `auto`. `isolated` is rejected (it is the reference run, started internally) |
+| `--mode vm\|shared\|auto` | fast mode to run. Default: the mode of the config (`mode` of `defineVitestGuardConfig`, else `vm`). `isolated` is rejected (it is the reference run, started internally) |
 | `--config <file>` | Vitest config to use; default: first of `vitest.config.{ts,mts,cts,js,mjs,cjs}`, `vite.config.*` in `--root` |
 | `--root <dir>` | project root, default cwd |
 | `--verbose` | stream Vitest's own output |
@@ -112,8 +114,9 @@ Compares every test of the fast mode with isolated forks. Fast side runs in seve
 Default orders: vm `gate,reversed`; shared `gate,forward,reversed`. `--no-plan` removes `planned` (explicitly
 asking for only `planned` together with `--no-plan` is exit 2). `--sample N` compares a seeded random sample and
 marks the record incomplete (the shared-mode warning of `vitest run` then stays). Results: false green (passes
-fast, fails isolated) -> exit 5; false red (fails fast, passes isolated) or new quarantine -> exit 4 (note: this also
-applies when the false red appeared only in the `gate` order, which is not quarantined: run `check`); otherwise 0.
+fast, fails isolated) -> exit 5; a lane or the reference that did not report every file it was given -> exit 1 and no
+record is written; a false red in the `gate` order (not quarantined: run `check`) or one not quarantined because of
+`--no-quarantine` -> exit 1; a false red that was quarantined -> exit 4; otherwise 0.
 Without `--no-quarantine`, false-green files and files failing in a non-gate order are quarantined. The record goes to
 `.vitest-guard/run/verify-<mode>.json`. Defaults: `--sample all`, `--seed 1`.
 

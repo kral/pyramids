@@ -5,7 +5,7 @@ import v8 from 'node:v8';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import VitestGuardSequencer from './sequencer.mjs';
-import { validateTestPaths, sanitize } from './safety.mjs';
+import { validateTestPaths, sanitize, escapeGlob } from './safety.mjs';
 import { readStateJson, writeStateFile } from './statefs.mjs';
 import { versionProblem } from './stateformat.mjs';
 import { listTestFiles, classifyFiles, readModes, DEFAULT_AUTO_MODES, DOM_ENVS } from './auto.mjs';
@@ -106,6 +106,16 @@ export function readQuarantine(root, mode, file = '.vitest-guard/incompatible.js
   return validateTestPaths(root, keys, { include, exclude, label: `${file} (${mode})`, warn: warn && !q.newer }).ok;
 }
 
+/**
+ * B1: lane entries are relative to the directory Vitest runs in (the CLI's root); include globs of a project with its
+ * own `root` are relative to that root. Entries of the project come back relative to its root, others are dropped.
+ */
+function laneEntriesFor(projRoot, files) {
+  const pr = path.relative(process.cwd(), projRoot).split(path.sep).join('/');
+  if (!pr || pr.startsWith('..') || path.isAbsolute(pr)) return files;
+  return files.filter((f) => typeof f === 'string' && f.startsWith(pr + '/')).map((f) => f.slice(pr.length + 1));
+}
+
 /** VITEST_GUARD_LANE_FILE: legacy array of files or { project, files }. */
 function readLane(laneFile) {
   const raw = readStateJson(laneFile, null);
@@ -172,7 +182,8 @@ function autoConfig(userConfig, g, root) {
   const test = { ...(userConfig.test || {}) };
   const stored = readModes(root);
   const pick = (name, isDom) => {
-    const m = g.autoModes?.[name] ?? stored[name] ?? (isDom ? g.autoModes?.dom ?? DEFAULT_AUTO_MODES.dom : g.autoModes?.node ?? DEFAULT_AUTO_MODES.node);
+    // a single-project suite measured by `compare` before (or without) the split is stored as 'root' (trial S1)
+    const m = g.autoModes?.[name] ?? stored[name] ?? (!Array.isArray(test.projects) ? stored.root : undefined) ?? (isDom ? g.autoModes?.dom ?? DEFAULT_AUTO_MODES.dom : g.autoModes?.node ?? DEFAULT_AUTO_MODES.node);
     return POOL_OF[m] ? m : 'isolated';
   };
   const strip = (t) => { const { pool, isolate, ...rest } = t; return rest; };
@@ -210,12 +221,19 @@ function autoConfig(userConfig, g, root) {
   // node group environment: 'node' for DOM-configured suites (pragma-node files, or opt-in moved files),
   // otherwise the configured non-DOM environment stays (e.g. edge-runtime)
   const nodeEnv = DOM_ENVS.has(test.environment) || !test.environment ? 'node' : test.environment;
-  if (dom.length) { groups.dom = pick('dom', true); projects.push({ extends: true, test: { name: 'dom', include: dom, ...POOL_OF[groups.dom], provide: { vitestGuardAuto: 'dom' } } }); }
-  if (node.length) { groups.node = pick('node', false); projects.push({ extends: true, test: { name: 'node', environment: nodeEnv, include: node, ...POOL_OF[groups.node], provide: { vitestGuardAuto: 'node', vitestGuardAutoHeal: optIn } } }); }
+  if (dom.length) { groups.dom = pick('dom', true); projects.push({ extends: true, test: { name: 'dom', include: dom.map(escapeGlob), ...POOL_OF[groups.dom], provide: { vitestGuardAuto: 'dom' } } }); }
+  if (node.length) { groups.node = pick('node', false); projects.push({ extends: true, test: { name: 'node', environment: nodeEnv, include: node.map(escapeGlob), ...POOL_OF[groups.node], provide: { vitestGuardAuto: 'node', vitestGuardAutoHeal: optIn } } }); }
   record();
   if (process.env.VITEST_GUARD_AUTO_VERBOSE) console.log(`[vitest-guard] auto: dom ${dom.length} files (${projects.find((p) => p.test.name === 'dom')?.test.pool ?? '-'}), node ${node.length} files (${projects.find((p) => p.test.name === 'node')?.test.pool ?? '-'})`);
   const { include: _i, ...rootRest } = base; // root include would be merged into the projects (extends: true)
   return { ...userConfig, test: { ...rootRest, exclude, projects } };
+}
+
+// S3: the mode the config itself runs in (what `vitest run` does), for the CLI's default --mode
+function configModeOf(g) {
+  let m = g.mode;
+  try { const o = process.env.VITEST_GUARD_OPTS ? JSON.parse(process.env.VITEST_GUARD_OPTS) : {}; if (o && o.mode) m = o.mode; } catch {}
+  return m === 'shared' || m === 'auto' || m === 'isolated' ? m : 'vm';
 }
 
 let warnedVerify = false;
@@ -226,7 +244,7 @@ export function defineVitestGuardConfig(userConfig = {}, g = {}) {
     throw new Error('[vitest-guard] defineVitestGuardConfig needs a plain config object, not a function or a promise. Resolve it first, e.g. `export default defineConfig(async (env) => defineVitestGuardConfig(await base(env)))`.');
   // U-2: the vitest-guard CLI must know that the config it measures really goes through this function
   // (an unwrapped config ignores VITEST_GUARD_MODE: every "mode" would silently be the user's own pool)
-  if (process.env.VITEST_GUARD_WRAP_MARKER && !g._autoDone) { try { fs.appendFileSync(process.env.VITEST_GUARD_WRAP_MARKER, JSON.stringify({ pid: process.pid, mode: process.env.VITEST_GUARD_MODE || g.mode || 'vm' }) + '\n'); } catch {} }
+  if (process.env.VITEST_GUARD_WRAP_MARKER && !g._autoDone) { try { fs.appendFileSync(process.env.VITEST_GUARD_WRAP_MARKER, JSON.stringify({ pid: process.pid, mode: process.env.VITEST_GUARD_MODE || g.mode || 'vm', configMode: configModeOf(g) }) + '\n'); } catch {} }
   const out = buildConfig(userConfig, g);
   // M6: shared mode can be green where forks are red (state left by an earlier file); only `vitest-guard verify`
   // compares the two. Say so when the gate runs in shared mode without a clean verify for this commit/config.
@@ -311,16 +329,17 @@ function buildConfig(userConfig, g) {
       const provide = (m) => ({ ...(pt.provide || {}), vitestGuard: { ...provideBase, mode: m, project: name, tail: tailFor(m, pt) } });
       if (lane) {
         if (lane.project !== null && lane.project !== name) continue;
-        const files = validateTestPaths(root, lane.files, { include, exclude, label: 'VITEST_GUARD_LANE_FILE', warn: lane.project !== null }).ok;
+        const projRoot = path.resolve(root, typeof (pt.root ?? p.root) === 'string' ? pt.root ?? p.root : '.');
+        const files = validateTestPaths(projRoot, laneEntriesFor(projRoot, lane.files), { include, exclude, label: 'VITEST_GUARD_LANE_FILE', warn: lane.project !== null }).ok;
         if (!files.length) continue;
-        projects.push({ ...p, test: { ...pt, ...pool, ...seq, include: files, exclude, setupFiles, provide: provide(mode) } });
+        projects.push({ ...p, test: { ...pt, ...pool, ...seq, include: files.map(escapeGlob), exclude, setupFiles, provide: provide(mode) } });
         continue;
       }
       const qKeys = mode !== 'isolated' && qRaw[mode] && typeof qRaw[mode] === 'object' ? Object.keys(qRaw[mode]) : [];
       const quarantined = validateTestPaths(root, qKeys, { include, exclude, warn: false }).ok;
       quarantined.forEach((f) => claimed.add(f));
-      projects.push({ ...p, test: { ...pt, ...pool, ...seq, include, exclude: [...exclude, ...quarantined], setupFiles, provide: provide(mode) } });
-      if (quarantined.length) projects.push({ ...p, test: { ...pt, name: `${name || 'project'}:isolated`, pool: 'forks', isolate: true, include: quarantined, exclude, setupFiles: isoSetup, provide: provide('isolated') } });
+      projects.push({ ...p, test: { ...pt, ...pool, ...seq, include, exclude: [...exclude, ...quarantined.map(escapeGlob)], setupFiles, provide: provide(mode) } });
+      if (quarantined.length) projects.push({ ...p, test: { ...pt, name: `${name || 'project'}:isolated`, pool: 'forks', isolate: true, include: quarantined.map(escapeGlob), exclude, setupFiles: isoSetup, provide: provide('isolated') } });
     }
     // F9: report quarantine entries that no project accepted
     for (const m of ['vm', 'shared']) {
@@ -352,9 +371,9 @@ function buildConfig(userConfig, g) {
 
   if (lane) {
     // one lane of a shared-mode plan: exactly these (validated) files, one worker, plan order
-    const files = validateTestPaths(root, lane.files, { include, exclude, label: 'VITEST_GUARD_LANE_FILE' }).ok;
+    const files = validateTestPaths(root, laneEntriesFor(root, lane.files), { include, exclude, label: 'VITEST_GUARD_LANE_FILE' }).ok;
     if (!files.length) throw new Error('[vitest-guard] VITEST_GUARD_LANE_FILE contains no valid test file');
-    Object.assign(out.test, { ...fast, include: files, exclude, setupFiles, provide: provide(mode) });
+    Object.assign(out.test, { ...fast, include: files.map(escapeGlob), exclude, setupFiles, provide: provide(mode) });
     return out;
   }
   const quarantined = ignoreQ ? [] : readQuarantine(root, mode, quarantineFile, { include, exclude });
@@ -364,8 +383,8 @@ function buildConfig(userConfig, g) {
     return out;
   }
   if (mode === 'vm') out.test.vmMemoryLimit = fast.vmMemoryLimit; // read from the root config only
-  out.test.projects = [{ extends: true, test: { name: `vitest-guard:${mode}`, ...fast, include, exclude: [...exclude, ...quarantined], setupFiles, provide: provide(mode) } }];
-  if (quarantined.length) out.test.projects.push({ extends: true, test: { name: 'vitest-guard:isolated', pool: 'forks', isolate: true, include: quarantined, exclude, setupFiles: isoSetup, provide: provide('isolated') } });
+  out.test.projects = [{ extends: true, test: { name: `vitest-guard:${mode}`, ...fast, include, exclude: [...exclude, ...quarantined.map(escapeGlob)], setupFiles, provide: provide(mode) } }];
+  if (quarantined.length) out.test.projects.push({ extends: true, test: { name: 'vitest-guard:isolated', pool: 'forks', isolate: true, include: quarantined.map(escapeGlob), exclude, setupFiles: isoSetup, provide: provide('isolated') } });
   return out;
 }
 
