@@ -113,3 +113,10 @@ test('specId: separators only on win32, never NFC (NFD and backslash file names 
   fs.writeFileSync(name, '');
   try { assert.ok(fs.existsSync(specId(name, process.platform)) || process.platform !== 'linux'); } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('runtimeBase ignores relative XDG_CACHE_HOME / XDG_RUNTIME_DIR / LOCALAPPDATA', () => {
+  assert.equal(runtimeBase({ platform: 'linux', env: { XDG_CACHE_HOME: 'rel/cache' }, home: '/home/u' }), '/home/u/.cache/vto/run');
+  assert.equal(runtimeBase({ platform: 'linux', env: { XDG_RUNTIME_DIR: 'rel/run' }, home: '/home/u' }), '/home/u/.cache/vto/run');
+  assert.equal(runtimeBase({ platform: 'linux', env: { XDG_CACHE_HOME: '/abs/c' }, home: '/home/u' }), '/abs/c/vto/run');
+  assert.match(runtimeBase({ platform: 'win32', env: { LOCALAPPDATA: 'rel' }, home: 'C:\\Users\\u' }), /Users.u.AppData.Local.vto.run$/);
+});

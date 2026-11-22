@@ -20,15 +20,18 @@ export const EXIT = { OK: 0, FAIL: 1, USAGE: 2, NEW_QUARANTINE: 4, FALSE_GREEN: 
 
 // flags that never take a value (so `vitest-guard --verbose check` does not swallow the command)
 const BOOLEAN_FLAGS = new Set(['verbose', 'help', 'version', 'prune', 'compare', 'commit-state', 'quarantine', 'diag', 'reset-modules', 'confirm', 'hunt', 'plan', 'heal', 'replan', 'clean', 'calibrate', 'write']);
+// flags that take a value; every other flag is boolean, so an unknown flag never swallows the next positional
+const VALUE_FLAGS = new Set(['mode', 'config', 'root', 'lanes', 'retries', 'sample', 'seed', 'orders', 'project', 'before', 'vto-raw', 'calibrate-sample']);
 function parseArgs(argv) {
   const o = { _: [] };
+  Object.defineProperty(o, 'negated', { value: new Set(), enumerable: false });
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a.startsWith('--no-')) o[a.slice(5)] = false;
+    if (a.startsWith('--no-')) { o[a.slice(5)] = false; o.negated.add(a.slice(5)); }
     else if (a.startsWith('--')) {
       const [k, v] = a.slice(2).split('=');
       if (v !== undefined) o[k] = v;
-      else if (!BOOLEAN_FLAGS.has(k) && argv[i + 1] && !argv[i + 1].startsWith('--')) o[k] = argv[++i];
+      else if (VALUE_FLAGS.has(k) && !BOOLEAN_FLAGS.has(k) && argv[i + 1] && !argv[i + 1].startsWith('--')) o[k] = argv[++i];
       else o[k] = true;
     }
     else o._.push(a);
@@ -372,6 +375,7 @@ async function explainFastFailures(c, o, candidates, { runMode, bucketOf, worker
 
 export async function cmdCheck(c, o) {
   const mode = c.mode;
+  const title = o.summaryTitle || 'check';
   const auto = mode === 'auto';
   if (auto && !load(c, 'modes.json', null)?.modes && o.calibrate !== false) {
     // first check of a mode-'auto' config: measure forks/vm/shared per group before choosing modes
@@ -422,10 +426,10 @@ export async function cmdCheck(c, o) {
   let pruned = 0;
   if (o.prune) for (const m of auto ? ['vm', 'shared'] : [mode]) pruned += await prune(c, q, m);
   if (!failing.length) {
-    if (notRunNote.length) { for (const s2 of notApplied) say(`UNEXPLAINED failure: ${s2}`); return checkSummary(c, mode, { files: first.files.size, failing: notRunNote.length, unexplained: notRunNote, pruned, rewritten: respelled }, report(c, workers, EXIT.FAIL)); }
-    if (first.code) { say(`Vitest exited with code ${first.code} although no file failed (unhandled error?):\n` + (first.log || '').slice(-2000)); return checkSummary(c, mode, { files: first.files.size, unhandled: true }, report(c, workers, EXIT.FAIL)); }
+    if (notRunNote.length) { for (const s2 of notApplied) say(`UNEXPLAINED failure: ${s2}`); return checkSummary(c, mode, { files: first.files.size, failing: notRunNote.length, unexplained: notRunNote, pruned, rewritten: respelled }, report(c, workers, EXIT.FAIL), title); }
+    if (first.code) { say(`Vitest exited with code ${first.code} although no file failed (unhandled error?):\n` + (first.log || '').slice(-2000)); return checkSummary(c, mode, { files: first.files.size, unhandled: true }, report(c, workers, EXIT.FAIL), title); }
     // S8: released quarantine entries changed incompatible.json: exit 4 (commit and re-run)
-    return checkSummary(c, mode, { files: first.files.size, pruned, rewritten: respelled }, report(c, workers, pruned || respelled ? EXIT.NEW_QUARANTINE : EXIT.OK));
+    return checkSummary(c, mode, { files: first.files.size, pruned, rewritten: respelled }, report(c, workers, pruned || respelled ? EXIT.NEW_QUARANTINE : EXIT.OK), title);
   }
 
   const iso = await runVitest({ root: c.root, config: c.config, mode: 'isolated', files: failing, verbose: c.verbose, tag: 'isolated' });
@@ -464,7 +468,7 @@ export async function cmdCheck(c, o) {
   if (newQ.length || conflicts.length) say(`quarantine/conflict state changed: commit ${changedStateFiles({ newQ, conflicts })} and re-run (exit 4)`);
   // D3: 1 (failures, incl. flaky/unexplained) wins over 4 (new quarantine); 0 only when nothing failed
   const code = genuine.length || flaky.length || unexplained.length ? EXIT.FAIL : newQ.length || conflicts.length ? EXIT.NEW_QUARANTINE : EXIT.FAIL /* a file failed and nothing explains it */;
-  return checkSummary(c, mode, { files: first.files.size, failing: failing.length + notRun.length, genuine, newQ, conflicts, flaky, unexplained, pruned, rewritten: respelled }, report(c, workers, code));
+  return checkSummary(c, mode, { files: first.files.size, failing: failing.length + notRun.length, genuine, newQ, conflicts, flaky, unexplained, pruned, rewritten: respelled }, report(c, workers, code), title);
 }
 
 /** Only the committed state files this run actually changed (pruning releases entries of incompatible.json). */
@@ -475,9 +479,11 @@ function changedStateFiles(d) {
   if (n(d.conflicts)) files.push('.vitest-guard/conflicts.json');
   return files.join(' and ') || '.vitest-guard/incompatible.json and/or conflicts.json';
 }
-function checkSummary(c, mode, d, code) {
+function checkSummary(c, mode, d, code, title = 'check') {
   const n = (a) => (a ? a.length : 0);
-  const quarantined = Object.values(load(c, 'incompatible.json', {}) || {}).reduce((s, m) => s + (m && typeof m === 'object' ? Object.keys(m).length : 0), 0);
+  const qAll = load(c, 'incompatible.json', {}) || {};
+  const qBuckets = mode === 'auto' ? ['vm', 'shared'] : [mode]; // only the files actually quarantined in the mode that ran
+  const quarantined = qBuckets.reduce((s, b) => s + (qAll[b] && typeof qAll[b] === 'object' ? Object.keys(qAll[b]).length : 0), 0);
   const headline = code === EXIT.OK ? `${d.files} files passed in ${mode} mode`
     : d.unhandled ? `no file failed, but Vitest exited with an error (unhandled error?)`
     : code === EXIT.NEW_QUARANTINE && !n(d.newQ) && !n(d.conflicts) && (d.pruned || d.rewritten) ? `${d.files} files passed in ${mode} mode; ${d.pruned ? `${d.pruned} quarantine entr${d.pruned === 1 ? 'y' : 'ies'} released` : ''}${d.pruned && d.rewritten ? ', ' : ''}${d.rewritten ? `${d.rewritten} quarantine key(s) re-spelled or removed as stale` : ''}`
@@ -489,7 +495,7 @@ function checkSummary(c, mode, d, code) {
   if (n(d.unexplained)) next.push('unexplained failures: re-run with --verbose, or `vitest-guard hunt <file>`');
   if (code === EXIT.NEW_QUARANTINE) next.push(`commit ${changedStateFiles(d)}, then re-run`);
   if (code === EXIT.OK && mode === 'shared') next.push('shared realms can hide failures: confirm with `vitest-guard verify --mode shared`');
-  summary({ title: `check · ${mode}`, verdict: verdictOf(code), label: code === EXIT.NEW_QUARANTINE ? 'QUARANTINE' : undefined, headline,
+  summary({ title: `${title} · ${mode}`, verdict: verdictOf(code), label: code === EXIT.NEW_QUARANTINE ? 'QUARANTINE' : undefined, headline,
     facts: [['real failures', n(d.genuine) || undefined, 'red'], ['newly quarantined', n(d.newQ) || undefined, 'yellow'], ['conflicts', n(d.conflicts) || undefined, 'yellow'],
       ['flaky', n(d.flaky) || undefined, 'yellow'], ['unexplained', n(d.unexplained) || undefined, 'red'], ['released from quarantine', d.pruned || undefined, 'yellow'], ['quarantine keys rewritten', d.rewritten || undefined, 'yellow'], ['quarantine size', quarantined || undefined], ['exit code', code]],
     next });
@@ -846,17 +852,19 @@ function hintShown(c, tracked) {
 }
 /** Paths below `.vitest-guard/` that git tracks (root-relative, `/`); null when git is unavailable or this is no repo. */
 function trackedState(c) {
-  const git = findGitBinary();
+  const git = findGitBinary(c.root);
   if (!git) return null;
   const r = spawnSync(git, ['-C', c.root, 'ls-files', '-z', '--', '.vitest-guard'], { encoding: 'utf8', timeout: 10000, windowsHide: true, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } });
   if (r.status !== 0 || typeof r.stdout !== 'string') return null;
   return new Set(r.stdout.split('\0').filter(Boolean));
 }
 /** git from PATH, never from the project directory (security review H4: a repo can ship its own git.exe). */
-function findGitBinary() {
+function findGitBinary(root = process.cwd()) {
   const exts = process.platform === 'win32' ? (process.env.PATHEXT || '.EXE;.CMD;.BAT').split(';').filter(Boolean) : [''];
   for (const dir of (process.env.PATH || '').split(path.delimiter)) {
     if (!dir || !path.isAbsolute(dir)) continue;
+    const rel = (b) => path.relative(b, path.resolve(dir));
+    if ([root, process.cwd()].some((b) => { const r = rel(path.resolve(b)); return r === '' || (!r.startsWith('..') && !path.isAbsolute(r)); }) || path.resolve(dir).split(path.sep).includes('node_modules')) continue;
     for (const ext of exts) { const f = path.join(dir, 'git' + ext.toLowerCase()); try { if (fs.statSync(f).isFile()) return f; } catch {} }
   }
   return null;
@@ -980,7 +988,8 @@ ${GLOBAL_OPTS}
 ${EXIT_HELP}`;
 export function helpFor(cmd) {
   const h = COMMAND_HELP[cmd];
-  return h ? `usage: ${h.usage}\n\n${h.text}\n\n${GLOBAL_OPTS}\n${EXIT_HELP}` : null;
+  const globals = NEEDS_WRAP.has(cmd) ? GLOBAL_OPTS : GLOBAL_OPTS.replace(/; must be wrapped with defineVitestGuardConfig\)/, ')');
+  return h ? `usage: ${h.usage}\n\n${h.text}\n\n${globals}\n${EXIT_HELP}` : null;
 }
 const KNOWN_FLAGS = new Set(['mode', 'config', 'root', 'verbose', 'diag', 'reset-modules', 'commit-state', 'help', 'version']);
 
@@ -1004,13 +1013,20 @@ export async function main(argv) {
   const o = parseArgs(argv);
   if (o.version || o._[0] === 'version') { console.log(`${PKG.name} ${PKG.version}`); return EXIT.OK; }
   if (o._[0] === 'help' || (typeof o.help === 'string' && !o._[0])) { const t = o._[1] || (typeof o.help === 'string' ? o.help : ''); const h = helpFor(t); if (t && !h) { console.error(`[vitest-guard] unknown command ${JSON.stringify(t.slice(0, 40))}\nsee --help`); return EXIT.USAGE; } console.log(h || HELP); return EXIT.OK; }
-  if (o.help || !o._[0]) { console.log((o.help && helpFor(o._[0])) || HELP); return EXIT.OK; }
+  if (!o._[0] && !o.help) { console.error(HELP); return EXIT.USAGE; }
+  if (o.help) { console.log(helpFor(o._[0]) || HELP); return EXIT.OK; }
   if (!COMMANDS.has(o._[0])) { console.error(`[vitest-guard] unknown command ${JSON.stringify(String(o._[0]).slice(0, 40))}\nsee --help`); return EXIT.USAGE; }
   if (o.mode !== undefined && !['vm', 'shared', 'auto'].includes(o.mode)) { console.error(`[vitest-guard] --mode must be vm, shared or auto\nsee --help`); return EXIT.USAGE; }
   if (o.config && !fs.existsSync(path.resolve(o.config))) { console.error(`[vitest-guard] --config ${o.config}: no such file\nsee --help`); return EXIT.USAGE; }
   // a mistyped option would otherwise be ignored silently (e.g. --no-hnt)
   const unknown = Object.keys(o).filter((k) => k !== '_' && !KNOWN_FLAGS.has(k) && !COMMAND_HELP[o._[0]].opts.includes(k));
-  if (unknown.length) console.error(`[vitest-guard] ${o._[0]}: ignoring unknown option${unknown.length > 1 ? 's' : ''} ${unknown.map((k) => '--' + k).join(', ')} (see ${o._[0]} --help)`);
+  if (unknown.length) { console.error(`[vitest-guard] ${o._[0]}: unknown option${unknown.length > 1 ? 's' : ''} ${unknown.map((k) => (o.negated.has(k) ? '--no-' : '--') + k).join(', ')}\nsee ${o._[0]} --help`); return EXIT.USAGE; }
+  for (const k of ['lanes', 'retries', 'calibrate-sample', 'sample', 'seed']) {
+    const v = o[k];
+    if (v === undefined || v === false) continue;
+    const ok = (k === 'sample' && v === 'all') || (/^\d+$/.test(String(v)) && Number(v) >= (k === 'seed' ? 0 : 1) && Number.isSafeInteger(Number(v)));
+    if (!ok) { console.error(`[vitest-guard] ${o._[0]}: --${k} must be a ${k === 'seed' ? 'non-negative' : 'positive'} integer${k === 'sample' ? ' or "all"' : ''}, got ${v === true ? 'no value' : JSON.stringify(String(v).slice(0, 40))}\nsee --help`); return EXIT.USAGE; }
+  }
   process.env.VITEST_GUARD_CLI = '1';
   if (o.diag === false) process.env.VITEST_GUARD_DIAG = '0'; // lean runs: no pollution diff / module-state scan
   if (o['reset-modules'] === false) process.env.VITEST_GUARD_OPTS = JSON.stringify({ ...JSON.parse(process.env.VITEST_GUARD_OPTS || '{}'), resetModules: false }); // planner then adds transitive vi.mock edges
@@ -1040,7 +1056,7 @@ export async function main(argv) {
     case 'run': {
       // planned shared run; self-healing unless --no-heal (shared-only failures are bisected -> conflicts.json)
       c.mode = 'shared';
-      if (o.heal !== false) return cmdCheck(c, o);
+      if (o.heal !== false) return cmdCheck(c, { ...o, summaryTitle: 'run' });
       const r = await cmdRunPlanned(c, o); const failed = [...r.files].filter(([, v]) => v.status !== 'passed').map(([k]) => k);
       // B3: Vitest's exit code (unhandled errors, crashed lanes) and files without a result count as failures
       const notRun = listFiles(c).filter((f) => !r.files.has(f) && !r.missing.includes(f));

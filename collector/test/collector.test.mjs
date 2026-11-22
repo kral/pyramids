@@ -309,3 +309,14 @@ test('records carry only fields known to contracts/raw-2.schema.json (plus the a
     if (r.t === 'file') assert.match(r.sha256, /^[0-9a-f]{64}$/);
   }
 });
+
+test('findGit never resolves git from the project (node_modules/.bin) or a relative PATH entry', { skip: process.platform === 'win32' }, async () => {
+  const { findGit } = await import('../git.mjs');
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vto-fg-')));
+  const bin = path.join(root, 'node_modules', '.bin'); fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, 'git'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const sys = ['/usr/bin', '/bin'].find((d) => fs.existsSync(path.join(d, 'git')));
+  const got = findGit({ PATH: [bin, 'node_modules/.bin', sys].filter(Boolean).join(path.delimiter) }, root, root);
+  assert.equal(got, sys ? path.join(sys, 'git') : null);
+  assert.equal(findGit({ PATH: bin }, root, root + '-b'), null);
+});

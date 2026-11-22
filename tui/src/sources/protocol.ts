@@ -85,9 +85,9 @@ function ownedPrivate(d: string): boolean {
 export function runtimeBase(o: { platform?: string; env?: Env; home?: string } = {}): string {
   const platform = o.platform ?? process.platform, env = o.env ?? process.env, home = o.home ?? os.homedir();
   const pp = platform === 'win32' ? path.win32 : path.posix; // the target platform's separators, not the host's
-  if (platform === 'win32') return pp.join(env.LOCALAPPDATA || pp.join(home, 'AppData', 'Local'), 'vto', 'run');
-  if (env.XDG_RUNTIME_DIR && ownedPrivate(env.XDG_RUNTIME_DIR)) return pp.join(env.XDG_RUNTIME_DIR, 'vto');
-  return pp.join(env.XDG_CACHE_HOME || pp.join(home, platform === 'darwin' ? 'Library/Caches' : '.cache'), 'vto', 'run');
+  if (platform === 'win32') return pp.join((env.LOCALAPPDATA && pp.isAbsolute(env.LOCALAPPDATA) ? env.LOCALAPPDATA : '') || pp.join(home, 'AppData', 'Local'), 'vto', 'run');
+  if (env.XDG_RUNTIME_DIR && pp.isAbsolute(env.XDG_RUNTIME_DIR) && ownedPrivate(env.XDG_RUNTIME_DIR)) return pp.join(env.XDG_RUNTIME_DIR, 'vto');
+  return pp.join((env.XDG_CACHE_HOME && pp.isAbsolute(env.XDG_CACHE_HOME) ? env.XDG_CACHE_HOME : '') || pp.join(home, platform === 'darwin' ? 'Library/Caches' : '.cache'), 'vto', 'run');
 }
 
 export function projectKey(root: string, caseInsensitive = isCaseInsensitiveFs(slash(path.resolve(root)))): string {

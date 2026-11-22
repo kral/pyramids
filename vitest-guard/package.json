@@ -44,7 +44,6 @@
     "README.cs.md",
     "README.md",
     "bin/",
-    "scripts/",
     "src/"
   ],
   "engines": {

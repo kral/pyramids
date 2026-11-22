@@ -26,7 +26,7 @@ test('S2 unit: an auto verify record does not count for a config that runs in an
 
 test('S2: a leftover auto.json does not make check / verify run in mode auto; an auto verify does not silence a shared run', integration, () => {
   const root = P({ 'src/a.test.js': pass }, {}, { mode: 'auto' });
-  const v = cli(root, ['verify', '--no-calibrate']);
+  const v = cli(root, ['verify']);
   assert.equal(v.code, 0, v.out);
   assert.match(v.out, /verify · auto/);
   assert.ok(fs.existsSync(path.join(root, '.vitest-guard/run/verify-shared.json')), 'auto with a shared group writes verify-shared.json');

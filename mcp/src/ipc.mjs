@@ -27,9 +27,9 @@ export const MAX_MESSAGE = 1 << 20;
 /** Per-user base directory for daemon endpoints (0700, verified). */
 export function runtimeBase({ platform = process.platform, env = process.env, home = os.homedir() } = {}) {
   const pp = platform === 'win32' ? path.win32 : path.posix; // the target platform's separators, not the host's
-  if (platform === 'win32') return pp.join(env.LOCALAPPDATA || pp.join(home, 'AppData', 'Local'), 'vto', 'run');
-  if (env.XDG_RUNTIME_DIR && ownedPrivate(env.XDG_RUNTIME_DIR)) return pp.join(env.XDG_RUNTIME_DIR, 'vto');
-  return pp.join(env.XDG_CACHE_HOME || pp.join(home, platform === 'darwin' ? 'Library/Caches' : '.cache'), 'vto', 'run');
+  if (platform === 'win32') return pp.join((env.LOCALAPPDATA && pp.isAbsolute(env.LOCALAPPDATA) ? env.LOCALAPPDATA : '') || pp.join(home, 'AppData', 'Local'), 'vto', 'run');
+  if (env.XDG_RUNTIME_DIR && pp.isAbsolute(env.XDG_RUNTIME_DIR) && ownedPrivate(env.XDG_RUNTIME_DIR)) return pp.join(env.XDG_RUNTIME_DIR, 'vto');
+  return pp.join((env.XDG_CACHE_HOME && pp.isAbsolute(env.XDG_CACHE_HOME) ? env.XDG_CACHE_HOME : '') || pp.join(home, platform === 'darwin' ? 'Library/Caches' : '.cache'), 'vto', 'run');
 }
 function ownedPrivate(d) { try { const s = fs.statSync(d); return s.isDirectory() && (process.getuid ? s.uid === process.getuid() : true) && (s.mode & 0o077) === 0; } catch { return false; } }
 

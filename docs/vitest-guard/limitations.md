@@ -73,6 +73,8 @@ non-reproducible failure stays FLAKY and blocks the gate until fixed or re-run.
   project module (outside `node_modules`) is cached for the worker; an equality tester or interval it registers on
   import is kept (as the module is) and reported as residual `equality testers` / `timers`. A file that does not
   import the module can still see that tester or interval in a shared worker.
+- **`navigator` overrides.** Overrides of `navigator` properties (for example `navigator.language`) are neither
+  reset nor reported.
 
 ## What vitest-guard does not cover
 
