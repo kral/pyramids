@@ -1,0 +1,73 @@
+# vitest-guard trial on a generated React 19 + RTL + jsdom suite, on Linux, macOS and Windows.
+#
+# Installs @jirikral/vitest-guard from the packed tarball (what users get from npm), measures a plain
+# `vitest run`, compare, check and verify in vm and shared mode, and injects two faults with an exact expected
+# exit code (a leaked global must be a false green = 5, a real failure must be 1). Results: job summary + artifact.
+#
+# Runs by hand (Actions → vitest-guard-trial → Run workflow; size = test files per module, 8 ≈ 300 files /
+# 3000 tests) and when the workflow, the trial script or vitest-guard changes on main.
+name: vitest-guard-trial
+
+on:
+  workflow_dispatch:
+    inputs:
+      files_per_module:
+        description: 'test files per module (3 ≈ 110 files, 8 ≈ 300 files / 3000 tests)'
+        default: '3'
+        required: true
+  push:
+    branches: [main]
+    paths:
+      - 'vitest-guard/**'
+      - 'bench/**'
+      - '.github/scripts/vg-trial.mjs'
+      - '.github/workflows/vitest-guard-trial.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vitest-guard-trial-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  trial:
+    name: trial (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      FILES_PER_MODULE: ${{ github.event.inputs.files_per_module || '3' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - name: Generate the benchmark project
+        shell: bash
+        run: |
+          P="$RUNNER_TEMP/vg-proj"
+          node bench/gen-project.mjs "$P" --files-per-module "$FILES_PER_MODULE" --no-verify
+          cp bench/trial/package.json bench/trial/package-lock.json "$P/"
+          cd "$P" && npm ci --ignore-scripts --no-audit --no-fund
+      - name: Pack vitest-guard and install the tarball
+        shell: bash
+        run: |
+          cd vitest-guard
+          TGZ=$(npm pack --pack-destination "$RUNNER_TEMP" | tail -n 1)
+          cd "$RUNNER_TEMP/vg-proj" && npm install --no-save --ignore-scripts --no-audit --no-fund "$RUNNER_TEMP/$TGZ"
+      - name: Trial
+        shell: bash
+        run: node .github/scripts/vg-trial.mjs "$RUNNER_TEMP/vg-proj" "$RUNNER_TEMP/vg-out"
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vitest-guard-trial-${{ matrix.os }}
+          path: ${{ runner.temp }}/vg-out
+          retention-days: 14
