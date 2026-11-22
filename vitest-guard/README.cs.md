@@ -185,7 +185,7 @@ npm run guard -- calibrate [--sample N]
   než forks. Pak doporučí režim per projekt: nejrychlejší bez rozdílů, nebo forks, když ušetří méně než 10 %.
   Výsledek je v `.vitest-guard/run/compare.json`.
 
-Exit kódy (contracts/DECISIONS.md D3): `0` OK, `1` selhání testů (skutečné, flaky i nevysvětlené), `2` špatné použití/konfigurace,
+Exit kódy (docs/vitest-guard/cli.md#exit-codes): `0` OK, `1` selhání testů (skutečné, flaky i nevysvětlené), `2` špatné použití/konfigurace,
 `4` změnila se karanténa/konflikty (commitněte `.vitest-guard/*.json` a spusťte znovu), `5` false green ve `verify`.
 `vitest-guard --help` a `vitest-guard <příkaz> --help` vypíší všechny volby.
 
@@ -412,7 +412,12 @@ Paměť (`mem/`, 120 souborů, 1 worker, vmThreads): výchozí limit nikdy nerec
 
 ## Doporučený rollout
 
-(`npm run guard --` je skript `guard` z poznámky o instalaci na začátku.)
+(`npm run guard --` předpokládá tento skript v `package.json`; nebo přímo volejte
+`node node_modules/@jirikral/vitest-guard/bin/vitest-guard.mjs`.)
+
+```json
+{ "scripts": { "guard": "vitest-guard" } }
+```
 
 0. `npm run guard -- compare --sample all`: výběr režimu per projekt (vm pro DOM projekty, shared nebo forks pro
    čistě node).

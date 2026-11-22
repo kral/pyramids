@@ -189,7 +189,7 @@ npm run guard -- calibrate [--sample N]
   result differs from forks, and recommends a mode per project: the fastest mode without mismatches, or forks when
   it saves less than 10 %. Results go to `.vitest-guard/run/compare.json`.
 
-Exit codes (contracts/DECISIONS.md D3): `0` ok, `1` test failures (genuine, flaky or unexplained), `2` usage or config
+Exit codes (docs/vitest-guard/cli.md#exit-codes): `0` ok, `1` test failures (genuine, flaky or unexplained), `2` usage or config
 error (e.g. config not wrapped), `4` quarantine/conflict state changed (commit `.vitest-guard/incompatible.json` /
 `conflicts.json` and re-run), `5` false green in `verify`. (`3` = run all belongs to vto's selection tools and is
 not returned.) `vitest-guard --help` and `vitest-guard <command> --help` list every option.
@@ -376,7 +376,12 @@ of them pass with a longer timeout; they are load-induced.
 
 ## Recommended rollout
 
-(`npm run guard --` is the `guard` script from the install note at the top.)
+(`npm run guard --` assumes this script in your `package.json`; or call
+`node node_modules/@jirikral/vitest-guard/bin/vitest-guard.mjs` directly instead.)
+
+```json
+{ "scripts": { "guard": "vitest-guard" } }
+```
 
 0. `npm run guard -- compare --sample all` to pick the mode per project (vm for DOM projects, shared or forks for
    pure-node ones).
