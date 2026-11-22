@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { parse, estimate } from '../savings-estimate.mjs';
 
 test('savings estimate: model, billing rounded up per job, validation', () => {
@@ -41,4 +44,37 @@ test('savings estimate --from-measured: aggregates metrics, explicit flags win, 
   assert.equal(m.poolGain, 0.5);            // 100 s vs 200 s
   assert.equal(m.localDays, 4);
   assert.equal(measuredFrom(recs, { since: '1h', now }).runs, 0);
+});
+
+test('savings estimate: --shards 0 is rejected, runner minutes are shards × wall time', () => {
+  assert.throws(() => parse(['--suite-min', '3', '--shards', '0']), /at least 1/);
+  const e = estimate(parse(['--suite-min', '5', '--shards', '4', '--selected', '0.1', '--run-all', '0', '--overhead', '0', '--ci-runs', '1', '--days', '1']));
+  assert.equal(e.month.ciRunnerMinutes, 16); // before 4 jobs × 5 min = 20, after 4 × ceil(0.5) = 4
+  assert.ok(Number.isFinite(e.month.ciUsd));
+});
+
+test('savings estimate --from-measured: mixed isolated+vm label is a fast pool; clean runs preferred; explicit --pool-gain used', async () => {
+  const { measuredFrom, isFastPool } = await import('../savings-estimate.mjs');
+  assert.ok(isFastPool('vitest-guard:isolated+vm +quarantine'));
+  assert.ok(isFastPool('vitest-guard:shared'));
+  assert.ok(!isFastPool('vitest-guard:isolated +quarantine'));
+  assert.ok(!isFastPool('forks'));
+  const now = Date.parse('2026-11-22T12:00:00Z');
+  const at = (d) => new Date(now - d * 864e5).toISOString();
+  const full = (d, pool, wallMs, instrumented) => ({ t: 'run', at: at(d), kind: 'full', status: 'done', pool, testsRun: 100, suiteTotal: 100, wallMs, instrumented });
+  const m = measuredFrom([full(5, 'forks', 200000, false), full(4, 'vitest-guard:isolated+vm', 100000, false), full(1, 'vitest-guard:vm', 400000, true)], { now });
+  assert.equal(m.poolGain, 0.5);
+  assert.equal(m.suitePool, 'vitest-guard:isolated+vm', 'the instrumented run is not mixed into the suite time');
+  assert.equal(m.suiteInstrumented, false);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vto-sav-'));
+  try {
+    fs.mkdirSync(path.join(dir, '.vto'));
+    const recent = (r, ago) => ({ ...r, at: new Date(Date.now() - ago).toISOString() });
+    const recs = [recent(full(0, 'forks', 200000, false), 120000), recent(full(0, 'vitest-guard:vm', 100000, false), 60000)];
+    fs.writeFileSync(path.join(dir, '.vto', 'metrics.jsonl'), recs.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    const o = parse(['--from-measured', dir, '--pool-gain', '0.2']);
+    assert.equal(Math.round(o['suite-min'] * 1000) / 1000, Math.round((100 / 60 / 0.8) * 1000) / 1000, 'converted with the explicit gain');
+    assert.equal(o['pool-gain'], 0.2);
+    assert.match(o.sources['local-runs'] || '', /AI-agent runs included/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

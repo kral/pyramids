@@ -11,14 +11,16 @@ const HELP = `vto savings estimate – projected monthly savings of vto (affecte
 Usage: vto savings estimate --suite-min MIN [options] [--json]
 
 Suite
-  --suite-min MIN        wall time of one full test run in CI, minutes (required)
+  --suite-min MIN        wall time of one full test run in CI, minutes (required); with --shards
+                         this is the time of one shard job, they run in parallel
   --selected SHARE       share of the suite an affected run executes          (default 0.2)
   --run-all SHARE        share of runs that fall back to the full suite        (default 0.2)
   --overhead MIN         fixed cost of an affected run: map download, selection (default 0.5)
   --pool-gain SHARE      time saved by a fast pool, from \`vto guard compare\`   (default 0)
 CI
   --ci-runs N            pipeline runs with tests per working day              (default 20)
-  --shards N             parallel jobs the suite is split into                 (default 1)
+  --shards N             parallel jobs the suite is split into, at least 1     (default 1)
+                         runner minutes = shards × wall time (each job rounded up to whole minutes)
   --usd-per-min USD      runner price per minute (default 0.006: GitHub-hosted Linux 2-core x64,
                          list price since 1 Jan 2026; Windows 0.010, macOS 0.062; self-hosted: your cost)
 Developers
@@ -45,10 +47,13 @@ suite (\`vto run\`, \`vto guard compare\`) and the realised savings with \`vto s
 
 const SPEC = {
   'suite-min': { req: true }, selected: { def: 0.2, share: true }, 'run-all': { def: 0.2, share: true }, overhead: { def: 0.5 },
-  'pool-gain': { def: 0, share: true }, 'ci-runs': { def: 20 }, shards: { def: 1, int: true }, 'usd-per-min': { def: 0.006 },
+  'pool-gain': { def: 0, share: true }, 'ci-runs': { def: 20 }, shards: { def: 1, int: true, min: 1 }, 'usd-per-min': { def: 0.006 },
   devs: { def: 5, int: true }, 'local-runs': { def: 10 }, 'usd-per-hour': { def: null }, 'agent-runs': { def: 0 },
   'classic-tokens': { def: 20000 }, 'vto-tokens': { def: 1500 }, 'usd-per-mtok': { def: null }, days: { def: 21 },
 };
+
+/** any vitest-guard label with a vm or shared main mode counts as a fast pool, also mixed ones: `vitest-guard:isolated+vm +quarantine` */
+export const isFastPool = (p) => /vitest-guard:[^ ]*\b(vm|shared)\b/.test(String(p || ''));
 
 export function parse(argv) {
   const o = { json: false };
@@ -65,6 +70,7 @@ export function parse(argv) {
     const v = Number(raw);
     if (raw === undefined || raw === '' || !Number.isFinite(v) || v < 0) throw new Error(`--${m[1]} needs a non-negative number, got ${JSON.stringify(String(raw))}`);
     if (SPEC[m[1]].share && v > 1) throw new Error(`--${m[1]} is a share between 0 and 1 (0.2 = 20 %), got ${raw}`);
+    if (SPEC[m[1]].min !== undefined && v < SPEC[m[1]].min) throw new Error(`--${m[1]} must be at least ${SPEC[m[1]].min}, got ${raw}`);
     if (SPEC[m[1]].int && !Number.isInteger(v)) throw new Error(`--${m[1]} must be a whole number, got ${raw}`);
     o[m[1]] = v;
   }
@@ -88,15 +94,18 @@ export function measuredFrom(records, { since = '30d', now = Date.now() } = {}) 
   const affected = runs.filter((r) => r.kind === 'affected');
   const fellBack = affected.filter((r) => r.testsRun >= 0.95 * r.suiteTotal);
   const partial = affected.filter((r) => r.testsRun < 0.95 * r.suiteTotal);
-  const isGuard = (p) => /vitest-guard:(vm|shared)/.test(String(p || ''));
-  const fullOf = (pred) => median(full.filter((r) => pred(r.pool)).map((r) => r.wallMs));
-  const forks = fullOf((p) => p === 'forks' || p === 'threads'), fast = fullOf(isGuard);
-  const latestFull = full.sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0];
+  // instrumented runs (the collector is on by default) include its overhead: use clean full runs when there are some,
+  // so pools are compared and the suite time is taken from runs of the same kind
+  const clean = full.filter((r) => r.instrumented === false);
+  const basis = clean.length ? clean : full;
+  const fullOf = (pred) => median(basis.filter((r) => pred(r.pool)).map((r) => r.wallMs));
+  const forks = fullOf((p) => p === 'forks' || p === 'threads'), fast = fullOf(isFastPool);
+  const latestFull = [...basis].sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0];
   const local = runs.filter((r) => !r.ci);
   const days = new Set(local.map((r) => String(r.at).slice(0, 10))).size;
   return {
     runs: runs.length, since,
-    suiteMin: latestFull ? latestFull.wallMs / 60000 : null, suitePool: latestFull?.pool ?? null,
+    suiteMin: latestFull ? latestFull.wallMs / 60000 : null, suitePool: latestFull?.pool ?? null, suiteInstrumented: latestFull ? latestFull.instrumented !== false : null,
     selected: partial.length ? median(partial.map((r) => r.testsRun / r.suiteTotal)) : null, partialRuns: partial.length,
     runAll: affected.length ? fellBack.length / affected.length : null, affectedRuns: affected.length,
     poolGain: forks && fast && fast < forks ? 1 - fast / forks : null,
@@ -118,12 +127,15 @@ function applyMeasured(o, m) {
   o.sources = {}; o.measured = m;
   const set = (k, v, note) => { if (v == null || o.given.has(k)) return; o[k] = Math.round(v * 1000) / 1000; o.sources[k] = note; };
   // a full run measured in a fast pool is already faster: the pool gain is in the suite time then, not on top
-  if (m.suitePool && /vitest-guard:(vm|shared)/.test(m.suitePool)) set('suite-min', m.suiteMin / (1 - (m.poolGain ?? 0)), `measured (full run, ${m.suitePool}${m.poolGain ? ', converted to forks' : ''})`);
-  else set('suite-min', m.suiteMin, `measured (latest full run${m.suitePool ? ', ' + m.suitePool : ''})`);
+  // (an explicit --pool-gain wins for the conversion too, so the two never disagree)
+  const gain = o.given.has('pool-gain') ? o['pool-gain'] : m.poolGain;
+  const instr = m.suiteInstrumented ? ', instrumented: includes collector overhead' : '';
+  if (isFastPool(m.suitePool)) set('suite-min', m.suiteMin / (1 - (gain ?? 0)), `measured (full run, ${m.suitePool}${gain ? ', converted to forks' : ''}${instr})`);
+  else set('suite-min', m.suiteMin, `measured (latest full run${m.suitePool ? ', ' + m.suitePool : ''}${instr})`);
   set('selected', m.selected, `measured (median of ${m.partialRuns} affected runs)`);
   set('run-all', m.runAll, `measured (${m.affectedRuns} affected runs)`);
   set('pool-gain', m.poolGain, 'measured (full runs: forks vs vitest-guard)');
-  set('local-runs', m.localRunsPerDay, `measured on this machine (${m.localDays} days)`);
+  set('local-runs', m.localRunsPerDay, `measured on this machine (${m.localDays} days; counts every non-CI run, AI-agent runs included, as the metrics do not record who started a run)`);
 }
 
 const r1 = (x) => Math.round(x * 10) / 10;
@@ -135,7 +147,7 @@ export function estimate(o) {
   const expected = o['run-all'] * full + (1 - o['run-all']) * affected;
   const savedPerRun = Math.max(0, o['suite-min'] - expected);
   // GitHub bills each job rounded up to whole minutes
-  const billed = (min) => Math.ceil(min / o.shards) * o.shards;
+  const billed = (min) => Math.ceil(min) * o.shards; // each of the parallel jobs takes `min` wall time
   const billedBefore = billed(o['suite-min']);
   const billedAfter = o['run-all'] * billed(full) + (1 - o['run-all']) * billed(affected);
   const ciRunsMonth = o['ci-runs'] * o.days;
