@@ -13,11 +13,13 @@ const P = (files, t = {}, guard = {}) => project({ 'vitest.config.mjs': wrappedC
 const Q = (root, q) => { fs.mkdirSync(path.join(root, '.vitest-guard'), { recursive: true }); fs.writeFileSync(path.join(root, '.vitest-guard/incompatible.json'), JSON.stringify({ version: 1, vm: {}, shared: {}, ...q })); };
 
 test('B1 unit: literal paths with [ ] ( ) @ and dot directories are accepted and escaped; * and ? stay refused', () => {
-  const root = project({ 'src/[id]/a.test.js': '', 'src/(g)/b.test.js': '', 'src/@core/c.test.js': '', '.storybook/s.test.js': '', 'src/x*.test.js': '' });
+  // `*` and `?` cannot appear in Windows file names: that half of the case is POSIX-only
+  const star = process.platform === 'win32' ? [] : ['src/x*.test.js'];
+  const root = project({ 'src/[id]/a.test.js': '', 'src/(g)/b.test.js': '', 'src/@core/c.test.js': '', '.storybook/s.test.js': '', ...Object.fromEntries(star.map((f) => [f, ''])) });
   const include = ['**/*.{test,spec}.?(c|m)[jt]s?(x)'];
-  const r = validateTestPaths(root, ['src/[id]/a.test.js', 'src/(g)/b.test.js', 'src/@core/c.test.js', '.storybook/s.test.js', 'src/x*.test.js'], { include, warn: false });
+  const r = validateTestPaths(root, ['src/[id]/a.test.js', 'src/(g)/b.test.js', 'src/@core/c.test.js', '.storybook/s.test.js', ...star], { include, warn: false });
   assert.deepEqual(r.ok, ['src/[id]/a.test.js', 'src/(g)/b.test.js', 'src/@core/c.test.js', '.storybook/s.test.js']);
-  assert.match(r.rejected[0].reason, /glob/);
+  if (star.length) assert.match(r.rejected[0].reason, /glob/);
   assert.equal(escapeGlob('src/[id]/(g)/@(x)/!y.test.js'), 'src/\\[id\\]/\\(g\\)/\\@\\(x\\)/!y.test.js');
   assert.ok(matchesGlobDot('src/[id]/a.test.js', escapeGlob('src/[id]/a.test.js')), 'escaped literal matches itself');
   assert.ok(!matchesGlobDot('src/i/a.test.js', escapeGlob('src/[id]/a.test.js')), 'no character class');
@@ -43,7 +45,7 @@ test('B1: a project with its own root runs in lanes', integration, () => {
   assert.doesNotMatch(v.out, /NOT RUN|INCOMPLETE/);
 });
 
-test('B1/S1: a file that a lane cannot take (a ? in its name) is NOT RUN: check / run / verify fail instead of passing', integration, () => {
+test('B1/S1: a file that a lane cannot take (a ? in its name) is NOT RUN: check / run / verify fail instead of passing', { skip: process.platform === 'win32' ? 'POSIX-only: ? is not allowed in Windows file names' : integration.skip }, () => {
   const root = P({ 'src/a.test.js': pass, 'src/q?.test.js': pass });
   const c = cli(root, ['check', '--mode', 'shared']);
   assert.equal(c.code, 1, c.out);
