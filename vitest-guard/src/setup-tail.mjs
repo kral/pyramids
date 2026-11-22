@@ -3,4 +3,4 @@
 // registry belongs to the setup files; whatever appears later was added by the test file itself and must not
 // reach the next file in the shared worker (REVIEW-2-correctness M6). No imports: one tiny module per file.
 const w = process[Symbol.for('vitest-guard.worker')];
-if (w && typeof w.afterSetup === 'function') w.afterSetup();
+if (w && typeof w.afterSetup === 'function') await w.afterSetup();

@@ -20,13 +20,18 @@ const sect = (name, t) => { if (PROF) PROF[name] = (PROF[name] || 0) + performan
 const W = Symbol.for('vitest-guard.worker');
 // F12: the worker store is a non-writable, non-configurable property: a test file can no longer swap it for a
 // fresh object to erase the baseline (it can still mutate fields; the realms are not a security boundary)
-if (!Object.prototype.hasOwnProperty.call(process, W)) Object.defineProperty(process, W, { value: { seq: 0, prev: null, base: null, roots: new Set(), listeners: [], patched: false, react: null, out: null }, writable: false, configurable: false, enumerable: false });
+if (!Object.prototype.hasOwnProperty.call(process, W)) Object.defineProperty(process, W, { value: { seq: 0, prev: null, base: null, roots: new Set(), listeners: [], intervals: new Map(), patched: false, react: null, out: null }, writable: false, configurable: false, enumerable: false });
 const worker = process[W];
 worker.extNow = null; // set by setup-tail.mjs (last setup file) through worker.afterSetup
+worker.pre = null; // S4: shared mode with the tail: state after this file's setup files, before its own code (afterSetup)
 
 let opts = {};
 try { opts = inject('vitestGuard') || {}; } catch {}
 const outer = (worker.outer ??= getOuterGlobal()); // worker store lives in the outer realm, so this is compiled once per worker
+// S4: the outer realm (process.env, process listeners, builtins) BEFORE the user's setup files and the test file's own
+// top-level code ran. This module is the first setup file and runs again for every test file: the first file's
+// snapshot is the baseline the resets restore, later snapshots show what earlier files left behind.
+const preOuter = fp.captureOuter();
 const inVm = outer !== globalThis;
 const mode = opts.mode || (inVm ? 'vm' : 'shared');
 const root = opts.root || process.cwd();
@@ -164,7 +169,7 @@ if (mode === 'shared' && !worker.patched) {
     target.addEventListener = function (type, fn, o) {
       const st = new Error().stack || '';
       const caller = st.split('\n')[2] || ''; // [0] Error, [1] this wrapper, [2] whoever registered
-      const fromLib = caller.includes('/node_modules/');
+      const fromLib = fp.inNodeModules(caller); // S12: CJS frames on Windows are C:\…\node_modules\…
       if (!fromLib) worker.listeners.push({ target, label, type, fn, o, file: worker.current });
       return add.call(this, type, fn, o);
     };
@@ -176,6 +181,23 @@ if (mode === 'shared' && !worker.patched) {
   };
   if (typeof window !== 'undefined') track(window, 'window');
   if (typeof document !== 'undefined') track(document, 'document');
+  // S5: intervals a test (not a package in node_modules) starts and never clears keep running into the next files;
+  // they are cleared at the end of the file that started them (in forks they die with the file's process)
+  try {
+    const si = globalThis.setInterval, ci = globalThis.clearInterval;
+    if (typeof si === 'function' && typeof ci === 'function' && !si.__vitestGuard) {
+      const setI = function (...a) {
+        const id = si.apply(this, a);
+        if (!fp.inNodeModules((new Error().stack || '').split('\n')[2] || '')) worker.intervals.set(id, worker.current);
+        return id;
+      };
+      const clearI = function (id) { worker.intervals.delete(id); return ci.apply(this, arguments); };
+      for (const [w, o] of [[setI, si], [clearI, ci]]) { try { for (const k of Reflect.ownKeys(o)) if (!(k in w)) Object.defineProperty(w, k, Object.getOwnPropertyDescriptor(o, k)); } catch {} }
+      Object.defineProperty(setI, '__vitestGuard', { value: true });
+      worker.clearInterval = ci;
+      globalThis.setInterval = setI; globalThis.clearInterval = clearI;
+    }
+  } catch {}
   try {
     const rq = createRequire(path.join(root, 'package.json'));
     const client = rq('react-dom/client');
@@ -215,10 +237,15 @@ const realNow = performance.now.bind(performance);
 // used by emotion/MUI): a changed value there is not a leak
 const DEFAULT_IGNORED_MODULES = ['stylis/dist/umd/stylis.js', 'stylis/dist/stylis.mjs'];
 // M6: names on built-in prototypes / in the matcher registry once ALL setup files have run (setup-tail.mjs calls this)
-if (mode === 'shared' && opts.tail) worker.afterSetup = () => { try { worker.extNow = fp.captureExt(); } catch {} };
+// S4: the context baseline (DOM, globals, module state, probes) is taken there too, before the test file's top-level code
+if (mode === 'shared' && opts.tail) worker.afterSetup = async () => {
+  try { worker.extNow = fp.captureExt(); } catch {}
+  try { worker.pre = { outer: detectPollution ? fp.captureOuter() : null, ctx: await captureCtx() }; } catch { worker.pre = null; }
+};
 else worker.afterSetup = null;
+const captureCtx = async () => ({ dom: fp.captureDom(), globals: fp.captureGlobals(), keys: fp.captureGlobalKeys(), eqLen: fp.equalityTesters()?.length ?? 0, mods: moduleState ? fp.captureModuleState() : new Map(), probes: await runProbes() });
 let selfMs = realNow() - T0; // top-level of this module
-let fileStart = 0, heapStart = 0, file = '';
+let fileStart = 0, heapStart = 0, file = '', fileOuter = null, fileCtx = null;
 // ---- F12: integrity of the assertion API in long-lived realms (shared mode) ----
 // A previous file in the same worker could replace expect / core matchers / vi so that later files pass
 // regardless of their assertions. Snapshot once per worker, compare at every file start; a mismatch fails the
@@ -262,9 +289,13 @@ async function beforeAllBody() {
   heapStart = v8.getHeapStatistics().used_heap_size;
   fileStart = realNow();
   let t = performance.now();
-  const outerNow = fp.captureOuter();
+  const pre = worker.pre; worker.pre = null;
+  const outerNow = preOuter; // S4: before the setup files and this file's top-level code
+  // what THIS file starts from, for its own pollution diff (after its setup files; without the tail also after its top level)
+  fileOuter = detectPollution ? pre?.outer ?? fp.captureOuter() : null;
   sect('before:outer', t); t = performance.now();
-  const ctx = mode === 'shared' ? { dom: fp.captureDom(), globals: fp.captureGlobals(), mods: moduleState ? fp.captureModuleState() : new Map(), probes: await runProbes() } : null;
+  const ctx = mode === 'shared' ? pre?.ctx ?? await captureCtx() : null;
+  fileCtx = ctx;
   sect('before:ctx', t);
   if (mode === 'shared' && opts.integrity !== false) {
     const snap = integritySnapshot();
@@ -295,11 +326,15 @@ async function beforeAllBody() {
   if (ctx) {
     const d = fp.diffDom(worker.base.dom, ctx.dom); if (d.length) dirty.push({ kind: 'dom/storage', keys: d });
     const g = fp.diffGlobals(worker.base.globals, ctx.globals); if (g.length) dirty.push({ kind: 'patched globals', keys: g });
+    // S5: added own properties of the global object are reported once per worker (then known: no repeated warning)
+    worker.keysKnown ??= new Set();
+    const ak = fp.addedKeys(worker.base.keys, ctx.keys, worker.keysKnown);
+    if (ak.length) { dirty.push({ kind: 'added globals', keys: ak.slice(0, 20) }); for (const k of ak) worker.keysKnown.add(k); }
     // modules whose exported state keeps CHANGING between consecutive file starts are parser/tokenizer
     // scratch state (stylis exports line/column/position): changed between starts 3 times -> volatile, ignored
     // (logged as {t:'volatile'} and listed by `vitest-guard report`).
     // A real leak that persists (set once, stays) differs from the baseline but is stable, so it stays reported.
-    const short = (id) => id.slice(id.lastIndexOf('/node_modules/') + 14);
+    const short = fp.moduleName; // S12: with / on Windows too
     worker.modLast ??= new Map(); worker.modStreak ??= new Map(); worker.volatile ??= new Set([...DEFAULT_IGNORED_MODULES, ...(opts.ignoreModules || [])]);
     for (const [id, sig] of ctx.mods) {
       const last = worker.modLast.get(id);
@@ -357,10 +392,13 @@ afterAll(async ({}, suite) => { // Vitest 5: fixtures first (must be destructure
   const extAdded = mode === 'shared' && worker.extNow ? fp.diffExt(worker.extNow, fp.captureExt()) : [];
   if (detectPollution && worker.base) {
     // what THIS file leaves behind before we reset it (used by the planner: polluters run last)
-    const p = fp.diffOuter(worker.base.outer, fp.captureOuter(), { ignoreListeners: opts.ignoreListeners || [] }).map((d) => d.kind);
+    const p = fp.diffOuter(fileOuter || worker.base.outer, fp.captureOuter(), { ignoreListeners: opts.ignoreListeners || [] }).map((d) => d.kind);
     if (mode === 'shared') {
       if (fp.diffDom(worker.base.dom, fp.captureDom()).length) p.push('dom/storage');
       if (fp.diffGlobals(worker.base.globals, fp.captureGlobals()).length) p.push('patched globals');
+      if (fp.addedKeys(worker.base.keys, fp.captureGlobalKeys(), worker.keysKnown).length) p.push('added globals');
+      if (worker.intervals.size) p.push('timers');
+      if ((fp.equalityTesters()?.length ?? 0) > (fileCtx?.eqLen ?? Infinity)) p.push('equality testers');
       if (vi.isFakeTimers()) p.push('fake timers');
       if (worker.roots.size) p.push('react roots');
       if (worker.listeners.length) p.push('listeners');
@@ -387,6 +425,10 @@ afterAll(async ({}, suite) => { // Vitest 5: fixtures first (must be destructure
       for (const r of [...worker.roots]) { try { act ? act(() => r.unmount()) : r.unmount(); } catch {} }
     }
     for (const l of worker.listeners.splice(0)) { try { l.target.removeEventListener(l.type, l.fn, l.o); } catch {} }
+    // S5: intervals this worker's test code left running; equality testers this file (not its setup files) added
+    for (const id of [...worker.intervals.keys()]) { try { worker.clearInterval(id); } catch {} }
+    worker.intervals.clear();
+    { const eq = fp.equalityTesters(); if (eq && fileCtx && eq.length > fileCtx.eqLen) eq.length = fileCtx.eqLen; }
     fp.restoreGlobals(worker.base.globals);
     fp.restoreDom(worker.base.dom);
     try { const m = await actual('@tanstack/query-core'); m.onlineManager.setOnline(true); m.focusManager.setFocused(undefined); } catch {}
@@ -408,6 +450,7 @@ afterAll(async ({}, suite) => { // Vitest 5: fixtures first (must be destructure
       const pr = await runProbes();
       for (const k of Object.keys(pr)) if (worker.base.probes[k] !== undefined && worker.base.probes[k] !== pr[k]) r.push('singleton:' + k);
       if (moduleState && fp.diffModuleState(worker.base.mods, fp.captureModuleState()).filter((k) => !worker.volatile?.has(k)).length) r.push('node_modules state');
+      if (fp.addedKeys(worker.base.keys, fp.captureGlobalKeys(), worker.keysKnown).length) r.push('added globals');
       if (extLeftover.some((k) => !k.startsWith('matcher:'))) r.push('built-in extensions');
       if (extLeftover.some((k) => k.startsWith('matcher:'))) r.push('expect matchers');
     }

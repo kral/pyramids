@@ -66,6 +66,9 @@ export const captureOuter = () => outerApi().captureOuter();
 export const diffOuter = (base, now, opts) => outerApi().diffOuter(base, now, opts);
 export const restoreEnv = (baseEnv) => outerApi().restoreEnv(baseEnv);
 
+/** S12: a path or stack frame inside node_modules, with either separator (Windows: C:\\…\\node_modules\\…) */
+export const inNodeModules = (s) => String(s).replace(/\\/g, '/').includes('/node_modules/');
+
 // ---------- context layer (shared mode) ----------
 export const WATCHED_GLOBALS = ['Date', 'Math.random', 'Date.now', 'console.log', 'console.info', 'console.warn', 'console.error', 'console.debug',
   'fetch', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval', 'queueMicrotask', 'requestAnimationFrame', 'cancelAnimationFrame',
@@ -127,8 +130,11 @@ export function captureDom() {
     attrs: de ? [...de.attributes].map((a) => [a.name, a.value]) : [],
     bodyAttrs: document.body ? [...document.body.attributes].map((a) => [a.name, a.value]) : [],
     local: safeKeys(() => localStorage), session: safeKeys(() => sessionStorage),
+    cookie: (() => { try { return String(document.cookie); } catch { return ''; } })(), // S5
+    href: (() => { try { return String(globalThis.location?.href ?? ''); } catch { return ''; } })(),
   };
 }
+const cookiePairs = (c) => String(c || '').split(';').map((x) => x.trim()).filter(Boolean);
 function safeKeys(get) { try { const s = get(); const r = []; for (let i = 0; i < s.length; i++) r.push(s.key(i)); return r.sort(); } catch { return []; } }
 
 export function diffDom(base, now) {
@@ -141,6 +147,8 @@ export function diffDom(base, now) {
   if (JSON.stringify(base.bodyAttrs) !== JSON.stringify(now.bodyAttrs)) out.push('<body> attributes');
   if (base.local.join() !== now.local.join()) out.push('localStorage');
   if (base.session.join() !== now.session.join()) out.push('sessionStorage');
+  if (base.cookie !== now.cookie) out.push('document.cookie');
+  if (base.href !== now.href) out.push('location');
   return out;
 }
 
@@ -153,6 +161,39 @@ export function restoreDom(base) {
   try { resetAttrs(document.documentElement, base.attrs); resetAttrs(document.body, base.bodyAttrs); } catch {}
   try { localStorage.clear(); } catch {}
   try { sessionStorage.clear(); } catch {}
+  // S5: cookies the baseline did not have (or had with another value) expire, on every path prefix of the current URL
+  try {
+    const keep = new Set(cookiePairs(base.cookie));
+    const paths = ['/'];
+    try { const segs = String(location.pathname || '/').split('/').filter(Boolean); for (let i = 1; i <= segs.length; i++) paths.push('/' + segs.slice(0, i).join('/')); } catch {}
+    for (const pair of cookiePairs(document.cookie)) {
+      if (keep.has(pair)) continue;
+      const name = pair.split('=')[0];
+      for (const p of paths) document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=${p}`;
+    }
+  } catch {}
+  // S5: the URL (history.pushState / replaceState of a router) goes back to the baseline URL (same origin only)
+  try { if (base.href && location.href !== base.href) history.replaceState(null, '', base.href); } catch {}
+}
+
+// S5: own properties of the global object that a file added (globalThis.__cfg = …, window.x = …). They are reported,
+// not deleted: a package in node_modules (cached for the whole worker) may have defined one on first import.
+const LIB_GLOBALS = /^(__vite|__vitest|IS_REACT_ACT_ENVIRONMENT$|__EMOTION_|__REACT_DEVTOOLS_|regeneratorRuntime$|__core-js)/;
+export function captureGlobalKeys() {
+  try { return new Set(Object.getOwnPropertyNames(globalThis).filter((k) => !LIB_GLOBALS.test(k))); } catch { return new Set(); }
+}
+/** keys in `now` that neither `base` nor `known` has */
+export function addedKeys(base, now, known = null) {
+  const out = [];
+  if (!base || !now) return out;
+  for (const k of now) if (!base.has(k) && !(known && known.has(k))) out.push(k);
+  return out;
+}
+
+// S5: expect.addEqualityTesters() pushes into one array shared by every file of a long-lived worker
+/** @returns {Array|null} the live array of custom equality testers */
+export function equalityTesters() {
+  try { const a = globalThis[Symbol.for('$$jest-matchers-object')]?.customEqualityTesters; return Array.isArray(a) ? a : null; } catch { return null; }
 }
 
 // CJS module-level state of loaded node_modules packages (auto-detect): one level of primitives and
@@ -191,7 +232,8 @@ export function captureModuleState() {
     for (const id of ids) {
       if (modSeen.has(id)) continue;
       modSeen.add(id);
-      if (!id.includes('/node_modules/') || id.includes('/node_modules/vitest/') || id.includes('/node_modules/@vitest/') || id.includes('/node_modules/vitest-guard/') || id.includes('/node_modules/vite/')) continue;
+      const nid = id.replace(/\\/g, '/'); // S12: require.cache keys use \ on Windows
+      if (!nid.includes('/node_modules/') || nid.includes('/node_modules/vitest/') || nid.includes('/node_modules/@vitest/') || nid.includes('/node_modules/vitest-guard/') || nid.includes('/node_modules/@jirikral/vitest-guard/') || nid.includes('/node_modules/vite/')) continue;
       const ex = cache[id]?.exports;
       if (!ex || typeof ex !== 'object') continue;
       const keys = sigKeys(ex);
@@ -204,9 +246,11 @@ export function captureModuleState() {
 }
 export function diffModuleState(base, now) {
   const out = [];
-  for (const [id, sig] of now) { const b = base.get(id); if (b !== undefined && b !== sig) out.push(id.slice(id.lastIndexOf('/node_modules/') + 14)); }
+  for (const [id, sig] of now) { const b = base.get(id); if (b !== undefined && b !== sig) out.push(moduleName(id)); }
   return out;
 }
+/** S12: the part of a module path after the last node_modules/, with / (also for Windows paths) */
+export const moduleName = (id) => { const n = String(id).replace(/\\/g, '/'); return n.slice(n.lastIndexOf('/node_modules/') + 14); };
 
 // ---------- extensions of built-ins and of the matcher registry (shared mode, REVIEW-2-correctness M6) ----------
 // A test file that adds `String.prototype.shout` or calls `expect.extend({ toBeEven })` makes every later file in

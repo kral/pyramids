@@ -53,6 +53,70 @@ test('S9: compare recommends no fast mode when the isolated reference is not usa
   assert.equal(readJson(path.join(root, '.vitest-guard/run/modes.json')).modes.root, 'isolated');
 });
 
+const jsdom = { environment: 'jsdom' };
+const runLog = (root) => { const d = path.join(root, '.vitest-guard/run/logs'); return fs.readdirSync(d).filter((n) => n.endsWith('.jsonl')).flatMap((n) => fs.readFileSync(path.join(d, n), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))); };
+
+test('S4: the baseline is taken before the first file\'s top-level code (shared and vm); setup-file state stays and is not reported', integration, () => {
+  const root = P({
+    'setup.js': `process.env.FROM_SETUP = '1';\n`,
+    'src/a.test.js': `import { test, expect } from 'vitest'; globalThis.fetch = () => 'mock'; process.env.RV_LEAK = '1'; document.title = 'A'; test('a', () => { expect(1).toBe(1); });\n`,
+    'src/b.test.js': `import { test, expect } from 'vitest'; test('b', () => { expect(String(globalThis.fetch)).not.toContain('mock'); expect(process.env.RV_LEAK).toBeUndefined(); expect(document.title).toBe(''); expect(process.env.FROM_SETUP).toBe('1'); });\n`,
+  }, { ...jsdom, setupFiles: ['./setup.js'] });
+  for (const mode of ['shared', 'vm']) {
+    const r = cli(root, ['verify', '--mode', mode, '--orders', 'forward', '--no-quarantine']);
+    assert.equal(r.code, 0, `${mode}\n${r.out}`);
+    assert.match(r.out, /false-green 0, false-red 0/);
+    const log = runLog(root);
+    assert.deepEqual(log.filter((x) => x.dirty), [], `${mode}: no file starts dirty (setup-file env is not a leak)`);
+    if (mode === 'shared') assert.ok(log.find((x) => x.t === 'end' && x.file === 'src/a.test.js' && !x.mode)?.pollution?.includes('process.env'), 'the first file\'s top-level pollution is recorded');
+  }
+});
+
+test('S5: cookies, the URL, intervals and equality testers are reset after a file; added globals are reported', integration, () => {
+  const root = P({
+    'setup.js': `import { expect } from 'vitest'; expect.addEqualityTesters([(a, b) => (a && b && a.__eqAny && b.__eqAny ? true : undefined)]);\n`,
+    'src/a.test.js': `import { test, expect } from 'vitest'; test('pollute', () => { document.cookie = 's=1'; history.pushState({}, '', '/users/5'); globalThis.__x = 1; globalThis.__iv = setInterval(() => { globalThis.__ticks = (globalThis.__ticks || 0) + 1; }, 1); expect.addEqualityTesters([() => true]); });\n`,
+    'src/b.test.js': `import { test, expect } from 'vitest';
+test('clean', async () => {
+  expect(document.cookie).toBe('');
+  expect(location.pathname).toBe('/');
+  const t0 = globalThis.__ticks || 0; await new Promise((r) => setTimeout(r, 30)); expect(globalThis.__ticks || 0).toBe(t0);
+  expect(() => expect({ a: 1 }).toEqual({ a: 2 })).toThrow();
+  expect({ __eqAny: 1 }).toEqual({ __eqAny: 2 }); // the setup file's tester is kept
+});\n`,
+  }, { ...jsdom, setupFiles: ['./setup.js'] });
+  const r = cli(root, ['verify', '--mode', 'shared', '--orders', 'forward', '--no-quarantine']);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /false-green 0, false-red 0/);
+  const log = runLog(root);
+  const end = log.find((x) => x.t === 'end' && x.file === 'src/a.test.js' && x.pollution);
+  for (const k of ['dom/storage', 'timers', 'equality testers', 'added globals']) assert.ok(end.pollution.includes(k), k + ' ' + JSON.stringify(end));
+  const start = log.find((x) => x.t === 'start' && x.file === 'src/b.test.js' && x.dirty);
+  assert.deepEqual(start?.dirty.map((d) => d.kind), ['added globals'], JSON.stringify(start));
+  assert.ok(start.dirty[0].keys.includes('__x'));
+});
+
+test('S12 unit: node_modules checks and module names accept Windows separators', async () => {
+  const fp = await import('../src/fingerprint.mjs');
+  assert.equal(fp.inNodeModules('    at Object.<anonymous> (C:\\proj\\node_modules\\lib\\index.js:3:9)'), true);
+  assert.equal(fp.inNodeModules('    at file:///C:/proj/node_modules/lib/index.mjs:3:9'), true);
+  assert.equal(fp.inNodeModules('    at C:\\proj\\src\\a.test.js:3:9'), false);
+  assert.equal(fp.moduleName('C:\\proj\\node_modules\\@scope\\lib\\dist\\x.js'), '@scope/lib/dist/x.js');
+  assert.equal(fp.moduleName('/p/node_modules/a/node_modules/b/i.js'), 'b/i.js');
+  // a require.cache key with backslashes (what Node uses on Windows) is scanned and reported by package path
+  const { createRequire } = await import('node:module');
+  const cache = createRequire(import.meta.url).cache;
+  const id = 'C:\\proj\\node_modules\\vg-fake-lib\\index.js';
+  const exp = { count: 0 };
+  cache[id] = { id, exports: exp, loaded: true, children: [] };
+  try {
+    const base = fp.captureModuleState();
+    assert.ok(base.has(id), 'tracked');
+    exp.count = 1;
+    assert.deepEqual(fp.diffModuleState(base, fp.captureModuleState()), ['vg-fake-lib/index.js']);
+  } finally { delete cache[id]; }
+});
+
 test('S12 unit: isInside is separator-aware, and case-insensitive with either separator on Windows', async () => {
   const { isInside } = await import('../src/safety.mjs');
   const win = { platform: 'win32' }, posix = { platform: 'linux' };
