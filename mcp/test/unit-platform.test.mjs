@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
-import { slash, pathKey, killTree, isCaseInsensitiveFs, analyzerCandidates } from '../src/platform.mjs';
+import { slash, specId, pathKey, killTree, isCaseInsensitiveFs, analyzerCandidates } from '../src/platform.mjs';
 import { runtimeBase, ensurePrivateDir, createServer, connectTo, readEndpoint, safeEqual, newAddress, acquireStartLock } from '../src/ipc.mjs';
 import { computeCoverage } from '../src/coverage.mjs';
 
@@ -100,4 +100,16 @@ test('computeCoverage: covered / partial / uncovered and branches', () => {
   assert.deepEqual(c.branches[2], [1, 0]);
   assert.deepEqual(c.testsByLine[1], ['t1']);
   assert.equal(c.more[1], 1);
+});
+
+test('specId: separators only on win32, never NFC (NFD and backslash file names keep their on-disk spelling)', () => {
+  const nfd = '/p/Mu\u030A\u030Aj proj\u030Cekt.test.ts'; // U + combining marks, as written by a macOS checkout
+  assert.equal(specId(nfd, 'linux'), nfd);
+  assert.notEqual(specId(nfd, 'linux'), nfd.normalize('NFC'));
+  assert.equal(specId('/p/a\\b.test.ts', 'linux'), '/p/a\\b.test.ts');
+  assert.equal(specId('c:\\p\\a.test.ts', 'win32'), 'C:/p/a.test.ts');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vto-nfd-'));
+  const name = path.join(dir, 'e\u0301.test.ts');
+  fs.writeFileSync(name, '');
+  try { assert.ok(fs.existsSync(specId(name, process.platform)) || process.platform !== 'linux'); } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
