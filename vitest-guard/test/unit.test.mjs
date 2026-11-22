@@ -187,3 +187,39 @@ test('swan: filled block water where the terminal supports it, line art on the o
   assert.equal(blocksSupported({}, 'win32'), false);
   assert.equal(blocksSupported({ WT_SESSION: 'x' }, 'win32'), true);
 });
+
+test('swan fits narrow terminals: every frame line stays below the column count, long labels get an ellipsis', async () => {
+  const { swanFrame, swanLayout, truncateVisible, visibleLength } = await import('../src/swan.mjs');
+  const long = 'comparing modes · root · forks · 20 files \x1b[2m12.3 s\x1b[22m';
+  for (const columns of [50, 60, 80, 120]) {
+    const lay = swanLayout(columns, 40);
+    assert.equal(lay.kind, 'frame');
+    for (let i = 0; i < 60; i++) for (const l of swanFrame(i, long, { width: lay.width, columns, color: true })) assert.ok(visibleLength(l) <= columns - 1, `${columns} columns: ${visibleLength(l)}`);
+  }
+  assert.equal(swanLayout(49, 40).kind, 'line');
+  assert.equal(swanLayout(120, 8).kind, 'line', 'a terminal shorter than the frame');
+  assert.equal(truncateVisible('abcdefghij', 5), 'abcd…');
+  assert.equal(truncateVisible('abc', 5), 'abc');
+});
+
+test('swan on a 60-column terminal never writes a line wider than the terminal; below 50 columns it is one line', async () => {
+  const { startSwan, visibleLength } = await import('../src/swan.mjs');
+  for (const columns of [60, 40]) {
+    let out = '';
+    const s = startSwan('comparing modes · root · forks · 20 files', { stream: { isTTY: true, columns, rows: 30, write: (t) => { out += t; } }, env: { TERM: 'xterm', NO_COLOR: '1' }, delayMs: 0, intervalMs: 1000 });
+    await new Promise((r) => setTimeout(r, 30));
+    s.stop();
+    for (const l of out.split(/\n|\r/)) assert.ok(visibleLength(l.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')) <= columns - 1);
+    if (columns < 50) assert.doesNotMatch(out, /\.-\./, 'no swan, a status line only');
+    assert.ok(out.endsWith('\x1b[?25h'));
+  }
+});
+
+test('swan restores the cursor on SIGTERM and SIGHUP too (handlers registered, removed on stop)', async () => {
+  const { startSwan } = await import('../src/swan.mjs');
+  const before = [process.listenerCount('SIGTERM'), process.listenerCount('SIGHUP'), process.listenerCount('SIGINT')];
+  const s = startSwan('x', { stream: { isTTY: true, write() {} }, env: { TERM: 'xterm' }, delayMs: 100000 });
+  assert.deepEqual([process.listenerCount('SIGTERM'), process.listenerCount('SIGHUP'), process.listenerCount('SIGINT')], before.map((n) => n + 1));
+  s.stop();
+  assert.deepEqual([process.listenerCount('SIGTERM'), process.listenerCount('SIGHUP'), process.listenerCount('SIGINT')], before);
+});

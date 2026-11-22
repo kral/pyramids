@@ -63,8 +63,9 @@ if (cmd === 'serve') {
   const swan = cmd === 'savings' && !flags.json ? (await import('../../vitest-guard/src/swan.mjs')).startSwan('reading savings') : null;
   try { b = await Backend.open(root, { daemon: !stateless && autostartCmds.has(cmd), client: 'vto-cli' }); }
   catch (e) { swan?.stop(); console.error(`vto: ${e.message}`); process.exit(2); }
-  if (b.daemonError && !flags.json) console.error(`vto: daemon unavailable (${b.daemonError}); running in-process`);
-  let code = 0;
+  // printed through the swan, so a redraw or stop() never erases it
+  if (b.daemonError && !flags.json) { const msg = `vto: daemon unavailable (${b.daemonError}); running in-process`; swan ? swan.log(msg) : console.error(msg); }
+  let code = 0, runSwan = null;
   try {
     if (cmd === 'status') out(await b.call('status'));
     else if (cmd === 'affected') { const a = await b.call('affected', { base: flags.base, limit: 100 }); out(a); if (a.runAll) code = 3; } // D3: 3 = run all
@@ -79,7 +80,7 @@ if (cmd === 'serve') {
       }) : undefined;
       // the swan glides with live progress; failures are printed above it as they arrive (TTY only)
       const human = !flags.json && cmd !== 'ci-report';
-      const runSwan = human ? (await import('../../vitest-guard/src/swan.mjs')).startSwan('starting the run') : null;
+      runSwan = human ? (await import('../../vitest-guard/src/swan.mjs')).startSwan('starting the run') : null;
       const prog = { runId: null, total: 0, done: 0, failed: 0, files: 0, filesTotal: 0 };
       const fmt = (x) => x.toLocaleString('en-US');
       if (human) b.on('event', (ev) => {
@@ -105,7 +106,8 @@ if (cmd === 'serve') {
       } else flags.json ? out(r) : printRun(r);
       code = r.failed ? 1 : r.status === 'error' ? 2 : 0;
     } else { await b.close(); usageError(`unknown command ${cmd}`); }
-  } catch (e) { console.error(`vto: ${e.message}`); code = 2; }
+  } catch (e) { swan?.stop(); runSwan?.stop(); console.error(`vto: ${e.message}`); code = 2; } // stop first: the swan's redraw must not erase the message
+  swan?.stop(); runSwan?.stop();
   await b.close();
   process.exit(code);
 }
@@ -137,11 +139,13 @@ async function printSavings(r) {
     return;
   }
   const t = r.tokens;
+  // like with like: vto's answers for the runs that have a classic baseline; never a negative saving in green
+  const saved = (x) => (x > 0 ? p.green(n(x) + ' saved') : p.dim('no saving'));
   const tokenRows = t.runsMeasured ? [
-    ['vto answers', n(t.returned), ''],
-    ['classic default reporter', n(t.classicDefault), p.green(n(t.saved.vsDefault) + ' saved')],
-    ['classic minimal (agents)', n(t.classicMinimal), p.green(n(t.saved.vsMinimal) + ' saved')],
-    ['classic verbose', n(t.classicVerbose), p.green(n(t.saved.vsVerbose) + ' saved')],
+    ['vto answers (same runs)', n(t.returnedMeasured ?? t.returned), ''],
+    ['classic default reporter', n(t.classicDefault), saved(t.saved.vsDefault)],
+    ['classic minimal (agents)', n(t.classicMinimal), saved(t.saved.vsMinimal)],
+    ['classic verbose', n(t.classicVerbose), saved(t.saved.vsVerbose)],
   ] : [];
   const est = r.estimated.wall + r.estimated.cpu;
   summary({

@@ -40,7 +40,7 @@ export class Metrics {
     const out = {
       since, runs: runs.length, fullRuns: runs.filter(isFull).length, partialRuns: 0, fullRunsAvoided: 0,
       wallSavedMs: 0, cpuSavedMs: 0, wallSavedVsForksMs: 0, cpuSavedVsForksMs: 0, testMinutesSaved: 0,
-      tokens: { returned: tokTotal, classicDefault: 0, classicMinimal: 0, classicVerbose: 0, runsMeasured: 0 },
+      tokens: { returned: tokTotal, classicDefault: 0, classicMinimal: 0, classicVerbose: 0, runsMeasured: 0, returnedMeasured: 0 },
       ttffGainedMs: 0, ttffRuns: 0, estimated: { wall: 0, cpu: 0 }, measured: { wall: 0, cpu: 0 }, perPool: {},
     };
     for (const r of runs) {
@@ -60,6 +60,7 @@ export class Metrics {
       if (r.failed && r.ttffMs != null && cfWall != null) { out.ttffGainedMs += Math.max(0, cfWall - r.ttffMs); out.ttffRuns++; }
       if (cf?.classic && r.classic) {
         out.tokens.runsMeasured++;
+        out.tokens.returnedMeasured += tokByRun.get(r.runId) || 0; // vto's answers for the same runs the classic sums cover
         for (const k of ['default', 'minimal', 'verbose']) {
           const a = cf.classic[k], b = r.classic[k];
           if (!a || !b) continue;
@@ -71,7 +72,8 @@ export class Metrics {
       const pp = (out.perPool[r.pool] ||= { runs: 0, lastFull: cf ? { wallMs: cf.wallMs, cpuMs: cf.cpuMs, at: cf.at, tests: cf.testsRun } : null });
       pp.runs++;
     }
-    out.tokens.saved = { vsDefault: out.tokens.classicDefault - out.tokens.returned, vsMinimal: out.tokens.classicMinimal - out.tokens.returned, vsVerbose: out.tokens.classicVerbose - out.tokens.returned };
+    const rm = out.tokens.returnedMeasured; // compare like with like: only the runs that have a classic baseline
+    out.tokens.saved = { vsDefault: out.tokens.classicDefault - rm, vsMinimal: out.tokens.classicMinimal - rm, vsVerbose: out.tokens.classicVerbose - rm };
     out.cpuHoursSaved = round(out.cpuSavedMs / 3600e3, 3);
     out.wallHoursSaved = round(out.wallSavedMs / 3600e3, 3);
     out.testMinutesSaved = round(out.testMinutesSaved, 1);
