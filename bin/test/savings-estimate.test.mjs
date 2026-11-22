@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { parse, estimate } from '../savings-estimate.mjs';
 
 test('savings estimate: model, billing rounded up per job, validation', () => {
@@ -120,4 +121,35 @@ test('savings estimate --from-measured: overhead is measured, baseline is the fo
     assert.ok(e.perRun.share > 0.9, `saving ${e.perRun.share}`);
     assert.ok(e.month.ciRunnerMinutes > 0);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+const rec = (extra = {}) => JSON.stringify({ t: 'run', at: new Date().toISOString(), kind: 'full', status: 'done', pool: 'forks', testsRun: 10, suiteTotal: 10, wallMs: 600000, ...extra }) + '\n';
+const mkProj = () => fs.mkdtempSync(path.join(os.tmpdir(), 'vto-sav-safe-'));
+
+test('savings estimate --from-measured: a symlinked .vto dir or metrics file is refused', { skip: process.platform === 'win32' }, () => {
+  const real = mkProj(); fs.mkdirSync(path.join(real, 'elsewhere')); fs.writeFileSync(path.join(real, 'elsewhere', 'metrics.jsonl'), rec());
+  const a = mkProj(); fs.symlinkSync(path.join(real, 'elsewhere'), path.join(a, '.vto'));
+  assert.throws(() => parse(['--from-measured', a]), /symbolic link/);
+  const b = mkProj(); fs.mkdirSync(path.join(b, '.vto')); fs.symlinkSync(path.join(real, 'elsewhere', 'metrics.jsonl'), path.join(b, '.vto', 'metrics.jsonl'));
+  assert.throws(() => parse(['--from-measured', b]), /symbolic link/);
+});
+
+test('savings estimate --from-measured: oversized files are refused, over-long lines skipped', () => {
+  const d = mkProj(); fs.mkdirSync(path.join(d, '.vto'));
+  const f = path.join(d, '.vto', 'metrics.jsonl');
+  fs.writeFileSync(f, rec() + JSON.stringify({ t: 'run', pad: 'x'.repeat(70000) }) + '\n');
+  assert.equal(parse(['--from-measured', d]).measured.runs, 1); // the long line is skipped, the normal one counts
+  const fd = fs.openSync(f, 'w'); fs.ftruncateSync(fd, 65 * 1024 * 1024); fs.closeSync(fd); // sparse
+  assert.throws(() => parse(['--from-measured', d]), /over the 64 MB limit/);
+});
+
+test('savings estimate --from-measured: a git-tracked metrics file gets a one-line note', () => {
+  const g = (d, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...a], { cwd: d, encoding: 'utf8' });
+  const d = mkProj();
+  if (g(d, 'init', '-q').status !== 0) return;
+  fs.mkdirSync(path.join(d, '.vto')); fs.writeFileSync(path.join(d, '.vto', 'metrics.jsonl'), rec());
+  let err = ''; const orig = console.error; console.error = (...a) => { err += a.join(' ') + '\n'; };
+  try { parse(['--from-measured', d]); assert.equal(err, ''); g(d, 'add', '.vto/metrics.jsonl'); parse(['--from-measured', d]); } finally { console.error = orig; }
+  assert.match(err, /committed to git: these are someone else's measurements/);
+  assert.equal(err.trim().split('\n').length, 1);
 });
