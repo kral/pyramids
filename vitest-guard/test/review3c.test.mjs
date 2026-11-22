@@ -106,7 +106,10 @@ test('R4 unit: the lane sequencer ranks by the lane base, not by a project root,
     const s = new VitestGuardSequencer({ config: { root } });
     const out = await s.sort(['packages/a/src/b.test.js', 'packages/a/src/m.test.js', 'packages/a/src/z.test.js'].map(spec));
     assert.deepEqual(out.map((x) => path.relative(root, x.moduleId).split(path.sep).join('/')), ['packages/a/src/z.test.js', 'packages/a/src/m.test.js', 'packages/a/src/b.test.js']);
-    await assert.rejects(() => s.sort([spec('packages/a/src/other.test.js')]), /not in the lane file/);
+    await assert.rejects(() => s.sort([spec('packages/a/src/other.test.js')]), /none of the 1 test file\(s\) is in the lane file/);
+    // B1: a file of another (config-file) project keeps its place after the lane instead of crashing the run
+    const mixed = await s.sort(['other/x.test.js', 'packages/a/src/b.test.js', 'packages/a/src/z.test.js'].map(spec));
+    assert.deepEqual(mixed.map((x) => path.relative(root, x.moduleId).split(path.sep).join('/')), ['packages/a/src/z.test.js', 'packages/a/src/b.test.js', 'other/x.test.js']);
   } finally { if (old === undefined) delete process.env.VITEST_GUARD_LANE_FILE; else process.env.VITEST_GUARD_LANE_FILE = old; }
 });
 

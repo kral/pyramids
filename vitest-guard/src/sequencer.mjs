@@ -43,8 +43,11 @@ export default class VitestGuardSequencer {
     const base = typeof raw?.base === 'string' ? raw.base : process.cwd();
     let realBase = base; try { realBase = fs.realpathSync(base); } catch {}
     const relOf = (s) => { const r = path.relative(base, s.moduleId).split(path.sep).join('/'); return rank.has(r) ? r : path.relative(realBase, s.moduleId).split(path.sep).join('/'); };
-    const missing = files.filter((s) => !rank.has(relOf(s)));
-    if (missing.length) throw new Error(`[vitest-guard] sequencer: ${missing.length} test file(s) are not in the lane file ${laneFile} (e.g. ${relOf(missing[0])}): the lane order cannot be applied`);
-    return [...files].sort((a, b) => rank.get(relOf(a)) - rank.get(relOf(b)));
+    // B1: files of other (unguarded, e.g. config-file) projects are not in the lane: they keep their order after the lane.
+    // Only when no file matches at all is the base wrong and the lane order cannot be applied (verify's per-worker
+    // ORDER MISMATCH check still catches a lane file that ran out of order).
+    if (files.length && !files.some((s) => rank.has(relOf(s)))) throw new Error(`[vitest-guard] sequencer: none of the ${files.length} test file(s) is in the lane file ${laneFile} (e.g. ${relOf(files[0])}): the lane order cannot be applied`);
+    const at = (s) => (rank.has(relOf(s)) ? rank.get(relOf(s)) : Infinity);
+    return [...files].map((s, i) => [s, i]).sort((a, b) => (at(a[0]) - at(b[0])) || (a[1] - b[1])).map(([s]) => s);
   }
 }

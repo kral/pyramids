@@ -310,7 +310,7 @@ test('records carry only fields known to contracts/raw-2.schema.json (plus the a
   }
 });
 
-test('findGit never resolves git from the project (node_modules/.bin) or a relative PATH entry', { skip: process.platform === 'win32' }, async () => {
+test('POSIX-only: findGit never resolves git from the project (node_modules/.bin) or a relative PATH entry', { skip: process.platform === 'win32' && 'POSIX-only: shebang git stub' }, async () => {
   const { findGit } = await import('../git.mjs');
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vto-fg-')));
   const bin = path.join(root, 'node_modules', '.bin'); fs.mkdirSync(bin, { recursive: true });

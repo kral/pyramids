@@ -68,7 +68,7 @@ test('S4: the baseline is taken before the first file\'s top-level code (shared 
     assert.match(r.out, /false-green 0, false-red 0/);
     const log = runLog(root);
     assert.deepEqual(log.filter((x) => x.dirty), [], `${mode}: no file starts dirty (setup-file env is not a leak)`);
-    if (mode === 'shared') assert.ok(log.find((x) => x.t === 'end' && x.file === 'src/a.test.js' && !x.mode)?.pollution?.includes('process.env'), 'the first file\'s top-level pollution is recorded');
+    if (mode === 'shared') assert.ok(log.some((x) => x.t === 'end' && x.file === 'src/a.test.js' && !x.mode && x.pollution?.includes('process.env')), 'the first file\'s top-level pollution is recorded');
   }
 });
 
