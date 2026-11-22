@@ -9,6 +9,7 @@ import { Lane } from './lane-client.mjs';
 import { slash } from './platform.mjs';
 import { classify, writeEnvJson, splitWorkers } from './classify.mjs';
 import { findConfig } from './project.mjs';
+import { guardLabel } from './guard-label.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -106,7 +107,7 @@ export class LanesMixin {
     // a trigger that changed while no lane ran is detected by select() before this overwrites it
     st.triggers = t;
     st.setupFiles = info.setupFiles;
-    st.lane = { pool: info.pool, vitestGuard: info.vitestGuard, vitest: info.vitest, maxWorkers: info.maxWorkers };
+    st.lane = { pool: info.pool, vitestGuard: info.vitestGuard, vitestGuardQuarantine: info.vitestGuardQuarantine, vitest: info.vitest, maxWorkers: info.maxWorkers };
     this.store.filesDirty = true;
   }
   async restartLanes(reason) {
@@ -142,7 +143,7 @@ export class LanesMixin {
   poolName() {
     if (this.groupsEnabled()) return `dom:${this.groupPool('dom')}+node:${this.groupPool('node')}`;
     const l = this.store.state.lane;
-    const actual = l ? (l.vitestGuard ? `vitest-guard:${l.vitestGuard}` : l.pool) : null;
+    const actual = guardLabel(l);
     if (this.config.pool === 'config') return actual ? `${actual} (project config)` : 'project config';
     return actual || this.config.pool;
   }

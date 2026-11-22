@@ -11,6 +11,7 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
 import { slash } from './platform.mjs';
+import { summarizeGuard } from './guard-label.mjs';
 import { compactError } from './format.mjs';
 import { Console } from 'node:console';
 import { Writable } from 'node:stream';
@@ -153,7 +154,6 @@ if (opts.group && RAW_POOL[pool] && !(guarded && (pool === 'vm' || pool === 'sha
   }
 }
 const setupFiles = new Set();
-let vitestGuard = null;
 for (const p of vitest.projects) {
   const c = p.config;
   for (const f of c.setupFiles) setupFiles.add(slash(f));
@@ -163,10 +163,11 @@ for (const p of vitest.projects) {
   c.maxConcurrency = 1;
   if (c.sequence) c.sequence.concurrent = false;
   if (c.coverage) c.coverage.enabled = false;
-  if (c.provide?.vitestGuard) vitestGuard = c.provide.vitestGuard.mode;
 }
+// the main projects' mode; the quarantine sibling (forks) is a suffix, never the label (it used to win as the last project)
+const guard = summarizeGuard(vitest.projects.map((p) => p.config));
 const info = {
-  vitest: vitestVersion, pool: [...new Set(vitest.projects.map((p) => p.config.pool))].join('+'), vitestGuard,
+  vitest: vitestVersion, pool: [...new Set(vitest.projects.map((p) => p.config.pool))].join('+'), vitestGuard: guard?.mode ?? null, vitestGuardQuarantine: !!guard?.quarantine,
   configFile: vitest.vite.config.configFile ? slash(vitest.vite.config.configFile) : null,
   setupFiles: [...setupFiles], projects: vitest.projects.map((p) => p.name || ''), maxWorkers: vitest.config.maxWorkers,
   envDir: slash(vitest.vite.config.envDir || root),
