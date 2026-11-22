@@ -50,6 +50,11 @@ file failed and was neither quarantined nor explained (flaky and unexplained giv
 needs several predecessors at once is reported as "needs a combination of files" (all candidates listed); a
 non-reproducible failure stays FLAKY and blocks the gate until fixed or re-run.
 
+## Known limits
+
+- Globals that a test file adds (`globalThis.__x`, `window.__cfg`) are reported as "added globals" in the run log but are not removed between files in shared mode.
+- Overrides of `navigator` properties (for example `navigator.language`) are neither reset nor reported.
+
 ## What vitest-guard does not cover
 
 - `constructor ===` and prototype identity checks, `Object.prototype.toString` tricks in user code.

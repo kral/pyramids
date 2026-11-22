@@ -51,7 +51,7 @@ test('verify --no-plan is honoured; --orders planned with --no-plan is a usage e
   const withPlan = cli(root, [...base, '--orders', 'gate,planned']);
   assert.equal(withPlan.code, 0, withPlan.out); assert.match(withPlan.out, /plan: \d+ lanes/);
   const s = cli(root, ['verify', '--sample', 'many']);
-  assert.equal(s.code, 2, s.out); assert.match(s.stderr, /--sample must be a positive number/);
+  assert.equal(s.code, 2, s.out); assert.match(s.stderr, /--sample must be a positive integer/);
   const h = cli(root, ['hunt']); assert.equal(h.code, 2); assert.match(h.stderr, /missing <victim>/);
 });
 
@@ -61,4 +61,15 @@ test('reactPackages reaches the setup file through provide', integration, () => 
   fs.writeFileSync(path.join(root, 'print.mjs'), code);
   const r = cli(root, [], { bin: path.join(root, 'print.mjs') });
   assert.match(r.stdout, /\["my-react-lib"\]/, r.out);
+});
+
+test('CLI argument errors are usage errors (exit 2)', () => {
+  const root = project({ 'package.json': '{"type":"module"}' });
+  const none = cli(root, []); assert.equal(none.code, 2); assert.match(none.out, /usage: vitest-guard/);
+  const unk = cli(root, ['check', '--bogus', 'src/a']); assert.equal(unk.code, 2); assert.match(unk.stderr, /unknown option --bogus/);
+  const neg = cli(root, ['check', '--no-hnt']); assert.equal(neg.code, 2); assert.match(neg.stderr, /--no-hnt/);
+  for (const a of [['check', '--retries', 'x'], ['plan', '--lanes', 'abc'], ['verify', '--sample'], ['verify', '--sample', '2.5']]) {
+    const r = cli(root, a); assert.equal(r.code, 2, a.join(' ') + r.out); assert.match(r.stderr, /must be a/);
+  }
+  const scan = cli(root, ['scan', '--help']); assert.equal(scan.code, 0); assert.doesNotMatch(scan.stdout, /must be wrapped/);
 });
