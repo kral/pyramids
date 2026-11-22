@@ -58,8 +58,9 @@ export function sanitizeText(value) {
 export function validateTestPaths(root, entries, { include, exclude = [], label = 'vitest-guard data', warn = true } = {}) {
   const ok = [], rejected = [];
   const realRoot = safeRealpath(root);
+  const names = new Map(); // directory -> its entry names (one readdir per directory and call)
   for (const entry of entries) {
-    const reason = checkEntry(realRoot, entry, include, exclude);
+    const reason = checkEntry(realRoot, entry, include, exclude, names);
     if (reason) rejected.push({ entry, reason });
     else if (!ok.includes(entry)) ok.push(entry);
   }
@@ -70,7 +71,18 @@ export function validateTestPaths(root, entries, { include, exclude = [], label 
   return { ok, rejected };
 }
 
-function checkEntry(root, entry, include, exclude) {
+/**
+ * S12: `p` is `root` or inside it. Separator-aware (no prefix match of `/a/bc` in `/a/b`); on Windows also
+ * case-insensitive and with either separator.
+ */
+export function isInside(root, p, { platform = process.platform } = {}) {
+  const win = platform === 'win32', P = win ? path.win32 : path.posix;
+  const norm = (x) => { let n = P.resolve(String(x)); if (win) n = n.toLowerCase(); return n.length > 1 && n.endsWith(P.sep) && !/^[a-z]:\\$/i.test(n) ? n.slice(0, -1) : n; };
+  const r = norm(root), q = norm(p);
+  return q === r || q.startsWith(r.endsWith(P.sep) ? r : r + P.sep);
+}
+
+function checkEntry(root, entry, include, exclude, names = new Map()) {
   if (typeof entry !== 'string' || !entry) return 'not a non-empty string';
   if (entry.length > 1024 || /[\0-\x1f\x7f]/.test(entry)) return 'control characters or too long';
   if (entry.includes('\\')) return 'backslash (use / separators)';
@@ -84,10 +96,19 @@ function checkEntry(root, entry, include, exclude) {
   try { st = fs.lstatSync(abs); } catch { return 'file does not exist'; }
   if (st.isSymbolicLink()) {
     const real = safeRealpath(abs);
-    if (!real || !(real === root || real.startsWith(root + path.sep))) return 'symlink pointing outside the project';
+    if (!real || !isInside(root, real)) return 'symlink pointing outside the project';
     try { st = fs.statSync(real); } catch { return 'dangling symlink'; }
   }
   if (!st.isFile()) return 'not a regular file';
+  // S12: on a case-insensitive file system (NTFS, APFS) lstat accepts `src/Button.test.tsx` for `src/button.test.tsx`,
+  // but Vitest's include / exclude literals compare exactly: the entry must spell every segment as the directory does
+  let dir = root;
+  for (const seg of entry.split('/')) {
+    let set = names.get(dir);
+    if (!set) { try { set = new Set(fs.readdirSync(dir)); } catch { set = null; } names.set(dir, set); }
+    if (set && !set.has(seg)) return `the name on disk is spelled differently (case or Unicode form of ${JSON.stringify(seg)})`;
+    dir = path.join(dir, seg);
+  }
   return null;
 }
 

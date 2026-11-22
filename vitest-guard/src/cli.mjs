@@ -69,7 +69,7 @@ const load = (c, n, d) => {
 export const saveState = (c, n, v) => save(c, n, v);
 const save = (c, n, v) => {
   const file = P(c, n), txt = JSON.stringify(stamp(n, v), null, 2) + '\n'; // writers always write the current version
-  if (file.startsWith(c.stateDir)) ensureStateDir(c.stateDir); else safeDir(c.dir);
+  if (file.startsWith(c.stateDir + path.sep)) ensureStateDir(c.stateDir); else safeDir(c.dir); // S12: with the separator
   let old = null; try { old = readStateFile(file); } catch (e) { if (e?.code === 'E_UNSAFE_STATE') throw e; }
   if (old === txt) return; // unchanged content: do not touch the file
   if (old !== null && STATE_VERSIONS[n]) { let cur; try { cur = JSON.parse(old); } catch {} if (cur) assertStateVersion(n, cur, relOf(c, file)); } // never downgrade a newer file

@@ -52,3 +52,24 @@ test('S9: compare recommends no fast mode when the isolated reference is not usa
   assert.match(rows[0].why, /isolated reference run is not usable/);
   assert.equal(readJson(path.join(root, '.vitest-guard/run/modes.json')).modes.root, 'isolated');
 });
+
+test('S12 unit: isInside is separator-aware, and case-insensitive with either separator on Windows', async () => {
+  const { isInside } = await import('../src/safety.mjs');
+  const win = { platform: 'win32' }, posix = { platform: 'linux' };
+  assert.equal(isInside('C:\\Proj', 'c:\\proj\\node_modules\\x', win), true);
+  assert.equal(isInside('C:\\Proj', 'C:/Proj/src/a.test.ts', win), true);
+  assert.equal(isInside('C:\\Proj', 'C:\\Proj', win), true);
+  assert.equal(isInside('C:\\Proj', 'C:\\Project\\x', win), false, 'no prefix match without a separator');
+  assert.equal(isInside('C:\\', 'C:\\x', win), true);
+  assert.equal(isInside('/a/b', '/a/bc', posix), false);
+  assert.equal(isInside('/a/b', '/a/b/c', posix), true);
+  assert.equal(isInside('/a/B', '/a/b/c', posix), false, 'POSIX stays case-sensitive');
+});
+
+test('S12: a quarantine key whose case differs from the file on disk is rejected (never claimed for a file Vitest would not match)', async () => {
+  const { validateTestPaths } = await import('../src/safety.mjs');
+  const root = project({ 'src/button.test.js': '' });
+  const r = validateTestPaths(root, ['src/Button.test.js', 'src/button.test.js'], { warn: false });
+  assert.deepEqual(r.ok, ['src/button.test.js']);
+  assert.equal(r.rejected.length, 1); // 'file does not exist' (case-sensitive FS) or 'spelled differently' (NTFS / APFS)
+});

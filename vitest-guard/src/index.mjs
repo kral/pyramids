@@ -5,7 +5,7 @@ import v8 from 'node:v8';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import VitestGuardSequencer from './sequencer.mjs';
-import { validateTestPaths, sanitize, escapeGlob } from './safety.mjs';
+import { validateTestPaths, sanitize, escapeGlob, isInside } from './safety.mjs';
 import { readStateJson, writeStateFile } from './statefs.mjs';
 import { versionProblem } from './stateformat.mjs';
 import { listTestFiles, classifyFiles, readModes, DEFAULT_AUTO_MODES, DOM_ENVS } from './auto.mjs';
@@ -32,12 +32,12 @@ export function setupFileFor(root, file = SETUP_FILE) {
   let out = file;
   try {
     const rr = realOr(root), rf = realOr(file);
-    if (!(rf === rr || rf.startsWith(rr + path.sep))) {
+    if (!isInside(rr, rf)) { // S12: case-insensitive on Windows
       // the copy must itself be a REAL path inside the root: Vitest re-runs a setup file per test file by
       // invalidating exactly the path it was given (a symlinked spelling would run once per worker only)
       const nm = realOr(path.join(rr, 'node_modules'));
       const dir = path.join(nm, '.vitest-guard');
-      if (fs.existsSync(nm) && nm.startsWith(rr + path.sep) && !(fs.existsSync(dir) && fs.lstatSync(dir).isSymbolicLink())) {
+      if (fs.existsSync(nm) && nm !== rr && isInside(rr, nm) && !(fs.existsSync(dir) && fs.lstatSync(dir).isSymbolicLink())) {
         const to = path.join(dir, path.basename(file));
         const src = fs.readFileSync(file);
         let same = false;
