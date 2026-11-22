@@ -131,7 +131,7 @@ test('ui: plain summary without colour, colour only when forced', async () => {
 test('swan: constant frame width, off without a TTY or in CI, draws and cleans up on a TTY', async () => {
   const { swanFrame, animationEnabled, startSwan } = await import('../src/swan.mjs');
   const widths = new Set();
-  for (let i = 0; i < 200; i++) for (const l of swanFrame(i, '')) widths.add(l.trimEnd().length <= 42);
+  for (let i = 0; i < 200; i++) for (const l of swanFrame(i, '')) widths.add(l.trimEnd().length <= 46);
   assert.deepEqual([...widths], [true]);
   assert.equal(swanFrame(0, 'x').length, swanFrame(57, 'x').length);
   assert.doesNotMatch(swanFrame(3, 'x').join('\n'), /\x1b/);
@@ -166,4 +166,14 @@ test('swan.log prints above the swan (plain write without a TTY)', async () => {
   s.stop();
   const i = out.indexOf('✗ a failure');
   assert.ok(i > 0 && out.lastIndexOf('.-.') > i, 'the line is printed, then the swan is drawn again below it');
+});
+
+test('swan waves: varied crests, two water rows, the swan bobs with the water under it', async () => {
+  const { surface, waterRows, swanFrame } = await import('../src/swan.mjs');
+  const glyphs = new Set();
+  const tops = new Set();
+  for (let t = 0; t < 120; t++) { const [top, bot] = waterRows(surface(t)); for (const [c] of [...top, ...bot]) glyphs.add(c); tops.add(swanFrame(t, '').findIndex((l) => l.includes('.-.'))); }
+  for (const c of ['^', '~', '/', '\\', '_', '-']) assert.ok(glyphs.has(c), `water uses ${c}`);
+  assert.deepEqual([...tops].sort(), [0, 1], 'the swan rides up and down');
+  assert.equal(swanFrame(0, '').length, 8);
 });

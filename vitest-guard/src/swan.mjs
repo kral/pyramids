@@ -3,32 +3,73 @@
 // Off in CI, when stderr is not a TTY, with TERM=dumb, or with VTO_NO_ANIMATION=1. Colour follows NO_COLOR/FORCE_COLOR.
 import { colorEnabled } from './ui.mjs';
 
-// the vto logo as ASCII: arched head, S-shaped neck, body rising to the right, an arc of water below
+// the vto logo as ASCII: arched head, S-shaped neck, body rising to the right; it rides on generated waves
 const SWAN = [
-  '   .-.           ',
-  '  /   \\          ',
-  '      /          ',
+  '   .-.            ',
+  '  /   \\           ',
+  '      /           ',
   "     /         _.-'",
-  "    (     _.-'   ",
-  "     `--'        ",
+  "    (     _.-'    ",
+  "     `--'         ",
 ];
-const ARC = ["   `-.________.-'", "  `-._________.-' "];
-const RIPPLE = ' ~   ~~    ~  ~~~   ~    ';
-const SW = Math.max(...SWAN.map((r) => r.length), ...ARC.map((r) => r.length));
-const WIDTH = 40;
-const HEIGHT = SWAN.length + 1;
+const SW = Math.max(...SWAN.map((r) => r.length));
+const WIDTH = 44;
+const HEIGHT = SWAN.length + 2; // one row of bobbing room + two rows of water (the swan's lowest line can sit on the crests)
+
+/** water height 0..1 per column at time t: a slow swell, groups of big and small waves, fine ripples */
+export function surface(t, w = WIDTH) {
+  const h = [];
+  for (let x = 0; x < w; x++) {
+    const swell = Math.sin(x * 0.11 - t * 0.06);
+    const amp = 0.55 + 0.45 * Math.sin(x * 0.05 + t * 0.03);
+    const chop = Math.sin(x * 0.55 - t * 0.28) * amp;
+    const ripple = 0.25 * Math.sin(x * 1.3 + t * 0.5);
+    h.push(0.5 + 0.18 * swell + 0.26 * chop + 0.06 * ripple);
+  }
+  return h;
+}
+
+/** two rows of water; kind per cell: 0 empty, 1 water, 2 sharp crest */
+export function waterRows(h) {
+  const top = [], bot = [];
+  for (let x = 0; x < h.length; x++) {
+    const v = h[x], l = h[x - 1] ?? v, r = h[x + 1] ?? v;
+    const sharp = v - (l + r) / 2;
+    if (v > 0.7 && v >= l && v >= r) top.push(sharp > 0.045 ? ['^', 2] : ['~', 1]);
+    else if (v > 0.66) top.push([r > l ? '/' : '\\', 1]);
+    else if (v > 0.6 && sharp > 0.03) top.push(['.', 1]);
+    else top.push([' ', 0]);
+    bot.push([v > 0.75 ? ' ' : v > 0.45 ? '~' : v > 0.33 ? '-' : '_', v > 0.75 ? 0 : 1]);
+  }
+  return [top, bot];
+}
 
 export function swanFrame(i, label = '', { color = false } = {}) {
-  const blue = (t) => (color ? `\x1b[38;5;69m${t}\x1b[39m` : t);
-  const dim = (t) => (color ? `\x1b[2m${t}\x1b[22m` : t);
-  // glides from right to left and comes round again; small waves trail behind it
+  const paint = { swan: (t) => (color ? `\x1b[38;5;69m${t}\x1b[39m` : t), water: (t) => (color ? `\x1b[2m\x1b[38;5;69m${t}\x1b[39m\x1b[22m` : t), crest: (t) => (color ? `\x1b[38;5;153m${t}\x1b[39m` : t) };
+  const t = i * 1.0;
+  const h = surface(t);
+  const [top, bot] = waterRows(h);
+  // glides from right to left and comes round again
   const span = WIDTH - SW;
   const x = span - (Math.floor(i / 3) % (span + 1));
-  const pad = (t) => t + ' '.repeat(SW - t.length);
-  const lines = SWAN.map((row) => ' '.repeat(x) + blue(pad(row)) + ' '.repeat(span - x));
-  const shift = i % RIPPLE.length;
-  const trail = (RIPPLE.slice(shift) + RIPPLE).repeat(2).slice(0, span - x);
-  lines.push(' '.repeat(x) + blue(pad(ARC[Math.floor(i / 4) % 2])) + dim(blue(trail)) + '  ' + label);
+  // bobs with the water under its body: up on a crest, down in a trough
+  const under = h.slice(x + 3, x + 14);
+  const up = under.reduce((a, b) => a + b, 0) / under.length > 0.52;
+  const y0 = up ? 0 : 1;
+  const grid = Array.from({ length: HEIGHT }, () => Array.from({ length: WIDTH }, () => [' ', 'none']));
+  for (let c = 0; c < WIDTH; c++) {
+    grid[HEIGHT - 2][c] = [top[c][0], top[c][1] === 2 ? 'crest' : top[c][1] ? 'water' : 'none'];
+    grid[HEIGHT - 1][c] = [bot[c][0], bot[c][1] ? 'water' : 'none'];
+  }
+  SWAN.forEach((row, r) => { for (let c = 0; c < row.length; c++) if (row[c] !== ' ') grid[y0 + r][x + c] = [row[c], 'swan']; });
+  const lines = grid.map((cells) => {
+    let out = '', run = '', kind = null;
+    const flush = () => { if (run) out += kind === 'none' ? run : paint[kind](run); run = ''; };
+    for (const [ch, k] of cells) { if (k !== kind) { flush(); kind = k; } run += ch; }
+    flush();
+    return out;
+  });
+  lines[HEIGHT - 1] += '  ' + label;
   return lines;
 }
 
