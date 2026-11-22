@@ -622,8 +622,12 @@ export async function cmdCompare(c, o) {
       // B4: the file status is compared too (a file can fail in forks outside any test); S10: the sample only
       for (const [file, fr] of r.files) { if (!sample.includes(file)) continue; for (const [t, st] of fr.tests) tests.set(file + ' > ' + t, st); tests.set(file + ' > (file)', fr.status); }
       const lost = sample.filter((f) => !r.files.has(f));
-      res[mode] = { cpu: cpu0 !== null && cpu1 !== null ? Math.round((cpu1 - cpu0) * 10) / 10 : null, wall: Math.round((Date.now() - t0) / 100) / 10, tests, lost, failed: [...tests.values()].filter((x) => x === 'failed').length };
+      const failed = [...tests.values()].filter((x) => x === 'failed').length;
+      // S9: no report, or a non-zero exit that no failing file explains (unhandled error, crashed worker): the run proves nothing
+      const broken = r.error ? String(r.error) : r.code && !failed ? `Vitest exited with code ${r.code} although no file failed` : null;
+      res[mode] = { cpu: cpu0 !== null && cpu1 !== null ? Math.round((cpu1 - cpu0) * 10) / 10 : null, wall: Math.round((Date.now() - t0) / 100) / 10, tests, lost, failed, broken };
       if (lost.length) say(`compare: ${lost.length} file(s) produced no result in ${mode === 'isolated' ? 'forks' : mode}: ${lost.slice(0, 10).join(' ')}`);
+      if (broken) say(`compare: the ${mode === 'isolated' ? 'forks' : mode} run is not usable: ${broken}`);
     }
     const ref = res.isolated.tests;
     for (const mode of ['vm', 'shared']) {
@@ -634,7 +638,8 @@ export async function cmdCompare(c, o) {
     const metric = (m) => res[m].cpu ?? res[m].wall;
     const base = metric('isolated');
     // S9: without a complete reference nothing is proven: no fast mode is recommended
-    const ok = res.isolated.lost.length ? [] : ['vm', 'shared'].filter((m) => !res[m].falseGreen && !res[m].falseRed && !res[m].lost.length);
+    const refOk = !res.isolated.lost.length && !res.isolated.broken && sample.length > 0 && res.isolated.tests.size > 0;
+    const ok = refOk ? ['vm', 'shared'].filter((m) => !res[m].falseGreen && !res[m].falseRed && !res[m].lost.length && !res[m].broken) : [];
     const best = ok.sort((a, b) => metric(a) - metric(b))[0];
     let rec = 'isolated (forks)', why = 'no fast mode matched isolated results';
     if (best) {
@@ -642,7 +647,7 @@ export async function cmdCompare(c, o) {
       if (gain >= 0.1) { rec = best; why = `${Math.round(gain * 100)} % less ${res[best].cpu !== null ? 'CPU' : 'wall time'} than forks` + (best === 'shared' ? '; shared realms can hide failures: gate on it only after a clean `vitest-guard verify --mode shared`' + (ok.includes('vm') ? ' (safer: vm)' : '') : ''); }
       else { why = `best fast mode (${best}) saves only ${Math.round(gain * 100)} %: not worth the shared-realm risk`; }
     }
-    if (res.isolated.lost.length) why = 'the isolated reference run did not report every file';
+    if (!refOk) why = res.isolated.broken ? `the isolated reference run is not usable (${res.isolated.broken})` : 'the isolated reference run did not report every file';
     rows.push({ project: project || '(root)', files: sample.length, of: all.length, isolated: metric('isolated'), vm: metric('vm'), shared: metric('shared'), vmMismatch: res.vm.falseGreen + res.vm.falseRed, sharedMismatch: res.shared.falseGreen + res.shared.falseRed, falseGreen: res.vm.falseGreen + res.shared.falseGreen, recommend: rec, why });
   }
   } finally { swan.stop(); }

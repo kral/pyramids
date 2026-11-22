@@ -40,3 +40,15 @@ test('S2: a leftover auto.json does not make check / verify run in mode auto; an
   const c = cli(root, ['check']);
   assert.doesNotMatch(c.out, /check · auto|auto: resolved mode/, c.out);
 });
+
+test('S9: compare recommends no fast mode when the isolated reference is not usable (unhandled error, no failing file)', integration, () => {
+  const root = P({
+    'src/a.test.js': `import { test, expect } from 'vitest'; test('ok', () => { if (process.env.VITEST_GUARD_MODE === 'isolated') Promise.reject(new Error('boom only in forks')); expect(1).toBe(1); });\n`,
+    'src/b.test.js': pass,
+  });
+  const r = cli(root, ['compare', '--sample', 'all']);
+  const rows = readJson(path.join(root, '.vitest-guard/run/compare.json')).rows;
+  assert.equal(rows[0].recommend, 'isolated (forks)', r.out);
+  assert.match(rows[0].why, /isolated reference run is not usable/);
+  assert.equal(readJson(path.join(root, '.vitest-guard/run/modes.json')).modes.root, 'isolated');
+});
