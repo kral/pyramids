@@ -77,11 +77,27 @@ if (cmd === 'serve') {
         const m = f && /^(.*?)(?::(\d+))?$/.exec(f);
         return { ...(m ? { file: m[1] } : {}), ...(m?.[2] ? { line: +m[2] } : {}), ...(flags.name ? { name: flags.name } : {}) };
       }) : undefined;
-      if (!flags.json && cmd !== 'ci-report') b.on('event', (ev) => { if (ev.ev === 'failure') console.error(`✗ ${ev.id}\n  ${String(ev.message).split('\n')[0]}`); });
+      // the swan glides with live progress; failures are printed above it as they arrive (TTY only)
+      const human = !flags.json && cmd !== 'ci-report';
+      const runSwan = human ? (await import('../../vitest-guard/src/swan.mjs')).startSwan('starting the run') : null;
+      const prog = { runId: null, total: 0, done: 0, failed: 0, files: 0, filesTotal: 0 };
+      const fmt = (x) => x.toLocaleString('en-US');
+      if (human) b.on('event', (ev) => {
+        if (prog.runId && ev.runId && ev.runId !== prog.runId) return;
+        if (ev.ev === 'run-start') { prog.total = ev.total || 0; prog.filesTotal = ev.files || 0; }
+        else if (ev.ev === 'progress') Object.assign(prog, { done: ev.done ?? prog.done, failed: ev.failed ?? prog.failed, files: ev.files ?? prog.files, filesTotal: ev.filesTotal || prog.filesTotal });
+        else if (ev.ev === 'failure') runSwan.log(`✗ ${ev.id}\n  ${String(ev.message).split('\n')[0]}`);
+        else return;
+        // the first full run does not know the test count yet: count files then
+        const what = prog.total ? `${fmt(prog.done)} / ${fmt(prog.total)} tests` : `${fmt(prog.done)} test${prog.done === 1 ? '' : 's'}${prog.filesTotal ? ` · ${fmt(prog.files)} / ${fmt(prog.filesTotal)} files` : ''}`;
+        runSwan.update(what + (prog.failed ? ` · ${fmt(prog.failed)} failed` : ''));
+      });
       if (b.kind === 'daemon') await b.call('subscribe', { topics: ['run'], replay: false });
       const s = await b.call('start_run', { kind, filters, base: flags.base, bail: flags.bail, timeoutS: flags.timeout, instrumented: !flags.clean });
-      if (!flags.json && cmd !== 'ci-report') console.error(`vto: ${s.runId} ${s.kind}: ${s.total} tests in ${s.files} files, pool ${s.pool}${s.runAll ? ` (run all: ${(s.reasons || []).join('; ')})` : ''}`);
-      const r = await b.call('wait_run', { runId: s.runId });
+      prog.runId = s.runId; if (s.total) prog.total = s.total;
+      if (human) runSwan.log(`vto: ${s.runId} ${s.kind}: ${s.total} tests in ${s.files} files, pool ${s.pool}${s.runAll ? ` (run all: ${(s.reasons || []).join('; ')})` : ''}`);
+      let r;
+      try { r = await b.call('wait_run', { runId: s.runId }); } finally { runSwan?.stop(); }
       if (cmd === 'ci-report') {
         const rep = await b.call('ci_summary', { runId: s.runId });
         if (flags.out) fs.writeFileSync(flags.out, JSON.stringify(rep, null, 2) + '\n');

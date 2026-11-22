@@ -39,7 +39,7 @@ export function animationEnabled(stream = process.stderr, env = process.env) {
 
 // startSwan('measuring') → { update(label), stop() }; a no-op when the animation is off
 export function startSwan(label = '', { stream = process.stderr, env = process.env, delayMs = 400, intervalMs = 120 } = {}) {
-  if (!animationEnabled(stream, env)) return { update() {}, stop() {} };
+  if (!animationEnabled(stream, env)) return { update() {}, stop() {}, log(line) { stream.write(line + '\n'); } };
   const color = colorEnabled(stream, env);
   const t0 = Date.now();
   let text = label, i = 0, drawn = false, timer = null, stopped = false;
@@ -59,6 +59,11 @@ export function startSwan(label = '', { stream = process.stderr, env = process.e
   start.unref?.();
   return {
     update(l) { text = l; },
+    // print a line above the swan (a failure, a note) without leaving a broken frame behind
+    log(line) {
+      if (stopped) { stream.write(line + '\n'); return; }
+      const was = drawn; clear(); stream.write(line + '\n'); if (was) draw();
+    },
     stop() {
       if (stopped) return;
       clearTimeout(start); clearInterval(timer);

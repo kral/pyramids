@@ -153,3 +153,17 @@ test('swan: constant frame width, off without a TTY or in CI, draws and cleans u
   assert.ok(out.endsWith('\x1b[J\x1b[?25h'), 'the swan is erased and the cursor shown again');
   const before = out.length; await new Promise((r) => setTimeout(r, 20)); assert.equal(out.length, before, 'nothing drawn after stop');
 });
+
+test('swan.log prints above the swan (plain write without a TTY)', async () => {
+  const { startSwan } = await import('../src/swan.mjs');
+  let out = '';
+  startSwan('x', { stream: { isTTY: false, write: (s) => { out += s; } }, env: {} }).log('✗ a failure');
+  assert.equal(out, '✗ a failure\n');
+  out = '';
+  const s = startSwan('run', { stream: { isTTY: true, write: (t) => { out += t; } }, env: { TERM: 'xterm', NO_COLOR: '1' }, delayMs: 0, intervalMs: 1000 });
+  await new Promise((r) => setTimeout(r, 15));
+  s.log('✗ a failure');
+  s.stop();
+  const i = out.indexOf('✗ a failure');
+  assert.ok(i > 0 && out.lastIndexOf('.-.') > i, 'the line is printed, then the swan is drawn again below it');
+});
