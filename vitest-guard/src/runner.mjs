@@ -2,6 +2,7 @@
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { privateTmp, readOwnedFile } from './safety.mjs';
 
@@ -58,8 +59,26 @@ export function childCpuSeconds() {
   } catch { return null; }
 }
 
-/** Normalised error signature: first meaningful line without paths, numbers, ports and ANSI. */
-export function signature(msg = '') {
-  const line = msg.replace(/\x1b\[[0-9;]*m/g, '').split('\n').map((l) => l.trim()).find((l) => l && !l.startsWith('at ')) || '';
-  return line.replace(/(file:\/\/)?\/[^\s'")]+/g, '<path>').replace(/\b\d+(\.\d+)?\b/g, 'N').slice(0, 200);
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** literal directory `dir` with either separator, optionally as a file:// URL, followed by the rest of the path */
+const under = (dir) => {
+  const parts = dir.replace(/[\\/]+$/, '').split(/[\\/]+/).map(esc);
+  return new RegExp(`(?:file:\\/\\/\\/?)?${parts.join('[\\\\/]+')}(?:[\\\\/]+([^\\s'")]*))?(?![^\\s\\\\/'")])`, /^[a-z]:|^\\\\/i.test(dir) || process.platform === 'win32' ? 'gi' : 'g');
+};
+const END = `[^\\s'")]*`;
+/**
+ * Normalised error signature: first meaningful line without absolute paths, user names, numbers, ports and ANSI.
+ * It goes into the committed incompatible.json / conflicts.json, so it must be the same on every machine
+ * (architecture review 3 S4): paths inside `root` become root-relative with `/`; every other absolute path
+ * (POSIX, `C:\\…`, `C:/…`, UNC `\\\\server\\share`, file:// URLs, home directories even with spaces) becomes <path>.
+ */
+export function signature(msg = '', { root = process.cwd(), home = os.homedir() } = {}) {
+  let line = String(msg).replace(/\x1b\[[0-9;]*m/g, '').split('\n').map((l) => l.trim()).find((l) => l && !l.startsWith('at ')) || '';
+  if (root && root.length > 1) line = line.replace(under(root), (m, rest) => (rest ? rest.replace(/\\/g, '/') : '.'));
+  line = line.replace(new RegExp(`(?:file:\\/\\/\\/?)?(?:[A-Za-z]:)?[\\\\/]+(?:Users|home|Documents and Settings)[\\\\/]+[^\\\\/\\n'"]+${END}`, 'gi'), '<path>'); // user dirs, names with spaces
+  if (home && home.length > 1) line = line.replace(under(home), '<path>'); // homes elsewhere (/root, /var/lib/ci, …)
+  line = line
+    .replace(new RegExp(`file:\\/\\/${END}`, 'gi'), '<path>')
+    .replace(new RegExp(`(?<![\\w.~<>-])(?:\\\\\\\\[^\\s\\\\'")]+\\\\${END}|[A-Za-z]:[\\\\/]${END}|\\/[^\\s'")]+)`, 'g'), '<path>'); // UNC, drive, POSIX
+  return line.replace(/\b\d+(\.\d+)?\b/g, 'N').slice(0, 200);
 }
