@@ -620,10 +620,39 @@ function escapeGlob(p) {
  * matches `.storybook/`; path.matchesGlob does not). Dot segments are masked for a second attempt.
  */
 function matchesGlobDot(file, glob) {
+  glob = normGlob(glob);
   if (file === glob || escapeGlob(file) === glob) return true; // literal entries (path.matchesGlob ignores \\ escapes)
   if (path.matchesGlob(file, glob)) return true;
   if (!/(^|\/)\./.test(file)) return false;
   return path.matchesGlob(file.split('/').map((s) => (s.startsWith('.') ? '\uE000' + s.slice(1) : s)).join('/'), glob);
+}
+
+/** R5/R6: Vitest (tinyglobby) accepts `./src/**`; path.matchesGlob does not: drop leading `./` segments. */
+const normGlob = (g) => (typeof g === 'string' ? g.replace(/^(?:\.\/)+/, '') : g);
+
+const globCache = new Map();
+/**
+ * R5/R6: the test files of a project exactly as Vitest globs them: Vitest's own tinyglobby (resolved from the
+ * project's vitest, never from vitest-guard's location) with Vitest's options (`dot: true`, exclude as `ignore`,
+ * `expandDirectories: false`). Root-relative paths with `/`, sorted. null when tinyglobby cannot be resolved
+ * (callers then fall back to their own matching and must fail closed).
+ */
+function globProjectFiles(root, include, exclude = []) {
+  const key = JSON.stringify([root, include, exclude]);
+  if (globCache.has(key)) return globCache.get(key);
+  let out = null;
+  try {
+    let tg = null;
+    for (const base of [path.join(root, 'package.json'), path.join(process.cwd(), 'package.json')]) {
+      try { const rq = createRequire(base); tg = createRequire(rq.resolve('vitest/package.json'))('tinyglobby'); break; } catch {}
+    }
+    if (tg && typeof tg.globSync === 'function') {
+      out = tg.globSync([].concat(include), { dot: true, cwd: root, ignore: [].concat(exclude), expandDirectories: false })
+        .map((f) => path.relative(root, path.resolve(root, f)).split(path.sep).join('/')).sort();
+    }
+  } catch { out = null; }
+  globCache.set(key, out);
+  return out;
 }
 
 // C0 (incl. ESC, \n, \t), DEL, C1 (incl. U+009B CSI, U+009D OSC), soft hyphen, Arabic letter mark, zero-width and bidi
@@ -658,20 +687,27 @@ function sanitizeText(value) {
  * that match the project's include globs and none of its exclude globs.
  * @returns {{ ok: string[], rejected: {entry: unknown, reason: string}[] }}
  */
-function validateTestPaths(root, entries, { include, exclude = [], label = 'vitest-guard data', warn = true } = {}) {
-  const ok = [], rejected = [];
+function validateTestPaths(root, entries, { include, exclude = [], files = null, label = 'vitest-guard data', warn = true } = {}) {
+  const ok = [], rejected = [], remapped = [];
+  const map = new Map(); // entry -> the on-disk spelling it was applied to
   const realRoot = safeRealpath(root);
   const names = new Map(); // directory -> its entry names (one readdir per directory and call)
+  const fileSet = files ? new Set(files) : null;
   for (const entry of entries) {
-    const reason = checkEntry(realRoot, entry, include, exclude, names);
-    if (reason) rejected.push({ entry, reason });
-    else if (!ok.includes(entry)) ok.push(entry);
+    const r = checkEntry(realRoot, entry, include, exclude, names, fileSet);
+    if (r.reason) { rejected.push({ entry, reason: r.reason }); continue; }
+    if (r.path !== entry) remapped.push({ entry, path: r.path });
+    map.set(entry, r.path);
+    if (!ok.includes(r.path)) ok.push(r.path);
   }
   if (warn && rejected.length) {
     for (const r of rejected.slice(0, 20)) console.warn(`[vitest-guard] ignoring ${sanitize(label)} entry ${sanitize(JSON.stringify(String(r.entry)), 200)}: ${r.reason}`);
     if (rejected.length > 20) console.warn(`[vitest-guard] ... and ${rejected.length - 20} more ignored ${sanitize(label)} entries`);
   }
-  return { ok, rejected };
+  if (warn && remapped.length) {
+    for (const r of remapped.slice(0, 20)) console.warn(`[vitest-guard] ${sanitize(label)} entry ${sanitize(JSON.stringify(r.entry), 200)} is spelled differently on disk (case or Unicode form): applied to ${sanitize(JSON.stringify(r.path), 200)}; re-spell the key (\`vitest-guard check\` rewrites it)`);
+  }
+  return { ok, rejected, remapped, map };
 }
 
 /**
@@ -685,34 +721,58 @@ function isInside(root, p, { platform = process.platform } = {}) {
   return q === r || q.startsWith(r.endsWith(P.sep) ? r : r + P.sep);
 }
 
-function checkEntry(root, entry, include, exclude, names = new Map()) {
-  if (typeof entry !== 'string' || !entry) return 'not a non-empty string';
-  if (entry.length > 1024 || /[\0-\x1f\x7f]/.test(entry)) return 'control characters or too long';
-  if (entry.includes('\\')) return 'backslash (use / separators)';
-  if (path.isAbsolute(entry) || /^[a-zA-Z]:/.test(entry)) return 'absolute path';
-  if (entry.split('/').some((s) => s === '..' || s === '.' || s === '')) return 'not a normalized relative path (., .. or empty segment)';
-  if (GLOB_META.test(entry)) return 'glob metacharacters (only literal paths are accepted)';
-  if (include && !include.some((g) => matchesGlobDot(entry, g))) return 'does not match the include globs';
-  if (exclude.some((g) => matchesGlobDot(entry, g))) return 'matches an exclude glob';
-  const abs = path.join(root, entry);
-  let st;
-  try { st = fs.lstatSync(abs); } catch { return 'file does not exist'; }
-  if (st.isSymbolicLink()) {
-    const real = safeRealpath(abs);
-    if (!real || !isInside(root, real)) return 'symlink pointing outside the project';
-    try { st = fs.statSync(real); } catch { return 'dangling symlink'; }
-  }
-  if (!st.isFile()) return 'not a regular file';
-  // S12: on a case-insensitive file system (NTFS, APFS) lstat accepts `src/Button.test.tsx` for `src/button.test.tsx`,
-  // but Vitest's include / exclude literals compare exactly: the entry must spell every segment as the directory does
+const fold = (x) => x.normalize('NFC').toLowerCase();
+/**
+ * The on-disk spelling of `entry` below `root`, segment by segment. S12 / review 3 item 3: a segment that is not
+ * spelled exactly as on disk is mapped to the single directory entry that equals it case-insensitively after NFC
+ * normalization (NTFS/APFS accept `src/Button.test.tsx` for `src/button.test.tsx`; macOS NFD vs Linux NFC names), so
+ * a committed quarantine key keeps guarding its file. Two candidates (a case-sensitive file system) -> null.
+ */
+function diskSpelling(root, entry, names) {
   let dir = root;
+  const out = [];
   for (const seg of entry.split('/')) {
     let set = names.get(dir);
-    if (!set) { try { set = new Set(fs.readdirSync(dir)); } catch { set = null; } names.set(dir, set); }
-    if (set && !set.has(seg)) return `the name on disk is spelled differently (case or Unicode form of ${JSON.stringify(seg)})`;
-    dir = path.join(dir, seg);
+    if (set === undefined) { try { set = fs.readdirSync(dir); } catch { set = null; } names.set(dir, set); }
+    if (!set) return null;
+    let name = set.includes(seg) ? seg : null;
+    if (!name) {
+      const cand = set.filter((n) => fold(n) === fold(seg));
+      if (cand.length !== 1) return null;
+      name = cand[0];
+    }
+    out.push(name);
+    dir = path.join(dir, name);
   }
-  return null;
+  return out.join('/');
+}
+
+function checkEntry(root, entry, include, exclude, names = new Map(), files = null) {
+  const no = (reason) => ({ reason });
+  if (typeof entry !== 'string' || !entry) return no('not a non-empty string');
+  if (entry.length > 1024 || /[\0-\x1f\x7f]/.test(entry)) return no('control characters or too long');
+  if (entry.includes('\\')) return no('backslash (use / separators)');
+  if (path.isAbsolute(entry) || /^[a-zA-Z]:/.test(entry)) return no('absolute path');
+  if (entry.split('/').some((s) => s === '..' || s === '.' || s === '')) return no('not a normalized relative path (., .. or empty segment)');
+  if (GLOB_META.test(entry)) return no('glob metacharacters (only literal paths are accepted)');
+  if (!root) return no('file does not exist');
+  const p = diskSpelling(root, entry, names);
+  if (p === null) return no('file does not exist');
+  if (files) { if (!files.has(p)) return no('not one of the test files Vitest globs for this project (include / exclude)'); }
+  else {
+    if (include && !include.some((g) => matchesGlobDot(p, g))) return no('does not match the include globs');
+    if (exclude.some((g) => matchesGlobDot(p, g))) return no('matches an exclude glob');
+  }
+  const abs = path.join(root, p);
+  let st;
+  try { st = fs.lstatSync(abs); } catch { return no('file does not exist'); }
+  if (st.isSymbolicLink()) {
+    const real = safeRealpath(abs);
+    if (!real || !isInside(root, real)) return no('symlink pointing outside the project');
+    try { st = fs.statSync(real); } catch { return no('dangling symlink'); }
+  }
+  if (!st.isFile()) return no('not a regular file');
+  return { path: p };
 }
 
 function safeRealpath(p) { try { return fs.realpathSync(p); } catch { return null; } }
@@ -769,7 +829,7 @@ function readOwnedFile(file, maxBytes = 256 * 1024 * 1024) {
   } finally { fs.closeSync(fd); }
 }
 
-return { escapeGlob, matchesGlobDot, sanitize, sanitizeText, validateTestPaths, isInside, validEdges, pickKnown, privateTmp, readOwnedFile };
+return { escapeGlob, matchesGlobDot, normGlob, globProjectFiles, sanitize, sanitizeText, validateTestPaths, isInside, validEdges, pickKnown, privateTmp, readOwnedFile };
 })();
 
 // vitest-guard setup file. Put it FIRST in `setupFiles` (defineVitestGuardConfig does that).
@@ -786,6 +846,7 @@ const W = Symbol.for('vitest-guard.worker');
 // fresh object to erase the baseline (it can still mutate fields; the realms are not a security boundary)
 if (!Object.prototype.hasOwnProperty.call(process, W)) Object.defineProperty(process, W, { value: { seq: 0, prev: null, base: null, roots: new Set(), listeners: [], intervals: new Map(), patched: false, react: null, out: null }, writable: false, configurable: false, enumerable: false });
 const worker = process[W];
+worker.testers ??= new Map(); // R2: equality tester -> 'lib' | 'file' | 'project' (who registered it)
 worker.extNow = null; // set by setup-tail.mjs (last setup file) through worker.afterSetup
 worker.pre = null; // S4: shared mode with the tail: state after this file's setup files, before its own code (afterSetup)
 
@@ -793,8 +854,11 @@ let opts = {};
 try { opts = inject('vitestGuard') || {}; } catch {}
 const outer = (worker.outer ??= getOuterGlobal()); // worker store lives in the outer realm, so this is compiled once per worker
 // S4: the outer realm (process.env, process listeners, builtins) BEFORE the user's setup files and the test file's own
-// top-level code ran. This module is the first setup file and runs again for every test file: the first file's
-// snapshot is the baseline the resets restore, later snapshots show what earlier files left behind.
+// top-level code ran. This module is the first setup file and runs again for every test file. In vm mode the first
+// file's snapshot is the baseline the resets restore (setup files run again per context). In shared mode (R1) the
+// baseline is the state AFTER the first file's setup files (the tail hook; without it the first beforeAll): a package
+// a setup file imports (`import 'dotenv/config'`) is evaluated once per worker, so what it set must survive the
+// resets. There this snapshot only shows what the previous file left behind.
 const preOuter = fp.captureOuter();
 const inVm = outer !== globalThis;
 const mode = opts.mode || (inVm ? 'vm' : 'shared');
@@ -874,6 +938,28 @@ function collectErrors(task, out = []) {
   return out;
 }
 
+// ---- R2: who registered an equality tester (shared mode) ----
+// A package in node_modules (evaluated once per worker) that registers one on import keeps it for the whole worker;
+// testers registered by the test file itself (or, with resetModules, by a project module that is evaluated again)
+// are removed after the file. The registry array's push is instrumented (every path - expect.addEqualityTesters,
+// a test context's expect - ends there); the first stack frame outside Vitest decides, remembered by identity.
+const VITEST_FRAME = /[\\/]node_modules[\\/](?:\.pnpm[\\/][^\\/]+[\\/]node_modules[\\/])?(?:vitest|@vitest[\\/][^\\/]+)[\\/]/;
+function patchTesters() {
+  const eq = fp.equalityTesters();
+  if (!eq || Object.prototype.hasOwnProperty.call(eq, 'push')) return;
+  const push = Array.prototype.push;
+  try {
+    Object.defineProperty(eq, 'push', { configurable: true, writable: true, enumerable: false, value: function (...items) {
+      const frames = (new Error().stack || '').split('\n').slice(2);
+      const caller = frames.find((f) => /^\s*at /.test(f) && !VITEST_FRAME.test(f) && !/\(node:|^\s*at node:/.test(f)) || '';
+      let cur = null; try { cur = expect.getState().testPath || null; } catch {}
+      const who = fp.inNodeModules(caller) ? 'lib' : cur && caller.includes(cur) ? 'file' : 'project';
+      for (const t of items) if (typeof t === 'function') worker.testers.set(t, who);
+      return push.apply(this, items);
+    } });
+  } catch {}
+}
+
 // ---- run log (one jsonl per worker) ----
 function log(rec) {
   if (opts.log === false) return;
@@ -885,6 +971,8 @@ function log(rec) {
     sfs.appendStateFile(worker.out, JSON.stringify(rec) + '\n');
   });
 }
+// R4: the lane this worker runs (the CLI compares the recorded order with the lane's order)
+const LANE = process.env.VITEST_GUARD_LANE_FILE ? path.basename(process.env.VITEST_GUARD_LANE_FILE) : undefined;
 const rel = (f) => (f ? path.relative(root, f).split(path.sep).join('/') : f);
 
 // ---- (a) realm tolerance (vm only) ----
@@ -927,6 +1015,7 @@ if (worker.react === 'dup' && opts.react !== 'warn') throw new Error(worker.reac
 // ---- shared mode: one-time instrumentation of the long-lived realm ----
 if (mode === 'shared' && !worker.patched) {
   worker.patched = true;
+  patchTesters();
   const track = (target, label) => {
     if (!target || !target.addEventListener) return;
     const add = target.addEventListener, remove = target.removeEventListener;
@@ -952,7 +1041,8 @@ if (mode === 'shared' && !worker.patched) {
     if (typeof si === 'function' && typeof ci === 'function' && !si.__vitestGuard) {
       const setI = function (...a) {
         const id = si.apply(this, a);
-        if (!fp.inNodeModules((new Error().stack || '').split('\n')[2] || '')) worker.intervals.set(id, worker.current);
+        const caller = (new Error().stack || '').split('\n')[2] || '';
+        if (!fp.inNodeModules(caller)) { let cur = null; try { cur = expect.getState().testPath || null; } catch {} worker.intervals.set(id, { file: worker.current, own: !!cur && caller.includes(cur) }); }
         return id;
       };
       const clearI = function (id) { worker.intervals.delete(id); return ci.apply(this, arguments); };
@@ -1004,7 +1094,8 @@ const DEFAULT_IGNORED_MODULES = ['stylis/dist/umd/stylis.js', 'stylis/dist/styli
 // S4: the context baseline (DOM, globals, module state, probes) is taken there too, before the test file's top-level code
 if (mode === 'shared' && opts.tail) worker.afterSetup = async () => {
   try { worker.extNow = fp.captureExt(); } catch {}
-  try { worker.pre = { outer: detectPollution ? fp.captureOuter() : null, ctx: await captureCtx() }; } catch { worker.pre = null; }
+  // R1: the first file's capture is the worker's baseline: taken also without diagnostics
+  try { worker.pre = { outer: detectPollution || !worker.base ? fp.captureOuter() : null, ctx: await captureCtx() }; } catch { worker.pre = null; }
 };
 else worker.afterSetup = null;
 const captureCtx = async () => ({ dom: fp.captureDom(), globals: fp.captureGlobals(), keys: fp.captureGlobalKeys(), eqLen: fp.equalityTesters()?.length ?? 0, mods: moduleState ? fp.captureModuleState() : new Map(), probes: await runProbes() });
@@ -1054,7 +1145,8 @@ async function beforeAllBody() {
   fileStart = realNow();
   let t = performance.now();
   const pre = worker.pre; worker.pre = null;
-  const outerNow = preOuter; // S4: before the setup files and this file's top-level code
+  if (mode === 'shared') patchTesters(); // the registry array may have been replaced
+  const outerNow = preOuter; // S4: before the setup files and this file's top-level code (what the previous file left)
   // what THIS file starts from, for its own pollution diff (after its setup files; without the tail also after its top level)
   fileOuter = detectPollution ? pre?.outer ?? fp.captureOuter() : null;
   sect('before:outer', t); t = performance.now();
@@ -1081,8 +1173,9 @@ async function beforeAllBody() {
     else { extLeft = fp.diffExt(worker.extKnown, ext); for (const k of extLeft) worker.extKnown.add(k); }
   }
   if (!worker.base) {
-    worker.base = { outer: outerNow, ...(ctx || {}) };
-    log({ t: 'start', file, seq: worker.seq, mode, pid: process.pid, tid: threadId });
+    // R1: shared mode restores to the state after the first file's setup files (tail), else after its top level
+    worker.base = { outer: mode === 'shared' ? pre?.outer ?? fp.captureOuter() : outerNow, ...(ctx || {}) };
+    log({ t: 'start', file, seq: worker.seq, mode, pid: process.pid, tid: threadId, lane: LANE });
     if (mode === 'shared') stateWrite(() => { const f = path.join(stateDir, 'settings.json'), t = JSON.stringify({ resetModules: !!opts.resetModules }); let old = null; try { old = sfs.readStateFile(f); } catch {} if (old !== t) sfs.writeStateFile(f, t); });
     return;
   }
@@ -1118,7 +1211,7 @@ async function beforeAllBody() {
     // module state of lazily loaded packages: extend the baseline with modules first seen now
     for (const [id, sig] of ctx.mods) if (!worker.base.mods.has(id)) worker.base.mods.set(id, sig);
   }
-  log({ t: 'start', file, seq: worker.seq, mode, pid: process.pid, tid: threadId, prev: worker.prev, dirty: dirty.length ? dirty : undefined });
+  log({ t: 'start', file, seq: worker.seq, mode, pid: process.pid, tid: threadId, lane: LANE, prev: worker.prev, dirty: dirty.length ? dirty : undefined });
   if (dirty.length && onDirty !== 'silent') {
     const msg = `[vitest-guard] ${safety.sanitize(file)} starts with state left by ${safety.sanitize(worker.prev)}: ` + dirty.map((d) => `${d.kind} [${d.keys.map((k) => safety.sanitize(k, 120)).join(', ')}]`).join('; ');
     if (onDirty === 'error') throw new Error(msg);
@@ -1150,6 +1243,7 @@ afterAll(async ({}, suite) => { // Vitest 5: fixtures first (must be destructure
   }
   const a0 = realNow();
   const extLeftover = [];
+  let testersLeft = false;
   const durationMs = Math.max(0, a0 - fileStart);
   let pollution;
   // M6: what this file (not its setup files) added to built-ins / matchers
@@ -1189,10 +1283,21 @@ afterAll(async ({}, suite) => { // Vitest 5: fixtures first (must be destructure
       for (const r of [...worker.roots]) { try { act ? act(() => r.unmount()) : r.unmount(); } catch {} }
     }
     for (const l of worker.listeners.splice(0)) { try { l.target.removeEventListener(l.type, l.fn, l.o); } catch {} }
-    // S5: intervals this worker's test code left running; equality testers this file (not its setup files) added
-    for (const id of [...worker.intervals.keys()]) { try { worker.clearInterval(id); } catch {} }
-    worker.intervals.clear();
-    { const eq = fp.equalityTesters(); if (eq && fileCtx && eq.length > fileCtx.eqLen) eq.length = fileCtx.eqLen; }
+    // S5: intervals this worker's test code left running. S4 (review 3b): an interval started by a project module stays
+    // with that cached module unless resetModules evaluates the module again: cleared only then (else: residual)
+    for (const [id, src] of [...worker.intervals]) {
+      if (src.own || opts.resetModules) { try { worker.clearInterval(id); } catch {} worker.intervals.delete(id); }
+    }
+    // R2: equality testers this file added: the test file's own always, a project module's only with resetModules;
+    // a node_modules package's never (it is evaluated once per worker, as its other module state)
+    { const eq = fp.equalityTesters();
+      if (eq && fileCtx && eq.length > fileCtx.eqLen) {
+        const added = eq.slice(fileCtx.eqLen);
+        const keep = added.filter((t) => { const who = worker.testers.get(t); return who === 'lib' || (who === 'project' && !opts.resetModules); });
+        testersLeft = keep.some((t) => worker.testers.get(t) !== 'lib');
+        eq.length = fileCtx.eqLen; Array.prototype.push.apply(eq, keep); // not the instrumented push: keep who registered them
+        for (const t of added) if (!keep.includes(t)) worker.testers.delete(t);
+      } }
     fp.restoreGlobals(worker.base.globals);
     fp.restoreDom(worker.base.dom);
     try { const m = await actual('@tanstack/query-core'); m.onlineManager.setOnline(true); m.focusManager.setFocused(undefined); } catch {}
@@ -1215,6 +1320,8 @@ afterAll(async ({}, suite) => { // Vitest 5: fixtures first (must be destructure
       for (const k of Object.keys(pr)) if (worker.base.probes[k] !== undefined && worker.base.probes[k] !== pr[k]) r.push('singleton:' + k);
       if (moduleState && fp.diffModuleState(worker.base.mods, fp.captureModuleState()).filter((k) => !worker.volatile?.has(k)).length) r.push('node_modules state');
       if (fp.addedKeys(worker.base.keys, fp.captureGlobalKeys(), worker.keysKnown).length) r.push('added globals');
+      if (testersLeft) r.push('equality testers');
+      if ([...worker.intervals.values()].some((v) => v.file === file)) r.push('timers');
       if (extLeftover.some((k) => !k.startsWith('matcher:'))) r.push('built-in extensions');
       if (extLeftover.some((k) => k.startsWith('matcher:'))) r.push('expect matchers');
     }

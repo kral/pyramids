@@ -1,7 +1,7 @@
 // Format versions of the state files (architecture review 3 B2, contracts/DECISIONS.md D3).
 // A missing `version` counts as 1 (hand-written files). Unknown fields are kept (load/save round-trips the object);
 // a HIGHER version than this vitest-guard understands is refused: the CLI exits 2 before running anything, the config
-// wrapper warns and fails safe (every file named in a newer incompatible.json runs isolated).
+// wrapper refuses to load (VITEST_GUARD_NEWER_STATE=failsafe: every file named in a newer incompatible.json runs isolated).
 import fs from 'node:fs';
 
 /** files a team may commit (incompatible/conflicts always, durations/pollution with --commit-state) */

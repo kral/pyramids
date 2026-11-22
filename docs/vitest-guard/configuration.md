@@ -70,6 +70,7 @@ Exported helpers: `autoMemoryLimit(maxWorkers)` (min of 50 % RAM / workers and 6
 | `VITEST_GUARD_PROFILE` | any value: section timings are added to the run log |
 | `VITEST_GUARD_IGNORE_QUARANTINE` | any non-empty value (even `0`): do not route quarantined files to forks |
 | `VITEST_GUARD_VERIFY_WARNING` | `0` silences the shared-mode "not verified" warning |
+| `VITEST_GUARD_NEWER_STATE` | `failsafe`: a newer-format `incompatible.json` does not stop the config; every test file it names runs isolated (for upgrades in progress) |
 | `VITEST_GUARD_AUTO_VERBOSE` | any value: print the dom/node split when `auto` builds projects |
 | `VITEST_GUARD_CLI`, `VITEST_GUARD_LANE_FILE`, `VITEST_GUARD_WRAP_MARKER` | internal, set by the CLI; do not set |
 

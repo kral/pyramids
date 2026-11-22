@@ -32,7 +32,12 @@ Nothing is sent over the network. vitest-guard does not modify your source files
 `.vitest-guard/*.json` are repository data and therefore untrusted (a PR can change them). Only entries that are
 literal, normalised, repo-relative paths of existing files inside the repository (no `..`, absolute paths, glob
 metacharacters, or symlinks pointing outside), that match the project's `include`, match none of its `exclude`
-globs, and that Vitest itself lists, reach `include`, plans or hunts. Others are ignored with a warning. The same
+globs, and that Vitest itself lists, reach `include`, plans or hunts. Others are ignored with a warning.
+Quarantine keys are checked against the files Vitest's own globber (tinyglobby, resolved from the project's
+Vitest) returns for the project, relative to the project's own `root`. A key whose case or Unicode form (NFC/NFD)
+differs from exactly one file on disk is applied to that file with a warning, and `vitest-guard check` rewrites the
+key (exit 4); a key that matches two files is rejected. `check` fails (exit 1) when the config does not run a
+quarantined file isolated, and when a false-green entry names no listed file (`check --prune` removes it). The same
 filter applies to `VITEST_GUARD_LANE_FILE`, `conflicts.json`, `pollution.json`, `durations.json` and `hunt --before`.
 The `env.json` reader accepts only well-formed entries with safe path keys.
 

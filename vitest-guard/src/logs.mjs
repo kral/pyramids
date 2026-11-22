@@ -13,7 +13,7 @@ export function readRunLogs(runDir) {
     for (const r of recs) {
       if (r.t === 'volatile') { (workers.volatile ??= new Set()).add(r.module); continue; }
       const e = files.get(r.file + '#' + r.seq) || { file: r.file, seq: r.seq };
-      if (r.t === 'start') Object.assign(e, { mode: r.mode, prev: r.prev, dirty: r.dirty });
+      if (r.t === 'start') Object.assign(e, { mode: r.mode, prev: r.prev, dirty: r.dirty, lane: r.lane });
       if (r.t === 'end') Object.assign(e, { durationMs: r.durationMs, heapStart: r.heapStart, heapEnd: r.heapEnd, pollution: r.pollution, residual: r.residual, selfMs: r.selfMs });
       files.set(r.file + '#' + r.seq, e);
     }

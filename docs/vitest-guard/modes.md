@@ -63,6 +63,9 @@ How: with generated projects, files are routed by their configured environment i
 and a `node` group. With your own `projects`, your split is kept and a mode is chosen per project from its
 environment. Mode per group: `autoModes` option > `.vitest-guard/run/modes.json` (from `calibrate`, `compare`, or the
 first `check`) > defaults (`dom` -> vm, `node` -> shared). A mode that is not vm/shared becomes `isolated`.
+The files are listed with Vitest's own globber, so `./` patterns, symlinked directories and dot directories match
+exactly as in Vitest. A third project, `auto:rest`, runs every file of your `include` that neither group lists in
+isolated forks (usually none), so no test file is ever dropped.
 
 Measured (the real-world suite, 1992 tests): forks 297.1; current repo setup 168.6 / 174.8; all vm 178.3; all shared
 119.2; auto defaults 143.5; auto calibrated 114.3 / 120.5 / 112.1 (-34 % vs current, -62 % vs forks). Heavy lab suite:

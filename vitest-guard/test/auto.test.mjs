@@ -70,7 +70,7 @@ test('auto: generated projects, stored modes, overrides, user projects keep thei
   assert.deepEqual(proj(cfg, 'dom').test.include, ['test/logic.test.ts', 'test/ui.test.tsx'], 'default: configured environment decides');
   assert.deepEqual(proj(cfg, 'node').test.include, ['test/pure.test.ts']);
   assert.equal(proj(cfg, 'node').test.provide.vitestGuardAutoHeal, false);
-  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, '.vitest-guard/run/auto.json'), 'utf8')).groups, { dom: 'vm', node: 'shared' });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, '.vitest-guard/run/auto.json'), 'utf8')).groups, { dom: 'vm', node: 'shared', 'auto:rest': 'isolated' });
   cfg = defineVitestGuardConfig({ root, test: { environment: 'jsdom', include: ['test/**/*.test.{ts,tsx}'] } }, { mode: 'auto', nodeEnvironment: 'node' });
   assert.deepEqual(proj(cfg, 'dom').test.include, ['test/ui.test.tsx']);
   assert.equal(proj(cfg, 'dom').test.pool, 'vmThreads');

@@ -138,9 +138,14 @@ files still work. vitest-guard always writes the version it supports. Its rules:
   version 1 layout.
   - The CLI exits 2 before it runs or writes anything: `.vitest-guard/incompatible.json has format version 2; this
     @jirikral/vitest-guard (…) understands version 1 - upgrade @jirikral/vitest-guard`.
-  - The config wrapper (a plain `vitest run`) warns and fails safe. Every existing test file named anywhere in a
-    newer `incompatible.json` runs isolated (forks) in every mode, so nothing that a newer version quarantined runs
-    fast.
+  - The config wrapper (a plain `vitest run`) refuses to load: Vitest exits 1 with the same message. Teams in the
+    middle of an upgrade can set `VITEST_GUARD_NEWER_STATE=failsafe`: then every existing test file named anywhere
+    in the newer `incompatible.json` runs isolated (forks) in every mode, so nothing that a newer version
+    quarantined runs fast. A newer file that names no existing test file still stops the config.
+- **An unusable `incompatible.json` stops the run (fail closed).** Text that is not JSON (merge-conflict markers), a
+  top level that is not an object, a `vm` / `shared` that is not an object, an unreadable file and a linked file or
+  directory never read as "no quarantine": the config throws (Vitest exits 1), the CLI exits 2, and no command
+  overwrites a committed file it could not parse.
 - Volatile files in `run/` that carry a version (`plan.json`, version 2) are ignored and re-created when they are
   newer.
 
@@ -154,7 +159,9 @@ cannot tell whether a file is committed, so these two files stay where they are.
 vitest-guard does not follow links in `.vitest-guard/`. These rules are the same as for vto's `.vto/`:
 
 - **Symlinks and junctions are refused.** This covers `.vitest-guard`, `run/`, `run/logs/` and any link inside
-  them. The CLI exits 2 and runs nothing. Test workers and the config wrapper print a warning and write no state.
+  them. The CLI exits 2 and runs nothing. Test workers print a warning and write no state. The config wrapper
+  refuses to load when it would have to read the quarantine through a link (`.vitest-guard` or
+  `incompatible.json` linked): a quarantine it cannot read must not turn into a fast run.
 - **Directories are created private.** `.vitest-guard`, `run/` and `run/logs/` get mode 0700 on POSIX.
 - **Files are written safely.** Each one is created with mode 0600 through an exclusive temp file and then renamed
   into place. Appends use `O_NOFOLLOW`.

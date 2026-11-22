@@ -130,12 +130,15 @@ test('S12 unit: isInside is separator-aware, and case-insensitive with either se
   assert.equal(isInside('/a/B', '/a/b/c', posix), false, 'POSIX stays case-sensitive');
 });
 
-test('S12: a quarantine key whose case differs from the file on disk is rejected (never claimed for a file Vitest would not match)', async () => {
+test('S12 / review 3 item 3: a quarantine key whose case or Unicode form differs from the file on disk is remapped to the on-disk spelling', async () => {
   const { validateTestPaths } = await import('../src/safety.mjs');
-  const root = project({ 'src/button.test.js': '' });
-  const r = validateTestPaths(root, ['src/Button.test.js', 'src/button.test.js'], { warn: false });
-  assert.deepEqual(r.ok, ['src/button.test.js']);
-  assert.equal(r.rejected.length, 1); // 'file does not exist' (case-sensitive FS) or 'spelled differently' (NTFS / APFS)
+  const root = project({ 'src/button.test.js': '', [`src/${'příklad'.normalize('NFC')}.test.js`]: '', 'src/twin.test.js': '', 'src/Twin.test.js': '' });
+  const r = validateTestPaths(root, ['src/Button.test.js', 'src/button.test.js', `src/${'příklad'.normalize('NFD')}.test.js`, 'src/TWIN.test.js'], { warn: false });
+  const twins = fs.readdirSync(path.join(root, 'src')).filter((n) => /^twin/i.test(n)).length; // 1 on a case-insensitive file system
+  assert.deepEqual(r.ok.slice(0, 2), ['src/button.test.js', `src/${'příklad'.normalize('NFC')}.test.js`]);
+  assert.deepEqual(r.remapped.map((x) => x.entry).slice(0, 2), ['src/Button.test.js', `src/${'příklad'.normalize('NFD')}.test.js`]);
+  assert.equal(r.map.get('src/Button.test.js'), 'src/button.test.js');
+  if (twins === 2) assert.deepEqual(r.rejected.map((x) => x.entry), ['src/TWIN.test.js'], 'two candidates (case-sensitive file system): rejected, never guessed');
 });
 
 test('N5 unit: a verify that ran only some of the default orders is not a clean verify', () => {

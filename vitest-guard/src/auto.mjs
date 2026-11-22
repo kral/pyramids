@@ -8,7 +8,7 @@ import path from 'node:path';
 import { readStateJson } from './statefs.mjs';
 import { stripComments } from './scan.mjs';
 import { foldEnvRecords, DOM_ENVS } from './envstore.mjs';
-import { matchesGlobDot } from './safety.mjs';
+import { matchesGlobDot, globProjectFiles } from './safety.mjs';
 
 export { DOM_ENVS };
 // B5: Vitest globs with `dot: true` and excludes only what the user's exclude says (default node_modules, .git):
@@ -16,8 +16,18 @@ export { DOM_ENVS };
 // Only directories that never hold the user's tests are skipped.
 const SKIP_DIRS = new Set(['node_modules', '.git', '.vitest-guard']);
 
-/** Test files matching include/exclude (root-relative, '/' separators). Synchronous: runs at config time. */
+/**
+ * Test files matching include/exclude (root-relative, '/' separators). Synchronous: runs at config time.
+ * R5: globbed with Vitest's own tinyglobby and options (symlinked directories, `./` patterns, nested dot directories
+ * behave exactly as in Vitest; excluded directories are pruned, S6). The directory walk below is only the fallback
+ * when tinyglobby cannot be resolved; autoConfig adds a catch-all isolated project for anything a listing missed.
+ */
 export function listTestFiles(root, include, exclude, { maxFiles = 50000 } = {}) {
+  const globbed = globProjectFiles(root, include, exclude);
+  if (globbed) {
+    if (globbed.length > maxFiles) console.warn(`[vitest-guard] auto: more than ${maxFiles} test files: the rest runs in the isolated catch-all group; use your own projects instead of mode 'auto'`);
+    return globbed.slice(0, maxFiles);
+  }
   const out = [];
   let warnedCap = false;
   const walk = (dir, rel) => {

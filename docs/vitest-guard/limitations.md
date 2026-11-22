@@ -50,6 +50,30 @@ file failed and was neither quarantined nor explained (flaky and unexplained giv
 needs several predecessors at once is reported as "needs a combination of files" (all candidates listed); a
 non-reproducible failure stays FLAKY and blocks the gate until fixed or re-run.
 
+## Known limits after the review 3 re-review (open items)
+
+- **S2, order-dependent entries from `verify` are released by `check --prune`.** `verify` records an
+  order-dependent false red without its predecessors (`after`) and without an "order-dependent" marker, so
+  `check --prune` sees the file pass alone in the fast mode and releases it; the next `verify` quarantines it
+  again. This is not a false green (the entry protects against a false red), but a nightly `verify` + `check
+  --prune` job alternates between exit 4 results and never converges. Workaround: do not prune entries whose
+  signature starts with `order-dependent:` by hand, or run `check` (which records `after`) instead of `verify` for
+  them.
+- **S5, state that is reported but not reset.** Added own properties of the global object (`globalThis.__x`,
+  `window.__cfg`), properties defined on `navigator` and similar state are reported once per worker as `added
+  globals` (a `dirty` record and a warning with the default `onDirty: 'warn'`), but are not removed: a later file
+  in the same shared worker can still see them. Only `verify` finds a test that depends on such state. Use
+  `onDirty: 'error'` to make the gate fail on it.
+- **S6, the fallback directory walk of mode `auto`.** The file listing of mode `auto` uses Vitest's own globber,
+  which prunes excluded directories. Only when tinyglobby cannot be resolved from the project's Vitest does `auto`
+  fall back to a directory walk that visits every directory except `node_modules`, `.git` and `.vitest-guard` and
+  tests the user's `exclude` per file; on a repository with large build output that costs time at every config
+  load. Files that either listing misses still run, in the isolated catch-all project `auto:rest`.
+- **Equality testers and intervals of project modules without `resetModules`.** With `resetModules: false` a
+  project module (outside `node_modules`) is cached for the worker; an equality tester or interval it registers on
+  import is kept (as the module is) and reported as residual `equality testers` / `timers`. A file that does not
+  import the module can still see that tester or interval in a shared worker.
+
 ## What vitest-guard does not cover
 
 - `constructor ===` and prototype identity checks, `Object.prototype.toString` tricks in user code.
