@@ -16,7 +16,7 @@ says how to resolve it first). The result is a config object; your own keys are 
   are removed (the mode decides). In `projects`, explicit project pools are kept ([Projects](#projects)).
 - `test.include` / `test.exclude`: kept (defaults `**/*.{test,spec}.?(c|m)[jt]s?(x)` and `**/node_modules/**`,
   `**/.git/**`); quarantined files are excluded from the fast project and run in an `...:isolated` sibling.
-- `test.maxWorkers`: filled with Vitest's run-mode default (CPUs - 1) if unset; 1 inside a planner lane.
+- `test.maxWorkers`: filled with Vitest's run-mode default (CPUs - 1) if unset; 1 inside a `verify` lane.
 - `test.vmMemoryLimit` (vm): `test.vmMemoryLimit` of yours, else `memoryLimit`, else `autoMemoryLimit`.
 - `test.provide.vitestGuard`: the resolved options, read by the setup file.
 - `test.server.deps.inline`: your entries plus `inline`.
@@ -27,10 +27,7 @@ says how to resolve it first). The result is a config object; your own keys are 
 
 | option | type | default | meaning |
 |---|---|---|---|
-| `mode` | `'vm' \| 'shared' \| 'auto' \| 'isolated'` | `'vm'` | execution mode ([modes.md](modes.md)). `off` exists only as `VITEST_GUARD_MODE=off` |
-| `autoModes` | `Record<string, 'vm'\|'shared'\|'isolated'>` | none | `auto`: mode per group (`dom`, `node`) or project name; beats `modes.json` |
-| `respectPools` | boolean | `false` | `auto` with user projects: keep projects that set an explicit pool |
-| `nodeEnvironment` | `'node' \| null` | `null` | `auto`: opt in to moving DOM-free files of a DOM-configured suite to a node-environment group |
+| `mode` | `'vm' \| 'shared' \| 'isolated' \| 'off'` | `'vm'` | execution mode ([modes.md](modes.md)); `'off'` returns your config untouched (as `VITEST_GUARD_MODE=off`). `'auto'` was removed in 0.2.0-alpha.0 and throws; any other value throws |
 | `memoryLimit` | number \| string | `autoMemoryLimit(maxWorkers)` | `vmMemoryLimit` for vm (bytes or Vitest string such as `'1.5GB'`) |
 | `inline` | `(string\|RegExp)[]` | `[]` | extra `server.deps.inline` entries |
 | `onDirty` | `'warn' \| 'error' \| 'silent'` | `'warn'` | what to do when a file starts with state left by the previous one |
@@ -47,7 +44,7 @@ says how to resolve it first). The result is a config object; your own keys are 
 | `log` | boolean | `true` | write per-worker run logs to `.vitest-guard/run/logs` |
 | `diag` | boolean | on only under the CLI (`VITEST_GUARD_DIAG=1`) | pollution diff at file end, residual after reset, node_modules export scan (CPU cost) |
 | `moduleState` | boolean | follows `diag` | node_modules export-state scan |
-| `detectPollution` | boolean | follows `diag` | end-of-file pollution diff (feeds the planner) |
+| `detectPollution` | boolean | follows `diag` | end-of-file pollution diff |
 | `ignoreListeners` | string[] | `[]` | process event names whose added listeners are not reported |
 | `ignoreModules` | string[] | `[]` (+ built-in stylis entries) | node_modules paths whose exports hold scratch state (also learned after 3 consecutive changes) |
 | `keepGlobals` | string[] | `[]` | shared: names of own properties of the global object that the reset after each file never deletes nor reports (escape hatch for a register-once package that sets a global from a hook or a test; see limitations). Vite's / Vitest's own `__vite*` / `__vitest*` / `__VITEST_*` globals and `__coverage__` are always kept |
@@ -58,8 +55,7 @@ says how to resolve it first). The result is a config object; your own keys are 
 Exported helpers: `autoMemoryLimit(maxWorkers)` (min of 50 % RAM / workers and 60 % of the V8 heap limit, at least
 512 MB), `readQuarantine(root, mode, file?)`, `setupFileFor(root, file?)`, `SETUP_FILE`, `SETUP_TAIL_FILE`,
 `DEFAULT_INCLUDE`, `DEFAULT_EXCLUDE`. Subpath exports: `@jirikral/vitest-guard/setup` (for `setup: 'import'`) and
-`/envstore` (**internal**: the contract with vto, experimental, no stability guarantee before 1.0). The sequencer and
-the realm shims are internal files, not exports.
+The sequencer and the realm shims are internal files, not exports.
 
 The quarantine file is always `.vitest-guard/incompatible.json`: the CLI writes it and the config reads it. The former
 `quarantineFile` option was removed in 0.1.0-alpha.3; setting it throws an error.
@@ -68,14 +64,13 @@ The quarantine file is always `.vitest-guard/incompatible.json`: the CLI writes 
 
 | variable | effect |
 |---|---|
-| `VITEST_GUARD_MODE` | `vm`, `shared`, `isolated`, `auto` override the `mode` option (and, in projects, the pool of every project); `off` returns your config untouched |
+| `VITEST_GUARD_MODE` | `vm`, `shared`, `isolated` override the `mode` option (and, in projects, the pool of every project); `off` returns your config untouched |
 | `VITEST_GUARD_OPTS` | JSON object merged over the options in the config (`'{"realm":false}'`); invalid JSON throws at config load |
 | `VITEST_GUARD_DIAG` | `1` enables diagnostics, `0` disables (the CLI sets 1 for its runs, `--no-diag` sets 0) |
 | `VITEST_GUARD_PROFILE` | any value: section timings are added to the run log |
 | `VITEST_GUARD_IGNORE_QUARANTINE` | any non-empty value (even `0`): do not route quarantined files to forks |
 | `VITEST_GUARD_VERIFY_WARNING` | `0` silences the shared-mode "not verified" warning |
 | `VITEST_GUARD_NEWER_STATE` | `failsafe`: a newer-format `incompatible.json` does not stop the config; every test file it names runs isolated (for upgrades in progress) |
-| `VITEST_GUARD_AUTO_VERBOSE` | any value: print the dom/node split when `auto` builds projects |
 | `VITEST_GUARD_CLI`, `VITEST_GUARD_LANE_FILE`, `VITEST_GUARD_WRAP_MARKER` | internal, set by the CLI; do not set |
 
 ## Projects
@@ -91,5 +86,4 @@ Inline objects in `test.projects` are wrapped one by one and keep their own pool
 
 `VITEST_GUARD_MODE` (`isolated`/`vm`/`shared`) overrides all of them. vitest-guard's setup runs first in each project.
 Quarantine is per project (`<name>:isolated` sibling). Projects given as strings/globs (`'packages/*'`) or
-functions are not wrapped: a warning says to wrap those configs themselves. In `auto`, the mode of each project is
-chosen from its environment; explicit pools are replaced unless `respectPools`.
+functions are not wrapped: a warning says to wrap those configs themselves.

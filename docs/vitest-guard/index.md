@@ -3,7 +3,7 @@
 vitest-guard makes Vitest's two fast execution modes safe enough to use as the default for a whole suite. This page is
 the one-page overview; the other pages go deeper.
 
-> Status: pre-release `0.1.0-alpha.5`, published on npm under the dist-tag `next`: `npm i -D @jirikral/vitest-guard@next`
+> Status: pre-release `0.2.0-alpha.0`, published on npm under the dist-tag `next`: `npm i -D @jirikral/vitest-guard@next`
 > (pnpm: `pnpm add -D @jirikral/vitest-guard@next`, yarn: `yarn add -D @jirikral/vitest-guard@next`). Run the CLI through
 > an npm script or `node node_modules/@jirikral/vitest-guard/bin/vitest-guard.mjs`. **Never run `npx vitest-guard`**: the
 > unscoped name `vitest-guard` is not ours, and whoever owns it would run their code on your machine.
@@ -32,15 +32,11 @@ Used bare, these modes either fail tests that pass in forks (false red) or, wors
    anything that survives ("dirty start", naming the previous file).
 3. The CLI is the safety net. `vitest-guard check` re-runs every failing file in isolated forks and explains the
    failure: genuine, fast-mode-only (quarantine it in `.vitest-guard/incompatible.json`), caused by another file
-   (conflict edge in `.vitest-guard/conflicts.json`), or flaky. `vitest-guard verify` compares pass/fail per test between
+   (quarantined with the files it fails after; shared mode also records the pair in `.vitest-guard/conflicts.json`), or flaky. `vitest-guard verify` compares pass/fail per test between
    the fast mode (in several file orders) and isolated forks to catch false greens.
 4. You commit the two small JSON files. Plain `vitest run` then gives you fast mode with the quarantined files (`incompatible.json`)
-   in forks. Conflict edges (`conflicts.json`, shared mode) are applied only by the planner, i.e. by `vitest-guard run` and
-   `check --mode shared`, not by plain `vitest run` ([getting-started.md](getting-started.md) step 5).
+   in forks.
 5. A periodic isolated run (`VITEST_GUARD_MODE=isolated vitest run`; PowerShell: `$env:VITEST_GUARD_MODE='isolated'; npx vitest run`) plus `verify` stays as the reference.
-
-Mode `auto` splits the suite into a DOM group and a node group and picks the best mode for each, using
-measurements (`vitest-guard calibrate`).
 
 ## When to use it
 
@@ -62,13 +58,30 @@ measurements (`vitest-guard calibrate`).
 | page | read it when |
 |---|---|
 | [getting-started.md](getting-started.md) | installing, first `check` and `verify`, 10-minute walkthrough |
-| [modes.md](modes.md) | choosing between vm, shared, auto, isolated, off; measured numbers |
+| [modes.md](modes.md) | choosing between vm, shared, isolated, off; measured numbers |
 | [cli.md](cli.md) | every command, flag and exit code |
 | [configuration.md](configuration.md) | every option of `defineVitestGuardConfig`, env vars, projects |
-| [how-it-works.md](how-it-works.md) | realm shims, setup layering, leak detector, state files, scheduler |
+| [how-it-works.md](how-it-works.md) | realm shims, setup layering, leak detector, state files |
 | [ci.md](ci.md) | GitHub Actions and Azure Pipelines examples |
 | [troubleshooting.md](troubleshooting.md) | failures and FAQ |
 | [security.md](security.md) | what it is not, what it writes, what is validated |
 | [limitations.md](limitations.md) | what does not help, residual risks |
 
 Package README: [vitest-guard/README.md](https://github.com/kral/vto/blob/main/vitest-guard/README.md) (measurements and risk tables in detail).
+
+## Removed in 0.2.0-alpha.0
+
+0.2.0-alpha.0 slims vitest-guard down to the safety layer. Removed, all of it still available on the
+[`vto` branch](https://github.com/kral/vto/tree/vto) (paused):
+
+- mode `auto` (the dom/node split, `auto:dom`/`auto:node`/`auto:rest` groups, `autoModes`, `respectPools`, `nodeEnvironment`,
+  the probes, `env.json`, `modes.json`) and the `calibrate` command;
+- the planner and planned runs: commands `plan` and `run`, the `planned` verify order, `--lanes` for planning,
+  `--no-plan`, `--vto-raw`, `durations.json`, `pollution.json` and `--commit-state`;
+- commands `scan` and `report`;
+- the animated swan (`compare` prints the plain summary only), the `/envstore` export and every vto integration.
+
+Kept: modes `vm`, `shared`, `isolated` and `off`, `projects`, the quarantine (`incompatible.json`, `conflicts.json`), the
+Vitest 4.1 vm file-isolation plugin, all shared-mode resets, and the commands `check`, `verify`, `compare` and `hunt`
+with unchanged exit codes. Removed commands, options and modes fail with exit 2 and a message that says what went.
+A config with `mode: 'auto'` (or `VITEST_GUARD_MODE=auto`) throws at load.

@@ -4,7 +4,6 @@
 //  S2      verify records order-dependent entries so that `check --prune` does not release them (G2)
 //  note 2  two guarded configs in one root keep each other's quarantine entries (T6); incompatible.json version 2
 //  note 3  `tail: false` is refused, `sequence.setupFiles: 'parallel'` keeps the baseline after the setup files
-//  S6      the fallback directory walk of mode auto prunes excluded, build and dot directories
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -12,7 +11,6 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { project, wrappedConfig, cli, vitestRun, integration, readJson, pkgDir } from './helpers.mjs';
-import { prunedDir } from '../src/auto.mjs';
 import { STATE_VERSIONS } from '../src/stateformat.mjs';
 import * as fp from '../src/fingerprint.mjs';
 
@@ -254,19 +252,4 @@ test('note 3: tail: false is refused in shared mode; setupFiles "parallel" still
   assert.match(r1.out, /setupFiles 'parallel' runs in list order in shared mode/);
   const v = cli(par, ['verify', '--mode', 'shared', '--orders', 'forward', '--no-quarantine']);
   assert.equal(v.code, 0, v.out);
-});
-
-// ---------------- S6 ----------------
-test('S6 unit: the fallback walk of mode auto prunes excluded, build and dot directories', () => {
-  assert.equal(prunedDir('dist', 'dist', []), true);
-  assert.equal(prunedDir('pkg/.cache', '.cache', []), true);
-  assert.equal(prunedDir('src/gen', 'gen', ['**/gen/**']), true);
-  assert.equal(prunedDir('src', 'src', ['**/gen/**', '**/*.snap']), false);
-  assert.equal(prunedDir('src', 'src', ['src/*.test.js']), false, 'an exclude of some files does not prune the directory');
-  // the walk itself: tinyglobby is not resolvable from a directory without node_modules (cwd there too)
-  const root = project({ 'src/a.test.js': pass, 'src/gen/g.test.js': pass, 'dist/d.test.js': pass, '.cache/c.test.js': pass, 'lib/l.test.js': pass }, { modules: 'none' });
-  const code = `import(${JSON.stringify(pathToFileURL(path.join(pkgDir, 'src', 'auto.mjs')).href)}).then((m) => console.log(JSON.stringify(m.listTestFiles(process.cwd(), ['**/*.test.js'], ['**/node_modules/**', '**/gen/**']))))`;
-  const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], { cwd: root, encoding: 'utf8' });
-  assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(JSON.parse(r.stdout.trim()), ['lib/l.test.js', 'src/a.test.js']);
 });

@@ -1,3 +1,0 @@
-{"t": "meta", "gitHead": "0123456789abcdef0123456789abcdef01234567"}
-{"t": "file", "file": "/home/claude/demo/src/price.ts", "blocks": [[1, 71, 7, 1, "f"], [1, 62, 1, 67, "b"], [2, 2, 2, 40, "s"], [2, 16, 2, 40, "b"], [3, 2, 3, 25, "s"], [4, 2, 4, 30, "s"], [4, 17, 4, 30, "b"], [5, 2, 5, 24, "s"], [5, 11, 5, 24, "b"], [6, 2, 6, 39, "s"], [8, 42, 10, 1, "f"], [9, 2, 9, 32, "s"]]}
-{"t": "test", "file": "/home/claude/demo/test/other.test.ts", "name": "duplicate of basic in other file", "line": 3, "state": "pass", "durationMs": 25.0, "assertions": 0, "hits": {"/home/claude/demo/src/price.ts": [0, 1, 2, 4, 5, 7, 9]}}

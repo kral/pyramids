@@ -1,5 +1,4 @@
-// Review 3: state-file format versions (architecture B2), migrateState and committed files (S3), symlinks and
-// junctions in .vitest-guard/ (security S2).
+// State-file format versions (B2), symlinks and junctions in .vitest-guard/ (security S2).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -8,7 +7,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { project, cli, vitestRun, wrappedConfig, integration } from './helpers.mjs';
 import { readQuarantine, readQuarantineFile } from '../src/index.mjs';
-import { ctx, saveState, loadState, statePath, migrateState, checkState } from '../src/cli.mjs';
+import { ctx, saveState, loadState, statePath, checkState } from '../src/cli.mjs';
 import { clearRunLogs, ensureStateDir, readRunLogs } from '../src/logs.mjs';
 import { writeStateFile, appendStateFile, readStateJson, safeDir } from '../src/statefs.mjs';
 
@@ -32,7 +31,7 @@ test('B2: the CLI refuses a committed incompatible.json / conflicts.json with a 
   for (const [name, cur] of [['incompatible.json', 2], ['conflicts.json', 1]]) {
     const body = JSON.stringify({ version: cur + 1, files: { 'test/a.test.ts': {} } });
     const root = mk({ [`.vitest-guard/${name}`]: body, 'package.json': '{}' });
-    const r = cli(root, ['report']);
+    const r = cli(root, ['check']);
     assert.equal(r.code, 2, r.out);
     assert.match(r.out, new RegExp(`\\.vitest-guard/${name.replace('.', '\\.')} has format version ${cur + 1}; this @jirikral/vitest-guard \\([^)]+\\) understands version ${cur} - upgrade`));
     assert.match(r.out, /Nothing was run or written/);
@@ -57,14 +56,10 @@ test('B2: a missing version counts as 1; writers always stamp the current versio
   w(root, '.vitest-guard/conflicts.json', JSON.stringify({ version: 7, edges: [] }));
   assert.throws(() => saveState(c, 'conflicts.json', { version: 1, edges: [{ a: 'x', b: 'y' }] }), (e) => e.code === 'E_STATE_VERSION' && /version 7/.test(e.message));
   assert.equal(JSON.parse(fs.readFileSync(statePath(c, 'conflicts.json'), 'utf8')).version, 7);
-  // invalid versions are refused as well; a newer volatile plan.json is ignored (re-planned), not misread
+  // invalid versions are refused as well
   w(root, '.vitest-guard/conflicts.json', JSON.stringify({ version: '2.0', edges: [] }));
   assert.match(checkState(c), /format version "2\.0"/);
   fs.rmSync(path.join(root, '.vitest-guard/conflicts.json'));
-  saveState(c, 'plan.json', { version: 99, lanes: [] });
-  assert.equal(loadState(c, 'plan.json', null), null);
-  saveState(c, 'plan.json', { version: 2, lanes: [] });
-  assert.deepEqual(loadState(c, 'plan.json', null), { version: 2, lanes: [] });
 });
 
 test('B2 / S3 (review 3b): a newer incompatible.json stops the config (fail closed); VITEST_GUARD_NEWER_STATE=failsafe runs every file it names isolated', () => {
@@ -102,78 +97,26 @@ test('B2 end to end: plain `vitest run` with a newer incompatible.json exits 1 (
   assert.match(r.out, /format version 3.*Failing safe/s);
 });
 
-// ---------------- S3: migrateState never moves or deletes committed state ----------------
-
-const git = (root, ...args) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: root, encoding: 'utf8' });
-const hasGit = git(os.tmpdir(), '--version').status === 0;
-
-test('S3: migrateState leaves a committed durations.json / pollution.json in place without --commit-state (hint only)', { skip: !hasGit && 'git not available' }, () => {
-  const root = mk({ 'package.json': '{}' });
-  for (const n of ['durations.json', 'pollution.json', 'incompatible.json', 'plan.json']) w(root, `.vitest-guard/${n}`, '{}\n');
-  assert.equal(git(root, 'init', '-q').status, 0);
-  git(root, 'add', '.vitest-guard/durations.json', '.vitest-guard/pollution.json', '.vitest-guard/incompatible.json');
-  assert.equal(git(root, 'commit', '-q', '-m', 'state').status, 0);
-  // the reproduction of the review: `vitest-guard report` (no wrapped config needed)
-  const r = cli(root, ['report']);
-  assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /\.vitest-guard\/durations\.json, \.vitest-guard\/pollution\.json are committed but this run has no --commit-state: left untouched/);
-  assert.match(r.out, /moved 1 volatile file\(s\).*plan\.json/);
-  assert.deepEqual(fs.readdirSync(path.join(root, '.vitest-guard')).sort(), ['durations.json', 'incompatible.json', 'pollution.json', 'run']);
-  assert.equal(git(root, 'status', '--porcelain', '--', '.vitest-guard').stdout.trim(), '');
-  // with --commit-state they are the live files: nothing to say about them
-  const r2 = cli(root, ['report', '--commit-state']);
-  assert.doesNotMatch(r2.out, /left untouched/);
-});
-
-test('migrate hint for a committed durations.json is printed once per set of affected files', { skip: !hasGit && 'git not available' }, () => {
-  const root = mk({ 'package.json': '{}' });
-  w(root, '.vitest-guard/durations.json', '{}\n');
-  assert.equal(git(root, 'init', '-q').status, 0);
-  git(root, 'add', '.vitest-guard/durations.json');
-  assert.equal(git(root, 'commit', '-q', '-m', 'state').status, 0);
-  assert.match(cli(root, ['report']).out, /durations\.json is committed but this run has no --commit-state/);
-  assert.doesNotMatch(cli(root, ['report']).out, /committed but this run has no --commit-state/);
-  assert.ok(fs.existsSync(path.join(root, '.vitest-guard/run/migrate-hint.json')));
-  // the set of affected files changes: shown again
-  w(root, '.vitest-guard/pollution.json', '{}\n');
-  git(root, 'add', '.vitest-guard/pollution.json'); git(root, 'commit', '-q', '-m', 'more');
-  assert.match(cli(root, ['report']).out, /durations\.json, \.vitest-guard\/pollution\.json are committed/);
-  assert.doesNotMatch(cli(root, ['report']).out, /committed but this run has no --commit-state/);
-});
-
-test('S3: migrateState never deletes: an old copy next to a newer run/ copy stays (with a hint)', () => {
-  const root = mk();
-  w(root, '.vitest-guard/plan.json', '{"old":1}');
-  w(root, '.vitest-guard/run/plan.json', '{"new":1}');
-  w(root, '.vitest-guard/durations.json', '{}'); // no git repo: the history files are kept where they are
-  const out = quiet(() => migrateState(ctx({ _: ['check'], root })));
-  assert.match(out, /plan\.json: a newer copy exists in \.vitest-guard\/run\/; the old one was left in place/);
-  assert.equal(fs.readFileSync(path.join(root, '.vitest-guard/plan.json'), 'utf8'), '{"old":1}');
-  assert.equal(fs.readFileSync(path.join(root, '.vitest-guard/run/plan.json'), 'utf8'), '{"new":1}');
-  assert.ok(fs.existsSync(path.join(root, '.vitest-guard/durations.json')));
-});
-
 // ---------------- S2: symlinks / junctions in .vitest-guard/ ----------------
 
 test('S2: a symlinked / junctioned .vitest-guard/run is refused: nothing is deleted, moved or written in the target', () => {
   const victim = victimDir();
-  const root = mk({ 'package.json': '{}', '.vitest-guard/plan.json': '{}' });
+  const root = mk({ 'package.json': '{}', '.vitest-guard/compare.json': '{}' });
   dirLink(victim, path.join(root, '.vitest-guard', 'run'));
   const before = listAll(victim);
-  const r = cli(root, ['report']);
+  const r = cli(root, ['check']);
   assert.equal(r.code, 2, r.out);
   assert.match(r.out, /\.vitest-guard\/run is a symbolic link or junction - refusing to follow it/);
   assert.deepEqual(listAll(victim), before);
   assert.equal(fs.readFileSync(path.join(victim, 'w-1-1.jsonl'), 'utf8'), 'precious\n');
-  assert.ok(fs.existsSync(path.join(root, '.vitest-guard', 'plan.json')));
+  assert.ok(fs.existsSync(path.join(root, '.vitest-guard', 'compare.json')));
   // the library helpers refuse on their own as well (no reliance on the CLI's up-front check)
   const c = ctx({ _: ['check'], root });
   assert.throws(() => clearRunLogs(c.runDir), (e) => e.code === 'E_UNSAFE_STATE');
   assert.throws(() => ensureStateDir(c.stateDir), (e) => e.code === 'E_UNSAFE_STATE');
-  assert.throws(() => saveState(c, 'plan.json', { version: 2 }), (e) => e.code === 'E_UNSAFE_STATE');
+  assert.throws(() => saveState(c, 'compare.json', { version: 2 }), (e) => e.code === 'E_UNSAFE_STATE');
   assert.throws(() => readRunLogs(c.runDir), (e) => e.code === 'E_UNSAFE_STATE');
-  assert.equal(quiet(() => migrateState(c)), '');
-  assert.deepEqual(listAll(victim), before);
+    assert.deepEqual(listAll(victim), before);
 });
 
 test('S2: a symlinked / junctioned .vitest-guard/run/logs is never deleted recursively', () => {
@@ -181,7 +124,7 @@ test('S2: a symlinked / junctioned .vitest-guard/run/logs is never deleted recur
   const root = mk({ 'package.json': '{}' });
   fs.mkdirSync(path.join(root, '.vitest-guard', 'run'), { recursive: true });
   dirLink(path.join(victim, 'logs'), path.join(root, '.vitest-guard', 'run', 'logs'));
-  const r = cli(root, ['report']);
+  const r = cli(root, ['check']);
   assert.equal(r.code, 2, r.out);
   assert.match(r.out, /\.vitest-guard\/run\/logs is a symbolic link or junction/);
   assert.throws(() => clearRunLogs(path.join(root, '.vitest-guard', 'run', 'logs')), (e) => e.code === 'E_UNSAFE_STATE');
@@ -193,7 +136,7 @@ test('S2 / R3: a symlinked .vitest-guard itself is refused, also by the config w
   w(victim, 'incompatible.json', JSON.stringify({ vm: { 'test/a.test.ts': {} } }));
   const root = mk({ 'package.json': '{}', 'test/a.test.ts': '' });
   dirLink(victim, path.join(root, '.vitest-guard'));
-  const r = cli(root, ['report']);
+  const r = cli(root, ['check']);
   assert.equal(r.code, 2, r.out);
   assert.match(r.out, /\.vitest-guard is a symbolic link or junction/);
   // R3 (review 3b): the config wrapper does not run quarantined files fast either: it refuses to load (Vitest exits 1)
@@ -207,13 +150,13 @@ test('S2: state files: no write, append or read through a symlinked file; privat
   ensureStateDir(run);
   assert.equal(fs.statSync(run).mode & 0o777, 0o700);
   assert.equal(fs.statSync(path.join(run, '.gitignore')).mode & 0o777, 0o600);
-  fs.symlinkSync(path.join(victim, 'w-1-1.jsonl'), path.join(run, 'plan.json'));
+  fs.symlinkSync(path.join(victim, 'w-1-1.jsonl'), path.join(run, 'compare.json'));
   fs.symlinkSync(path.join(victim, 'w-1-1.jsonl'), path.join(run, 'env-1-1.jsonl'));
   fs.symlinkSync(path.join(victim, 'nope'), path.join(run, 'dangling.json'));
-  assert.throws(() => writeStateFile(path.join(run, 'plan.json'), 'x'), (e) => e.code === 'E_UNSAFE_STATE');
+  assert.throws(() => writeStateFile(path.join(run, 'compare.json'), 'x'), (e) => e.code === 'E_UNSAFE_STATE');
   assert.throws(() => appendStateFile(path.join(run, 'env-1-1.jsonl'), 'x'), (e) => e.code === 'E_UNSAFE_STATE');
   assert.throws(() => writeStateFile(path.join(run, 'dangling.json'), 'x'), (e) => e.code === 'E_UNSAFE_STATE');
-  assert.throws(() => readStateJson(path.join(run, 'plan.json'), null), (e) => e.code === 'E_UNSAFE_STATE');
+  assert.throws(() => readStateJson(path.join(run, 'compare.json'), null), (e) => e.code === 'E_UNSAFE_STATE');
   assert.equal(fs.readFileSync(path.join(victim, 'w-1-1.jsonl'), 'utf8'), 'precious\n');
   assert.ok(!fs.existsSync(path.join(victim, 'nope')));
   // a dangling .gitignore link is not written through either

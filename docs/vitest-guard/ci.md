@@ -9,8 +9,8 @@ Principles:
   tells the developer to run `check` locally.
 - `@jirikral/vitest-guard` is on npm under the dist-tag `next`. Install it once as a pinned dev dependency
   (`npm i -D -E @jirikral/vitest-guard@next`, commit the lockfile); the jobs then get it from `npm ci` and need no extra
-  install step. The jobs below instead install from a tarball packed from a pinned checkout of the vto repository: use
-  that route only for changes that are not released yet. Replace `<OWNER>/<VTO_REPO>` and `<VTO_SHA>`; pin actions by SHA
+  install step. The jobs below instead install from a tarball packed from a pinned checkout of this repository: use
+  that route only for changes that are not released yet. Replace `<OWNER>/<VG_REPO>` and `<VG_SHA>`; pin actions by SHA
   in real use. The tarball is named `jirikral-vitest-guard-<version>.tgz`. The examples were written from the CLI's
   documented behaviour and not executed on a hosted runner (unverified there).
 - Never run `npx vitest-guard` in a job: the unscoped npm name is not ours. Call the CLI by path, as below.
@@ -27,7 +27,7 @@ on:
   schedule: [{ cron: '17 2 * * *' }]
 permissions: { contents: read }
 env:
-  VTO_SHA: <VTO_SHA>
+  VG_SHA: <VG_SHA>
 jobs:
   fast:                                   # pull requests: fast mode, quarantined files in forks
     if: github.event_name == 'pull_request'
@@ -39,9 +39,9 @@ jobs:
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - uses: actions/checkout@v4
-        with: { repository: <OWNER>/<VTO_REPO>, ref: '${{ env.VTO_SHA }}', path: .vto-tool, persist-credentials: false }
+        with: { repository: <OWNER>/<VG_REPO>, ref: '${{ env.VG_SHA }}', path: .vg-tool, persist-credentials: false }
       - run: |
-          npm pack ./.vto-tool/vitest-guard --pack-destination "$RUNNER_TEMP"
+          npm pack ./.vg-tool/vitest-guard --pack-destination "$RUNNER_TEMP"
           npm i --no-save "$RUNNER_TEMP"/jirikral-vitest-guard-*.tgz
       - run: npx vitest run               # exit code = the gate; wrapped config, VITEST_GUARD_MODE unset
       # optional: detect a newly vm-incompatible test (exit 4 = would change the quarantine)
@@ -57,9 +57,9 @@ jobs:
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - uses: actions/checkout@v4
-        with: { repository: <OWNER>/<VTO_REPO>, ref: '${{ env.VTO_SHA }}', path: .vto-tool, persist-credentials: false }
+        with: { repository: <OWNER>/<VG_REPO>, ref: '${{ env.VG_SHA }}', path: .vg-tool, persist-credentials: false }
       - run: |
-          npm pack ./.vto-tool/vitest-guard --pack-destination "$RUNNER_TEMP"
+          npm pack ./.vg-tool/vitest-guard --pack-destination "$RUNNER_TEMP"
           npm i --no-save "$RUNNER_TEMP"/jirikral-vitest-guard-*.tgz
       - run: npx vitest run
         env: { VITEST_GUARD_MODE: isolated }  # reference: Vitest default isolation
@@ -72,7 +72,7 @@ jobs:
 Note: a job whose step exits non-zero fails; to turn exit 4 of the nightly into a PR instead of a red build, add
 `continue-on-error: true` to that step and upload `.vitest-guard/*.json` as an artifact. Windows and macOS runners work
 the same way (use `shell: bash` for the `$RUNNER_TEMP` lines, or PowerShell equivalents). With the package installed from npm
-(`npm ci`), delete the checkout of `.vto-tool` and the `npm pack` / `npm i --no-save` step.
+(`npm ci`), delete the checkout of `.vg-tool` and the `npm pack` / `npm i --no-save` step.
 
 ## Azure Pipelines
 
@@ -86,23 +86,23 @@ schedules:
     always: true
 resources:
   repositories:
-    - repository: vto
+    - repository: vg-source
       type: git
-      name: <PROJECT>/<VTO_REPO>
-      ref: <VTO_SHA_OR_TAG>
+      name: <PROJECT>/<VG_REPO>
+      ref: <VG_SHA_OR_TAG>
 pool: { vmImage: ubuntu-latest }
 steps:
   - checkout: self
-  - checkout: vto
+  - checkout: vg-source
   - task: NodeTool@0
     inputs: { versionSpec: '22.x' }
   - script: npm ci
     workingDirectory: $(Build.SourcesDirectory)/app
   - script: |
-      npm pack ../vto/vitest-guard --pack-destination "$(Agent.TempDirectory)"
+      npm pack ../vg-source/vitest-guard --pack-destination "$(Agent.TempDirectory)"
       npm i --no-save "$(Agent.TempDirectory)"/jirikral-vitest-guard-*.tgz
     workingDirectory: $(Build.SourcesDirectory)/app
-    displayName: install vitest-guard from the pinned vto checkout
+    displayName: install vitest-guard from the pinned checkout
   # pull request: fast mode
   - script: npx vitest run
     workingDirectory: $(Build.SourcesDirectory)/app
@@ -120,7 +120,7 @@ steps:
     displayName: vitest-guard verify (exit 5 = false green, 4 = quarantine changes)
 ```
 
-With two `checkout:` steps, sources land in `$(Build.SourcesDirectory)/<repo name>`; adjust the `app` and `vto`
+With two `checkout:` steps, sources land in `$(Build.SourcesDirectory)/<repo name>`; adjust the `app` and `vg-source`
 folder names to your repository names.
 
 ## Choosing what to gate on
@@ -133,8 +133,7 @@ folder names to your repository names.
 | `vitest-guard verify --sample all` | nightly; required before gating on `shared` (the config warns while no clean record exists for the commit) |
 | `vitest-guard check --prune` | weekly; releases files that pass fast again |
 
-Caching: `.vitest-guard/run/` is volatile; caching it between runs is optional (it holds durations that make plans
-better, and `files-cache.json`, which self-invalidates).
+Caching: `.vitest-guard/run/` is volatile (logs and verify/compare records); caching it between runs is pointless.
 
 The verify record is tied to the commit and a hash of config + quarantine files, so the shared-mode warning of
 `vitest run` appears in CI when the record (git-ignored, under `run/`) is absent. Silence with

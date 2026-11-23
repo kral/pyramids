@@ -1,5 +1,0 @@
-{"t":"meta","version":2,"gitHead":null}
-{"t":"file","file":"/abs/p/src/a.ts","blocks":[[1,0,3,1,"f"]]}
-{"t":"test","file":"/abs/p/test/a.test.ts","name":"a","line":null,"state":"pass","hits":{"/abs/p/src/a.ts":[0]}}
-{"t":"fileload","testFile":"/abs/p/test/a.test.ts","hits":{},"modules":["/abs/p/src/a.ts"]}
-{"t":"env","testFile":"/abs/p/test/a.test.ts","env":"node","dom":false}

@@ -7,9 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import VitestGuardSequencer from './sequencer.mjs';
 import { validateTestPaths, sanitize, escapeGlob, isInside, globProjectFiles } from './safety.mjs';
-import { readStateJson, readStateFile, writeStateFile } from './statefs.mjs';
+import { readStateJson, readStateFile } from './statefs.mjs';
 import { versionProblem } from './stateformat.mjs';
-import { listTestFiles, classifyFiles, readModes, DEFAULT_AUTO_MODES, DOM_ENVS } from './auto.mjs';
 import { verifyStatus, findConfigFile } from './verifystate.mjs';
 
 // single-module bundle (scripts/bundle-setup.mjs): every setup module costs a fetch + evaluation per test file in vm pools
@@ -22,7 +21,7 @@ const localCache = new Map();
 /**
  * Path of one of vitest-guard's setup files as Vitest of the project at `root` can load it.
  * Installed normally (inside `<root>/node_modules` or anywhere below the root) it is the file itself. Installed
- * through a symlink (`npm i -D ../vto/vitest-guard`, `npm link`, a checkout next to the project) the real file lives
+ * through a symlink (`npm i -D ../vitest-guard`, `npm link`, a checkout next to the project) the real file lives
  * outside the root: Vite refuses to serve it to jsdom/happy-dom tests (`server.fs.strict`) and bare imports would
  * resolve from the checkout instead of the project. Then an identical copy in `<root>/node_modules/.vitest-guard/`
  * is used (refreshed when the content differs).
@@ -261,99 +260,33 @@ function poolFor(mode, keepPool, projTest, rootTest, g) {
   return { pool: 'forks', isolate: true };
 }
 
-/**
- * @param {import('vitest/config').ViteUserConfig} userConfig plain object (not a function)
- * @param {object} [g]
- * @param {'vm'|'shared'} [g.mode='vm']
- */
-/** R5: name of mode auto's catch-all project (files neither group lists; runs isolated) */
-export const AUTO_REST = 'auto:rest';
-const POOL_OF = { vm: { pool: 'vmThreads' }, shared: { pool: 'threads', isolate: false }, isolated: { pool: 'forks', isolate: true } };
-
-/**
- * mode 'auto': choose the mode per group of test files.
- *  - user `projects`: kept as the user split them; only the mode of each project is chosen;
- *  - otherwise: files are classified into a `dom` and a `node` project (src/auto.mjs).
- * Mode per group/project: g.autoModes[name] > .vitest-guard/run/modes.json (vitest-guard compare / calibrate) > defaults
- * (dom -> vm, node -> shared). Explicit pools of user projects are replaced unless g.respectPools.
- */
-function autoConfig(userConfig, g, root) {
-  const test = { ...(userConfig.test || {}) };
-  const stored = readModes(root);
-  const pick = (name, isDom) => {
-    // a single-project suite measured by `compare` before (or without) the split is stored as 'root' (trial S1)
-    const m = g.autoModes?.[name] ?? stored[name] ?? (!Array.isArray(test.projects) ? stored.root : undefined) ?? (isDom ? g.autoModes?.dom ?? DEFAULT_AUTO_MODES.dom : g.autoModes?.node ?? DEFAULT_AUTO_MODES.node);
-    return POOL_OF[m] ? m : 'isolated';
-  };
-  const strip = (t) => { const { pool, isolate, ...rest } = t; return rest; };
-  const groups = {};
-  const record = (listed) => {
-    // for the CLI: `check` on an auto config runs in auto mode and calibrates first when modes.json is missing
-    try {
-      const f = path.join(root, '.vitest-guard', 'run', 'auto.json');
-      const txt = JSON.stringify({ auto: true, groups, nodeEnvironment: g.nodeEnvironment ?? null, ...(listed != null ? { listed } : {}) });
-      let old = null; try { old = JSON.stringify(readStateJson(f, null)); } catch {}
-      if (old !== txt) writeStateFile(f, txt); // refuses a symlinked .vitest-guard/ or run/
-    } catch (e) { if (e?.code === 'E_UNSAFE_STATE') warnOnce(`${e.message}; auto.json is not written`); }
-  };
-  if (Array.isArray(test.projects)) {
-    test.projects = test.projects.map((p) => {
-      if (!p || typeof p !== 'object') return p;
-      const pt = { ...(p.test || {}) };
-      if (g.respectPools && pt.pool !== undefined) return p;
-      const env = pt.environment ?? (inheritsRoot(p, vitestMajor(root)) ? test.environment : undefined);
-      const name = projectName(pt);
-      const mode = pick(name, DOM_ENVS.has(env));
-      groups[name] = mode;
-      return { ...p, test: { ...strip(pt), ...POOL_OF[mode], provide: { ...(pt.provide || {}), vitestGuardAuto: DOM_ENVS.has(env) ? 'dom' : 'node' } } };
-    });
-    record();
-    return { ...userConfig, test };
-  }
-  const include = test.include || DEFAULT_INCLUDE;
-  const exclude = test.exclude || DEFAULT_EXCLUDE;
-  const files = listTestFiles(root, include, exclude);
-  const optIn = g.nodeEnvironment === 'node';
-  const { dom, node } = classifyFiles(root, files, test.environment, { nodeEnvironment: g.nodeEnvironment });
-  const projects = [];
-  const base = strip(test);
-  // node group environment: 'node' for DOM-configured suites (pragma-node files, or opt-in moved files),
-  // otherwise the configured non-DOM environment stays (e.g. edge-runtime)
-  const nodeEnv = DOM_ENVS.has(test.environment) || !test.environment ? 'node' : test.environment;
-  if (dom.length) { groups.dom = pick('dom', true); projects.push({ extends: true, test: { name: 'dom', include: dom.map(escapeGlob), ...POOL_OF[groups.dom], provide: { vitestGuardAuto: 'dom' } } }); }
-  if (node.length) { groups.node = pick('node', false); projects.push({ extends: true, test: { name: 'node', environment: nodeEnv, include: node.map(escapeGlob), ...POOL_OF[groups.node], provide: { vitestGuardAuto: 'node', vitestGuardAutoHeal: optIn } } }); }
-  // R5 (fail closed): every file Vitest globs that is in neither group (a listing that differs from Vitest's) still
-  // runs, in isolated forks with the configured environment: the user's include minus the two groups' literal files
-  groups[AUTO_REST] = 'isolated';
-  projects.push({ extends: true, test: { name: AUTO_REST, include, exclude: [...exclude, ...files.map(escapeGlob)], ...POOL_OF.isolated } });
-  record(files.length); // files the dom and node groups list: the CLI hides auto:rest when Vitest lists no more than that
-  if (process.env.VITEST_GUARD_AUTO_VERBOSE) console.log(`[vitest-guard] auto: dom ${dom.length} files (${projects.find((p) => p.test.name === 'dom')?.test.pool ?? '-'}), node ${node.length} files (${projects.find((p) => p.test.name === 'node')?.test.pool ?? '-'})`);
-  const { include: _i, ...rootRest } = base; // root include would be merged into the projects (extends: true)
-  return { ...userConfig, test: { ...rootRest, exclude, projects } };
-}
-
 // S3: the mode the config itself runs in (what `vitest run` does), for the CLI's default --mode
 function configModeOf(g) {
   let m = g.mode;
   try { const o = process.env.VITEST_GUARD_OPTS ? JSON.parse(process.env.VITEST_GUARD_OPTS) : {}; if (o && o.mode) m = o.mode; } catch {}
-  return m === 'shared' || m === 'auto' || m === 'isolated' ? m : 'vm';
+  return m === 'shared' || m === 'isolated' ? m : 'vm';
 }
 
 // S2: the mode a plain `vitest run` of this config runs in (VITEST_GUARD_MODE overrides the config)
-const effectiveMode = (g) => { const e = process.env.VITEST_GUARD_MODE; return ['vm', 'shared', 'auto', 'isolated'].includes(e) ? e : configModeOf(g); };
+const effectiveMode = (g) => { const e = process.env.VITEST_GUARD_MODE; return ['vm', 'shared', 'isolated'].includes(e) ? e : configModeOf(g); };
 let warnedVerify = false;
 const usesShared = (cfg) => [cfg?.test, ...(Array.isArray(cfg?.test?.projects) ? cfg.test.projects.map((p) => p?.test) : [])].some((t) => t?.provide?.vitestGuard?.mode === 'shared');
 
+/**
+ * @param {import('vitest/config').ViteUserConfig} userConfig plain object (not a function)
+ * @param {object} [g]
+ * @param {'vm'|'shared'|'isolated'|'off'} [g.mode='vm']
+ */
 export function defineVitestGuardConfig(userConfig = {}, g = {}) {
   if (typeof userConfig === 'function' || (userConfig && typeof userConfig.then === 'function'))
     throw new Error('[vitest-guard] defineVitestGuardConfig needs a plain config object, not a function or a promise. Resolve it first, e.g. `export default defineConfig(async (env) => defineVitestGuardConfig(await base(env)))`.');
   // U-2: the vitest-guard CLI must know that the config it measures really goes through this function
   // (an unwrapped config ignores VITEST_GUARD_MODE: every "mode" would silently be the user's own pool)
-  if (process.env.VITEST_GUARD_WRAP_MARKER && !g._autoDone) { try { fs.appendFileSync(process.env.VITEST_GUARD_WRAP_MARKER, JSON.stringify({ pid: process.pid, mode: process.env.VITEST_GUARD_MODE || g.mode || 'vm', configMode: configModeOf(g) }) + '\n'); } catch {} }
+  if (process.env.VITEST_GUARD_WRAP_MARKER) { try { fs.appendFileSync(process.env.VITEST_GUARD_WRAP_MARKER, JSON.stringify({ pid: process.pid, mode: process.env.VITEST_GUARD_MODE || g.mode || 'vm', configMode: configModeOf(g) }) + '\n'); } catch {} }
   const out = buildConfig(userConfig, g);
   // M6: shared mode can be green where forks are red (state left by an earlier file); only `vitest-guard verify`
   // compares the two. Say so when the gate runs in shared mode without a clean verify for this commit/config.
-  if (!warnedVerify && !g._autoDone && g.verifyWarning !== false && !process.env.VITEST_GUARD_CLI && !process.env.VITEST_GUARD_LANE_FILE && process.env.VITEST_GUARD_VERIFY_WARNING !== '0' && process.env.VITEST_GUARD_MODE !== 'off' && usesShared(out)) {
+  if (!warnedVerify && g.verifyWarning !== false && !process.env.VITEST_GUARD_CLI && !process.env.VITEST_GUARD_LANE_FILE && process.env.VITEST_GUARD_VERIFY_WARNING !== '0' && process.env.VITEST_GUARD_MODE !== 'off' && usesShared(out)) {
     warnedVerify = true;
     try {
       const root = path.resolve(userConfig.root || userConfig.test?.root || process.cwd());
@@ -369,11 +302,9 @@ function buildConfig(userConfig, g) {
   if (process.env.VITEST_GUARD_OPTS) g = { ...g, ...JSON.parse(process.env.VITEST_GUARD_OPTS) }; // CI / experiments
   if (g.quarantineFile !== undefined) throw new Error('[vitest-guard] the `quarantineFile` option was removed in 0.1.0-alpha.3: the CLI always reads and writes .vitest-guard/incompatible.json, so another path could never be kept in sync. Delete the option (move the file to .vitest-guard/incompatible.json).');
   const envMode = process.env.VITEST_GUARD_MODE;
-  if (envMode === 'off') return userConfig;
-  if ((g.mode === 'auto' || envMode === 'auto') && !g._autoDone) {
-    const root0 = path.resolve(userConfig.root || userConfig.test?.root || process.cwd());
-    return buildConfig(autoConfig(userConfig, g, root0), { ...g, mode: 'vm', _autoDone: true });
-  }
+  if (envMode === 'off' || g.mode === 'off') return userConfig;
+  if (g.mode === 'auto' || envMode === 'auto') throw new Error("[vitest-guard] mode 'auto' was removed in 0.2.0-alpha.0 (it lives on the `vto` branch). Use mode 'vm' or 'shared' (run `vitest-guard compare` to pick one), or keep per-project modes with `projects`.");
+  if (g.mode !== undefined && !['vm', 'shared', 'isolated'].includes(g.mode)) throw new Error(`[vitest-guard] unknown mode ${sanitize(JSON.stringify(String(g.mode)), 40)}: use 'vm', 'shared', 'isolated' or 'off'.`);
   const test = { ...(userConfig.test || {}) };
   if (test.poolOptions) console.warn('[vitest-guard] test.poolOptions was removed in Vitest 4 and is ignored (use vmMemoryLimit / maxWorkers).');
   const root = path.resolve(userConfig.root || test.root || process.cwd());
@@ -507,7 +438,7 @@ function buildConfig(userConfig, g) {
   if (mode === 'vm' && needVmPlugin) out.plugins = withVmPlugin(userConfig.plugins);
 
   if (lane) {
-    // one lane of a shared-mode plan: exactly these (validated) files, one worker, plan order
+    // one lane (a `verify` order): exactly these (validated) files, one worker, in this order
     const files = validateTestPaths(root, laneEntriesFor(root, lane.files), { include, exclude, label: 'VITEST_GUARD_LANE_FILE' }).ok;
     if (!files.length) throw new Error('[vitest-guard] VITEST_GUARD_LANE_FILE contains no valid test file');
     Object.assign(out.test, { ...fast, include: files.map(escapeGlob), exclude, setupFiles, provide: provide(mode) });

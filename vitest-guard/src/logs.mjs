@@ -1,7 +1,6 @@
 // Reads the per-worker run logs written by setup.mjs (.vitest-guard/run/w-<pid>-<tid>.jsonl).
 import path from 'node:path';
-import { safeDir, listStateDir, readStateFile, readStateJson, writeStateFile, createStateFile, removeState } from './statefs.mjs';
-import { assertStateVersion, stamp } from './stateformat.mjs';
+import { safeDir, listStateDir, readStateFile, createStateFile, removeState } from './statefs.mjs';
 
 export function readRunLogs(runDir) {
   const workers = [];
@@ -35,22 +34,10 @@ export function predecessors(workers, file) {
   return [];
 }
 
-/** durations.json: exponential moving average of measured per-file durations. */
 /** .vitest-guard/run/ holds only volatile state: make git ignore all of it (A4). */
 export function ensureStateDir(dir) {
   safeDir(dir); // creates .vitest-guard/run 0700; refuses a symlinked / junctioned component
-  createStateFile(path.join(dir, '.gitignore'), '# vitest-guard volatile state (logs, plan, caches, durations): never commit\n*\n');
-}
-
-export function updateDurations(file, workers) {
-  let d = readStateJson(file, {});
-  if (!d || typeof d !== 'object' || Array.isArray(d)) d = {};
-  assertStateVersion('durations.json', d, file); // never rewrite a newer format in the old shape
-  for (const w of workers) for (const f of w.files) if (typeof f.durationMs === 'number' && f.durationMs >= 0) d[f.file] = d[f.file] ? Math.round((0.5 * d[f.file] + 0.5 * f.durationMs) * 10) / 10 : f.durationMs;
-  if (path.basename(path.dirname(file)) === 'run') ensureStateDir(path.dirname(file));
-  d = stamp('durations.json', d);
-  writeStateFile(file, JSON.stringify(d, null, 1) + '\n');
-  return d;
+  createStateFile(path.join(dir, '.gitignore'), '# vitest-guard volatile state (run logs, verify and compare records): never commit\n*\n');
 }
 
 export function selfTime(workers) {

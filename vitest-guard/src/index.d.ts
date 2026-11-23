@@ -1,17 +1,12 @@
 import type { ViteUserConfig } from 'vitest/config';
 export interface VitestGuardOptions {
   /**
-   * 'vm' = pool vmThreads (default), 'shared' = threads + isolate:false, 'auto' = per group/project (see autoModes),
-   * 'isolated' = plain forks with isolation (guard layer only, no speed-up).
-   * Env VITEST_GUARD_MODE=vm|shared|auto|isolated|off overrides; 'off' returns your config untouched (env only, not a config value).
+   * 'vm' = pool vmThreads (default), 'shared' = threads + isolate:false,
+   * 'isolated' = plain forks with isolation (guard layer only, no speed-up),
+   * 'off' = your config untouched.
+   * Env VITEST_GUARD_MODE=vm|shared|isolated|off overrides. (Mode 'auto' was removed in 0.2.0-alpha.0.)
    */
-  mode?: 'vm' | 'shared' | 'auto' | 'isolated';
-  /** mode 'auto': per group/project mode override, e.g. { dom: 'vm', node: 'shared' } ('vm' | 'shared' | 'isolated') */
-  autoModes?: Record<string, 'vm' | 'shared' | 'isolated'>;
-  /** mode 'auto' with user projects: keep explicit project pools */
-  respectPools?: boolean;
-  /** mode 'auto': 'node' = files of a DOM-configured suite that never touch the DOM (measured, else static) move to the node group with environment node (opt-in; default routes by the configured environment) */
-  nodeEnvironment?: 'node' | null;
+  mode?: 'vm' | 'shared' | 'isolated' | 'off';
   /** bytes or Vitest string ('1.5GB', '30%'); default autoMemoryLimit(maxWorkers) */
   memoryLimit?: number | string;
   /** extra server.deps.inline entries */
@@ -65,6 +60,4 @@ export declare const SETUP_TAIL_FILE: string;
 export declare function setupFileFor(root: string, file?: string): string;
 export declare const DEFAULT_INCLUDE: string[];
 export declare const DEFAULT_EXCLUDE: string[];
-/** Name of mode auto's catch-all project: test files neither group lists run there, isolated. */
-export declare const AUTO_REST: string;
 export declare const VitestGuardSequencer: unknown;

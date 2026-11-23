@@ -1,5 +1,5 @@
-// A4 (VALIDATION-real-suite): only incompatible.json / conflicts.json are committed state; everything volatile
-// lives in .vitest-guard/run/ with a `*` .gitignore, unchanged files are not rewritten, old layouts are migrated.
+// Only incompatible.json / conflicts.json are committed state; everything volatile lives in .vitest-guard/run/
+// with a `*` .gitignore, unchanged files are not rewritten.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -11,16 +11,13 @@ const mk = () => fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), '
 test('A4: volatile state goes to .vitest-guard/run/ (git-ignored), committed files stay in .vitest-guard/', async () => {
   const { ctx, statePath, saveState } = await import('../src/cli.mjs');
   const root = mk();
-  const c = ctx({ _: ['plan'], root });
-  for (const n of ['durations.json', 'pollution.json', 'plan.json', 'files-cache.json', 'settings.json', 'verify-vm.json', 'compare.json'])
+  const c = ctx({ _: ['check'], root });
+  for (const n of ['verify-vm.json', 'verify-shared.json', 'compare.json'])
     assert.equal(path.dirname(statePath(c, n)), path.join(root, '.vitest-guard', 'run'), n);
   for (const n of ['incompatible.json', 'conflicts.json']) assert.equal(path.dirname(statePath(c, n)), path.join(root, '.vitest-guard'), n);
-  saveState(c, 'durations.json', { a: 1 });
+  saveState(c, 'compare.json', { a: 1 });
   assert.equal(fs.readFileSync(path.join(root, '.vitest-guard/run/.gitignore'), 'utf8').trim().split('\n').at(-1), '*');
   assert.equal(c.runDir, path.join(root, '.vitest-guard', 'run', 'logs'));
-  const committed = ctx({ _: ['plan'], root, 'commit-state': true });
-  assert.equal(path.dirname(statePath(committed, 'durations.json')), path.join(root, '.vitest-guard'));
-  assert.equal(path.dirname(statePath(committed, 'plan.json')), path.join(root, '.vitest-guard', 'run'));
 });
 
 test('A4: unchanged content does not touch the committed file', async () => {
@@ -33,18 +30,4 @@ test('A4: unchanged content does not touch the committed file', async () => {
   fs.utimesSync(f, old, old);
   saveState(c, 'incompatible.json', { version: 1, vm: {}, shared: {} });
   assert.equal(Math.floor(fs.statSync(f).mtimeMs / 1000), Math.floor(old.getTime() / 1000));
-});
-
-test('A4: volatile files of the old layout are moved into run/, committed ones stay (S3: no git = history files stay too)', async () => {
-  const { ctx, migrateState } = await import('../src/cli.mjs');
-  const root = mk();
-  const d = path.join(root, '.vitest-guard');
-  fs.mkdirSync(path.join(d, 'run'), { recursive: true });
-  for (const n of ['incompatible.json', 'conflicts.json', 'durations.json', 'pollution.json', 'plan.json', 'files-cache.json', 'settings.json', 'verify-vm.json']) fs.writeFileSync(path.join(d, n), '{}');
-  fs.writeFileSync(path.join(d, 'run', 'w-1-1.jsonl'), '');
-  const log = console.log; console.log = () => {};
-  try { migrateState(ctx({ _: ['check'], root })); } finally { console.log = log; }
-  // without git it cannot be told whether durations.json / pollution.json are committed: they are not moved
-  assert.deepEqual(fs.readdirSync(d).sort(), ['conflicts.json', 'durations.json', 'incompatible.json', 'pollution.json', 'run']);
-  assert.deepEqual(fs.readdirSync(path.join(d, 'run')).sort(), ['.gitignore', 'files-cache.json', 'migrate-hint.json', 'plan.json', 'settings.json', 'verify-vm.json']);
 });

@@ -1,9 +1,3 @@
 node_modules/
-target/
-overlap-report/
 *.log
-.vto-cache/
-.vto/
-.vto-tmp/
-verify-report/
 .vitest-guard/run/

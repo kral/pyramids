@@ -19,10 +19,6 @@ export const MISSING_GLOBALS = ['ReadableStream', 'WritableStream', 'TransformSt
   'CompressionStream', 'DecompressionStream', 'ByteLengthQueuingStrategy', 'CountQueuingStrategy',
   'BroadcastChannel', 'MessageChannel', 'MessagePort', 'MessageEvent', 'CryptoKey', 'SubtleCrypto'];
 
-/** DOM globals watched by the auto-mode probe and by the node-group miss detector. */
-export const DOM_KEYS = ['document', 'window', 'navigator', 'location', 'localStorage', 'sessionStorage', 'HTMLElement', 'Element', 'Node',
-  'Event', 'CustomEvent', 'KeyboardEvent', 'MouseEvent', 'getComputedStyle', 'requestAnimationFrame', 'MutationObserver', 'customElements', 'DOMParser', 'matchMedia'];
-
 const MARK = Symbol.for('vitest-guard.realm');
 const ordinaryHasInstance = Function.prototype[Symbol.hasInstance];
 

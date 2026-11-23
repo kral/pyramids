@@ -1,15 +1,14 @@
 #!/usr/bin/env node
 // Repository hygiene checks that need no dependency and no build (CI step `lint`).
-//   1. samples/ hold no source code and no absolute paths (SECURITY F11)
-//   2. workflows: actions pinned by commit SHA, least-privilege permissions, no pull_request_target,
+//   1. workflows: actions pinned by commit SHA, least-privilege permissions, no pull_request_target,
 //      checkout without persisted credentials, no retired runner images
-//   3. docs: no `npx <unscoped name>` that npm could resolve to a foreign package; relative links resolve
-//   4. manifests: licence and Node range declared consistently
+//   2. docs: no `npx <unscoped name>` that npm could resolve to a foreign package; relative links resolve
+//   3. manifests: licence and Node range declared consistently
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const REPO = process.env.VTO_CI_REPO ? path.resolve(process.env.VTO_CI_REPO) : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const REPO = process.env.VG_CI_REPO ? path.resolve(process.env.VG_CI_REPO) : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const problems = [];
 const bad = (file, msg) => problems.push(`${path.relative(REPO, file)}: ${msg}`);
 const read = (f) => fs.readFileSync(f, 'utf8');
@@ -23,22 +22,7 @@ function walk(dir, out = []) {
   return out;
 }
 
-// ---- 1. samples
-const ABS = /(?:^|["'\s(=:])(?:\/(?:home|Users|root|tmp|var|private|mnt|opt)\/|[A-Za-z]:[\\/]{1,2}(?:Users|src|tools|a|proj)\b|file:\/\/)/;
-for (const f of walk(path.join(REPO, 'samples'))) {
-  const text = read(f);
-  if (ABS.test(text)) bad(f, 'contains an absolute path');
-  if (!f.endsWith('.jsonl')) continue;
-  for (const [i, line] of text.split('\n').entries()) {
-    if (!line.trim()) continue;
-    let r;
-    try { r = JSON.parse(line); } catch { bad(f, `line ${i + 1} is not JSON`); continue; }
-    if (r.t === 'script' || 'source' in r || 'code' in r) bad(f, `line ${i + 1}: record carries source code (t=${r.t})`);
-    if (r.t === 'meta' && typeof r.root === 'string') bad(f, `line ${i + 1}: meta.root records a machine path`);
-  }
-}
-
-// ---- 2. workflows
+// ---- 1. workflows
 const RETIRED = /\b(macos-1[0-3]|ubuntu-(18|20)\.04|windows-2019)\b/;
 for (const f of walk(path.join(REPO, '.github', 'workflows')).filter((p) => /\.ya?ml$/.test(p))) {
   const text = read(f);
@@ -64,13 +48,13 @@ for (const f of walk(path.join(REPO, '.github', 'workflows')).filter((p) => /\.y
   }
 }
 
-// ---- 3. docs (the ones this check owns; package READMEs of other components are linted for npx only)
-const BIN_NAMES = 'vitest-guard|vto|vto-daemon|vto-mcp|vto-ui|vitest-overlap';
+// ---- 2. docs
+const BIN_NAMES = 'vitest-guard';
 const NPX = new RegExp(`\\bnpx\\s+(?!--no-install\\b)(?:-y\\s+|--yes\\s+)?(?:${BIN_NAMES})\\b`);
 const docs = [
   ...fs.readdirSync(REPO).filter((f) => /^(README.*|SECURITY|CONTRIBUTING)\.md$|^README/.test(f)).map((f) => path.join(REPO, f)),
   ...walk(path.join(REPO, 'docs')).filter((f) => /\.(md|ya?ml)$/.test(f)),
-  ...['tui', 'mcp', 'vitest-guard', 'samples'].flatMap((d) => (fs.existsSync(path.join(REPO, d)) ? fs.readdirSync(path.join(REPO, d)).filter((f) => /^README.*\.md$/.test(f)).map((f) => path.join(REPO, d, f)) : [])),
+  ...(fs.existsSync(path.join(REPO, 'vitest-guard')) ? fs.readdirSync(path.join(REPO, 'vitest-guard')).filter((f) => /^README.*\.md$/.test(f)).map((f) => path.join(REPO, 'vitest-guard', f)) : []),
 ];
 for (const f of docs) {
   const text = read(f);
@@ -88,15 +72,15 @@ for (const f of docs) {
   }
 }
 
-// ---- 4. manifests
+// ---- 3. manifests
 const LICENSE = 'MIT OR Apache-2.0';
-for (const rel of ['package.json', 'tui/package.json', 'mcp/package.json', 'vitest-guard/package.json']) {
+for (const rel of ['vitest-guard/package.json']) {
   const f = path.join(REPO, rel);
   if (!fs.existsSync(f)) continue;
   const p = JSON.parse(read(f));
   if (p.license !== LICENSE) bad(f, `"license" is ${JSON.stringify(p.license)}, expected "${LICENSE}"`);
   if (!p.engines?.node) bad(f, 'no engines.node');
-  if (/^(vitest-guard|vto)$/.test(p.name ?? '')) bad(f, `package name "${p.name}" belongs to somebody else on npm – use a scope`);
+  if (/^vitest-guard$/.test(p.name ?? '')) bad(f, `package name "${p.name}" belongs to somebody else on npm – use a scope`);
 }
 for (const f of ['LICENSE-MIT', 'LICENSE-APACHE', 'SECURITY.md', 'README.md']) if (!fs.existsSync(path.join(REPO, f))) bad(path.join(REPO, f), 'missing');
 
@@ -104,4 +88,4 @@ if (problems.length) {
   process.stderr.write(`check-repo: ${problems.length} problem(s)\n${problems.map((p) => `  - ${p}`).join('\n')}\n`);
   process.exit(1);
 }
-process.stdout.write(`  check-repo: samples, workflows, ${docs.length} docs, manifests – ok\n`);
+process.stdout.write(`  check-repo: workflows, ${docs.length} docs, manifests – ok\n`);

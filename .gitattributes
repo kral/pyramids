@@ -1,7 +1,2 @@
-# Byte-exact checkouts on every OS: tests, golden fixtures and hash vectors compare bytes.
+# Byte-exact checkouts on every OS: tests and hash vectors compare bytes.
 * text=auto eol=lf
-# Intentional CRLF test cases for the instrumenter: never convert.
-collector/corpus/cases/*crlf* -text
-# Binary fixtures
-*.png binary
-*.gif binary

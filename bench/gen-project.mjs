@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Generates the vto benchmark fixture: a React + TSX project (components, custom hooks, context,
+// Generates the benchmark fixture of the vitest-guard trial: a React + TSX project (components, custom hooks, context,
 // reducer, async effects with a vi.mock'd API module, forms, Czech diacritics) with ~300 test
 // files / ~3000 tests and deliberately planted duplicate / subsumed tests.
 //
-//   node vto/bench/gen-project.mjs [targetDir=/home/claude/bench-project] [--seed N] [--files-per-module N] [--no-verify]
+//   node bench/gen-project.mjs [targetDir=/home/claude/bench-project] [--seed N] [--files-per-module N] [--no-verify]
 //
 // Ground truth is independent of vto: every source module is ALSO rendered as a "probe" copy
 // (.vto-probe/src) with explicit __probe('id') calls on every function entry / branch arm /

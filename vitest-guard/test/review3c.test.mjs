@@ -6,7 +6,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { project, wrappedConfig, cli, vitestRun, integration, readJson } from './helpers.mjs';
 import { readQuarantineFile } from '../src/index.mjs';
-import { listTestFiles } from '../src/auto.mjs';
 import { validateTestPaths, matchesGlobDot } from '../src/safety.mjs';
 import VitestGuardSequencer from '../src/sequencer.mjs';
 
@@ -125,32 +124,6 @@ test('R4: verify runs the reversed order for a project with its own root (finds 
   assert.doesNotMatch(r.out, /ORDER MISMATCH/);
   const starts = runLog(root).filter((x) => x.t === 'start' && x.lane === 'lane-verify-reversed-0.json').map((x) => x.file);
   assert.deepEqual(starts, ['packages/a/src/z.test.js', 'packages/a/src/m.test.js', 'packages/a/src/b.test.js']);
-});
-
-// ---------------- R5 ----------------
-test('R5 unit: auto lists files as Vitest globs them (./ patterns, symlinked directories, nested dot directories)', () => {
-  const root = project({ 'src/a.test.js': '', 'tests/b.test.js': '', 'shared-tests/c.test.js': '', '.a/.b/d.test.js': '' });
-  fs.symlinkSync('../shared-tests', path.join(root, 'src/linked'), 'junction');
-  assert.deepEqual(listTestFiles(root, ['./src/**/*.test.js', 'tests/**/*.test.js', '.a/**/*.test.js'], ['**/node_modules/**']),
-    ['.a/.b/d.test.js', 'src/a.test.js', 'src/linked/c.test.js', 'tests/b.test.js']);
-  assert.equal(matchesGlobDot('src/a.test.js', './src/**/*.test.js'), true);
-});
-
-test('R5: mode auto drops no test file Vitest runs (./ include, symlinked test directory); anything unclassified runs isolated', integration, () => {
-  const root = P({ 'tests/a.test.js': pass, 'src/bad.test.js': bad, 'shared-tests/bad2.test.js': bad },
-    { include: ['./src/**/*.test.js', 'tests/**/*.test.js'] }, { mode: 'auto', verifyWarning: false });
-  fs.symlinkSync('../shared-tests', path.join(root, 'src/linked'), 'junction');
-  const expected = { 'src/bad.test.js': 'failed', 'src/linked/bad2.test.js': 'failed', 'tests/a.test.js': 'passed' };
-  assert.deepEqual(vitestRun(root, [], { env: { VITEST_GUARD_MODE: 'off' } }).status, expected);
-  for (const env of [{}, { VITEST_GUARD_MODE: 'isolated' }]) {
-    const r = vitestRun(root, [], { env });
-    assert.equal(r.code, 1, r.out);
-    assert.deepEqual(r.status, expected, JSON.stringify(env));
-  }
-  const c = cli(root, ['check', '--no-calibrate']);
-  assert.equal(c.code, 1, c.out);
-  // the catch-all group: present, isolated, empty here
-  assert.equal(readJson(path.join(root, '.vitest-guard/run/auto.json')).groups['auto:rest'], 'isolated');
 });
 
 // ---------------- R6 ----------------

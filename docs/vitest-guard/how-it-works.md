@@ -3,9 +3,8 @@
 ## Config layering
 
 `defineVitestGuardConfig` builds the config in this order: env mode (`VITEST_GUARD_MODE`) > explicit pool of a project >
-`mode` option. `VITEST_GUARD_OPTS` is merged over the options first. `auto` first rewrites the config into projects
-(`dom`/`node`, or your projects with chosen pools) and then runs the normal path with `vm`/`shared`/`isolated` per
-project. The resolved options travel to the setup file through `test.provide.vitestGuard` (read with `inject`).
+`mode` option. `VITEST_GUARD_OPTS` is merged over the options first. Projects get their mode from their own pool
+(see [configuration.md](configuration.md#projects)). The resolved options travel to the setup file through `test.provide.vitestGuard` (read with `inject`).
 
 ## Setup layering
 
@@ -73,9 +72,7 @@ globals that are never removed. Limits: [limitations.md](limitations.md#known-li
 
 With `isolate: false` a module cached by an earlier file keeps its first `vi.mock` binding: even identical mocks
 conflict because each file creates its own `vi.fn()`. `vi.resetModules()` after every file makes the next file
-evaluate its modules again. Measured without it: 308 failing tests on the heavy lab suite. With
-`--no-reset-modules` (CLI) the planner instead adds hard edges between a file mocking module M and files that
-reach M unmocked (heavy suite: 39 files to forks, 83.9 CPU s vs 18.0).
+evaluate its modules again. Measured without it: 308 failing tests on the heavy lab suite. `--no-reset-modules` (CLI) sets `resetModules: false` for a run.
 
 ## Integrity check (shared)
 
@@ -96,46 +93,30 @@ project, excluded from the fast project (an entry of another config applies too 
 it also passes in isolated forks, an order-dependent one only when a lane replay of its `after` files passes (without
 `after` it is never released). Entries of another config (two guarded configs in one root) are never stale and never
 pruned; a version 1 entry without `config` whose file exists but is not listed by this config is kept as well.
-`conflicts.json`: `{ version, edges: [{ a: polluter, b: victim, kind: 'history', signature, seen }] }`, used by the
-planner only.
+`conflicts.json`: `{ version, edges: [{ a: polluter, b: victim, kind: 'history', signature, seen }] }`, written by
+`check --mode shared` and `hunt`; `verify` reads it to report known conflicts. Nothing else applies it.
 
-## Scheduler (shared)
+## Lanes (verify)
 
-`vitest-guard plan` per project: (1) conflict graph; hard edges from `conflicts.json`, `vi.mock('pkg')` vs the
-package's importers, different factories for the same module, singleton pollution that survived the resets, and
-(with `resetModules` off) transitive mock edges; soft edges between files sharing a project module with
-module-level mutable state. Modules per file come from vto `fileload` data (`--vto-raw`) or the static import graph.
-(2) greedy colouring balanced by duration (`durations.json`, smoothed 50/50 with each new run), a soft edge costs 25 %
-of the ideal lane load, a hard edge never shares a lane, files that fit nowhere go to an isolated bucket.
-(3) order inside a lane: known victims first, polluters last.
-
-`vitest-guard run` starts one Vitest process per lane (`VITEST_GUARD_LANE_FILE` = `{ project, files }`, `maxWorkers: 1`,
-`VitestGuardSequencer`) because with `isolate: false` a project's files go to one worker in sequencer order only when
-`maxWorkers` is 1 (verified by the author against Vitest 5.1.1 `groupSpecs`/`pool.run`; this is Vitest internals:
-see [limitations.md](limitations.md)). Lane data are validated like all repo data ([security.md](security.md)).
+`verify` runs its single-worker orders (`forward`, `reversed`, `shuffle`) as lanes: one Vitest process per project with
+`VITEST_GUARD_LANE_FILE` = `{ project, files }`, `maxWorkers: 1` and `VitestGuardSequencer`, because with `isolate: false`
+a project's files go to one worker in sequencer order only when `maxWorkers` is 1 (verified against Vitest 5.1.1
+`groupSpecs`/`pool.run`; this is Vitest internals: see [limitations.md](limitations.md)). Lane data are validated like
+all repo data ([security.md](security.md)).
 
 ## Self-healing
 
 A shared-mode failure that passes in forks is replayed with its recorded predecessors; if it fails again, a
-binary search (about log2(n)+2 runs) finds the polluting file(s) and records an edge. If the victim fails alone in the
-fast mode it is quarantined instead. In vm mode, `check` also replays predecessors and records `after` on the
-quarantine entry. Only a retry-pass under identical conditions is called flaky.
+binary search (about log2(n)+2 runs) finds the polluting file(s). The victim is quarantined with an `after` list (shared
+mode also records the edge in `conflicts.json`). If the victim fails alone in the fast mode it is quarantined without
+`after`. Only a retry-pass under identical conditions is called flaky.
 
-## env.json (auto)
+## Compare
 
-`.vitest-guard/run/env.json`, format `vto-env/1`, shared with the vto daemon. `{ format, producer, updatedAt, files:
-{ <path>: { group, source: 'probe'|'static', env, dom, at, miss? } } }`. Precedence, strongest first, a weaker record
-never replaces a stronger one: 3 DOM miss (a node-group file failed after touching a DOM global; sticky), 2 probe
-(measured; `dom: true` is sticky), 1 static (source-text guess), 0 none. Routing evidence order with
-`nodeEnvironment: 'node'`: pragma, recorded miss, measured probe, static signals. Workers append
-`env-<pid>-<tid>.jsonl`; the next config load folds them in (atomic write, lock) and deletes them. Only
-`src/envstore.mjs` writes the file.
-
-## Calibration
-
-`compare`/`calibrate` run a sample of each project in forks, vm and shared, compare results per test with forks, and
-take the fastest mode with no mismatches if it saves at least 10 % (CPU, else wall); otherwise forks. The result
-is `modes.json`. It is sample based ([limitations.md](limitations.md)).
+`compare` runs a sample of each project in forks, vm and shared, compares results per test with forks, and
+takes the fastest mode with no mismatches if it saves at least 10 % (CPU, else wall); otherwise forks. Files that fail
+to load in a fast mode are reported with their cause and counted as failures of that mode. It is sample based
+([limitations.md](limitations.md)). The result goes to `.vitest-guard/run/compare.json`.
 
 ## State files
 
@@ -143,14 +124,12 @@ is `modes.json`. It is sample based ([limitations.md](limitations.md)).
 |---|---|---|
 | `.vitest-guard/incompatible.json` | yes | quarantine |
 | `.vitest-guard/conflicts.json` | yes | conflict edges |
-| `.vitest-guard/durations.json`, `pollution.json` | only with `--commit-state` | else in `run/` |
-| `.vitest-guard/run/` (git-ignored by its own `.gitignore`) | no | `logs/`, `plan.json`, `files-cache.json`, `settings.json`, `verify-<mode>.json`, `compare.json`, `modes.json`, `auto.json`, `env.json`, `env-*.jsonl`, lane files |
+| `.vitest-guard/run/` (git-ignored by its own `.gitignore`) | no | `logs/` (worker logs, lane files), `verify-<mode>.json`, `compare.json` |
 
 ### Format versions
 
 `incompatible.json` is format version **2** (0.1.0-alpha.3: entries carry `config` and `orderDependent`);
-`conflicts.json`, `pollution.json` and `durations.json` (the other files a team can commit) are format version
-**1**. A version 1 `incompatible.json` is read as version 2 (entries without `config`; an entry whose signature
+`conflicts.json` is format version **1**. A version 1 `incompatible.json` is read as version 2 (entries without `config`; an entry whose signature
 starts with `order-dependent:` gets `orderDependent: true`) and written as version 2 by the next command that
 changes it; 0.1.0-alpha.2 and older then refuse it instead of pruning entries they do not understand. The
 `version` field comes first. A file without it counts as version 1, so hand-written files still work. vitest-guard always writes the version it supports. Its rules:
@@ -169,17 +148,13 @@ changes it; 0.1.0-alpha.2 and older then refuse it instead of pruning entries th
   top level that is not an object, a `vm` / `shared` that is not an object, an unreadable file and a linked file or
   directory never read as "no quarantine": the config throws (Vitest exits 1), the CLI exits 2, and no command
   overwrites a committed file it could not parse.
-- Volatile files in `run/` that carry a version (`plan.json`, version 2) are ignored and re-created when they are
-  newer.
 
-`migrateState` (run before every command) moves files that older versions kept next to the committed ones into
-`run/`. It never deletes anything. It never moves a file that git tracks: a committed `durations.json` or
-`pollution.json` stays where it is when a run has no `--commit-state`, and the run prints a hint. Without git it
-cannot tell whether a file is committed, so these two files stay where they are.
+0.2.0-alpha.0 no longer reads or writes `durations.json`, `pollution.json`, `plan.json`, `modes.json`, `auto.json` or
+`env.json`; leftovers from older versions are ignored and can be deleted.
 
 ### Symlinks
 
-vitest-guard does not follow links in `.vitest-guard/`. These rules are the same as for vto's `.vto/`:
+vitest-guard does not follow links in `.vitest-guard/`. The rules:
 
 - **Symlinks and junctions are refused.** This covers `.vitest-guard`, `run/`, `run/logs/` and any link inside
   them. The CLI exits 2 and runs nothing. Test workers print a warning and write no state. The config wrapper
@@ -190,6 +165,3 @@ vitest-guard does not follow links in `.vitest-guard/`. These rules are the same
   into place. Appends use `O_NOFOLLOW`.
 - **Recursive deletes check first.** A recursive delete (`run/logs/` before a run) checks the whole chain before
   and after. It never starts at a link.
-
-The `vitest list` result is cached in `files-cache.json` until the test directories' mtimes, the config's mtime
-or the filters change.
