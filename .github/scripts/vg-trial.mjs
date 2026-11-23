@@ -64,13 +64,13 @@ step('verify --mode shared --sample all', ['verify', '--mode', 'shared', '--samp
 const leak = path.join(proj, 'test', 'zz-trial-leak');
 fs.mkdirSync(leak, { recursive: true });
 fs.writeFileSync(path.join(leak, 'a-sets.test.tsx'), `import { test, expect } from 'vitest';
-test('sets a global for the next file', () => { (globalThis as any).__vgTrialLeak = true; expect(true).toBe(true); });
+test('sets process state for the next file', () => { (process as any).__vgTrialLeak = true; expect(true).toBe(true); });
 `);
 fs.writeFileSync(path.join(leak, 'b-needs.test.tsx'), `import { test, expect } from 'vitest';
-test('passes only after a-sets ran in the same realm', () => { expect((globalThis as any).__vgTrialLeak).toBe(true); });
+test('passes only after a-sets ran in the same realm', () => { expect((process as any).__vgTrialLeak).toBe(true); });
 `);
 // the dependent test passes in a shared realm and fails in isolated forks: that is a false green (5)
-step('fault: leaked global → verify shared = false green', ['verify', '--mode', 'shared', '--no-quarantine', 'test/zz-trial-leak'], { expect: [5] });
+step('fault: leaked process state → verify shared = false green', ['verify', '--mode', 'shared', '--no-quarantine', 'test/zz-trial-leak'], { expect: [5] });
 fs.rmSync(leak, { recursive: true, force: true });
 
 const bad = path.join(proj, 'test', 'zz-trial-fail');
@@ -98,12 +98,12 @@ fs.rmSync(path.join(proj, 'test/.zz-trial-dot'), { recursive: true, force: true 
 const hook = path.join(proj, 'test', 'zz-trial-hook');
 fs.mkdirSync(hook, { recursive: true });
 fs.writeFileSync(path.join(hook, 'a-provides.test.tsx'), `import { test, expect } from 'vitest';
-(globalThis as any).__vgTrialHelper = () => 1;
+(process as any).__vgTrialHelper = () => 1;
 test('provides a helper for the next file', () => { expect(true).toBe(true); });
 `);
 fs.writeFileSync(path.join(hook, 'b-hook.test.tsx'), `import { test, expect, beforeAll } from 'vitest';
 let v = 0;
-beforeAll(() => { v = (globalThis as any).__vgTrialHelper(); });
+beforeAll(() => { v = (process as any).__vgTrialHelper(); });
 test('uses the helper', () => { expect(v).toBe(1); });
 `);
 step('fault: beforeAll fails only in forks → verify shared = false green', ['verify', '--mode', 'shared', '--no-quarantine', 'test/zz-trial-hook'], { expect: [5] });
@@ -113,10 +113,10 @@ fs.rmSync(hook, { recursive: true, force: true });
 const dup = path.join(proj, 'test', 'zz-trial-dup');
 fs.mkdirSync(dup, { recursive: true });
 fs.writeFileSync(path.join(dup, 'a-sets.test.tsx'), `import { test, expect } from 'vitest';
-test('sets a global for the next file', () => { (globalThis as any).__vgTrialDup = 1; expect(true).toBe(true); });
+test('sets process state for the next file', () => { (process as any).__vgTrialDup = 1; expect(true).toBe(true); });
 `);
 fs.writeFileSync(path.join(dup, 'b-dup.test.tsx'), `import { test, expect } from 'vitest';
-test.each([1, 2])('same title', (n) => { if (n === 1) expect((globalThis as any).__vgTrialDup).toBe(1); });
+test.each([1, 2])('same title', (n) => { if (n === 1) expect((process as any).__vgTrialDup).toBe(1); });
 `);
 step('fault: duplicate titles with a false green → verify shared = 5', ['verify', '--mode', 'shared', '--no-quarantine', '--orders', 'forward', 'test/zz-trial-dup'], { expect: [5] });
 fs.rmSync(dup, { recursive: true, force: true });
