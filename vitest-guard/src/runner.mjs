@@ -15,6 +15,16 @@ export function vitestBin(root) {
 }
 
 /**
+ * Version string of the Vitest the CLI spawns for `root` (the one vitestBin resolves), null when it cannot be read.
+ * VITEST_GUARD_VITEST_MAJOR overrides it with just the major (tests).
+ */
+export function vitestVersion(root) {
+  const forced = Number(process.env.VITEST_GUARD_VITEST_MAJOR);
+  if (Number.isInteger(forced) && forced > 0) return String(forced);
+  try { const v = JSON.parse(fs.readFileSync(path.join(path.dirname(vitestBin(root)), 'package.json'), 'utf8')).version; return typeof v === 'string' ? v : null; } catch { return null; }
+}
+
+/**
  * @returns {Promise<{code:number, files: Map<string,{status:string, tests: Map<string,string>, message?:string}>, cpu?:number, wallMs:number, log:string}>}
  */
 export function runVitest({ root, config, mode, files = [], laneFile, args = [], env = {}, verbose = false, tag = 'run' }) {

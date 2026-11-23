@@ -21,6 +21,14 @@
     instead of letting it pass (fail closed). Because those single-worker vm runs do not reuse a worker on 4.1,
     `verify --mode vm` lanes cannot see state that one file leaves in the worker process for the next (outside the
     vm context, e.g. `process.env` or a native addon). The `gate` order, which reuses workers, still can.
+    For this reason `verify --mode vm` skips its single-worker orders (`forward`, `reversed`, `shuffle`) on
+    Vitest < 5 unless `--orders` names them. They cost about as much as the forks reference and cannot find
+    anything order-dependent there. Measured on a 60-file jsdom project, Vitest 4.1.8, 2 CPUs: 118-120 s before
+    (gate + reversed), 79-81 s now (gate), 160 s with `--orders gate,forward,reversed`. What is left is the
+    `gate` order (Vitest's own order, workers reused) and the forks comparison. An order-dependent leak at
+    process level is seen only in the order the gate happens to use. For a nightly full check, run
+    `verify --mode vm --orders gate,forward,reversed`. A gate with `maxWorkers: 1` (e.g. the default on 2 CPUs)
+    also isolates every file on 4.1, so it does not reuse workers either.
   - **Inline projects inherit the root config** only with `extends: true` on Vitest 4, but by default on Vitest
     5 (unless `extends: false`). vitest-guard moves the root `setupFiles` into each project and follows the rule
     of the installed major. On 5.x a project without `extends` keeps the root setup files. Before alpha.4 they

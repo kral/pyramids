@@ -91,7 +91,7 @@ Risk summary per mode:
 
 | mode | main risk | safety net |
 |---|---|---|
-| vm | false reds (realm, process state), memory | `check` quarantines; `verify` for false greens (gate + reversed order) |
+| vm | false reds (realm, process state), memory | `check` quarantines; `verify` for false greens (gate + reversed order; gate only on Vitest < 5) |
 | shared | false greens, `vi.mock` behaviour, order dependence | resets, integrity check, `verify` (gate + forward + reversed), planner, nightly forks |
 | auto | wrong group guess; calibration from a sample | self-healing (opt-in routing), `verify --sample all` |
 | isolated | none beyond Vitest's | it is the reference |
