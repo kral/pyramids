@@ -4,8 +4,14 @@
 // wrapper refuses to load (VITEST_GUARD_NEWER_STATE=failsafe: every file named in a newer incompatible.json runs isolated).
 import fs from 'node:fs';
 
-/** files a team may commit (incompatible/conflicts always, durations/pollution with --commit-state) */
-export const STATE_VERSIONS = { 'incompatible.json': 1, 'conflicts.json': 1, 'pollution.json': 1, 'durations.json': 1 };
+/**
+ * files a team may commit (incompatible/conflicts always, durations/pollution with --commit-state).
+ * incompatible.json version 2 (alpha.3): entries may carry `config` (the config that wrote them; entries of another
+ * config are never pruned) and `orderDependent` (released only after a replay of `after`). Version 1 files are read
+ * as version 2 (no `config`: legacy entry; an "order-dependent: …" signature gets the marker) and written as 2;
+ * vitest-guard 0.1.0-alpha.2 and older refuse a version 2 file instead of pruning entries they do not understand.
+ */
+export const STATE_VERSIONS = { 'incompatible.json': 2, 'conflicts.json': 1, 'pollution.json': 1, 'durations.json': 1 };
 /** volatile files in .vitest-guard/run/ with a version: a newer one is ignored (re-created), never misread */
 export const VOLATILE_VERSIONS = { 'plan.json': 2 };
 

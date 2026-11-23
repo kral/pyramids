@@ -76,8 +76,8 @@ test('B3/S7: an unhandled rejection fails run --no-heal and check --mode shared 
 });
 
 test('B4: a file that fails in forks at import time or in beforeAll is a false green in verify (exit 5) and compare (exit 5)', integration, () => {
-  const a = `import { test, expect } from 'vitest'; globalThis.__helper = () => 1; test('a', () => { expect(1).toBe(1); });\n`;
-  const top = P({ 'src/a.test.js': a, 'src/b.test.js': `import { test, expect } from 'vitest'; const v = globalThis.__helper(); test('b', () => { expect(v).toBe(1); });\n` });
+  const a = `import { test, expect } from 'vitest'; process.__helper = () => 1; test('a', () => { expect(1).toBe(1); });\n`;
+  const top = P({ 'src/a.test.js': a, 'src/b.test.js': `import { test, expect } from 'vitest'; const v = process.__helper(); test('b', () => { expect(v).toBe(1); });\n` });
   const v = cli(top, ['verify', '--mode', 'shared', '--no-quarantine']);
   assert.equal(v.code, 5, v.out);
   assert.match(v.out, /FALSE GREEN.*src\/b\.test\.js/);
@@ -86,7 +86,7 @@ test('B4: a file that fails in forks at import time or in beforeAll is a false g
   const cmp = cli(forksOnly, ['compare', '--no-write']);
   assert.equal(cmp.code, 5, cmp.out);
   assert.doesNotMatch(cmp.out, /recommend (vm|shared)/);
-  const hook = P({ 'src/a.test.js': a, 'src/b.test.js': `import { test, expect, beforeAll } from 'vitest'; let v; beforeAll(() => { v = globalThis.__helper(); }); test('b', () => { expect(v).toBe(1); });\n` });
+  const hook = P({ 'src/a.test.js': a, 'src/b.test.js': `import { test, expect, beforeAll } from 'vitest'; let v; beforeAll(() => { v = process.__helper(); }); test('b', () => { expect(v).toBe(1); });\n` });
   assert.equal(cli(hook, ['verify', '--mode', 'shared', '--no-quarantine']).code, 5);
 });
 
@@ -132,8 +132,8 @@ test('check --root from another cwd: the quarantine signature has root-relative 
 });
 
 test('B7: duplicate test titles do not hide a false green', integration, () => {
-  const root = P({ 'src/a.test.js': `import { test, expect } from 'vitest'; test('a', () => { globalThis.__leak = 1; expect(1).toBe(1); });\n`,
-    'src/b.test.js': `import { test, expect } from 'vitest'; test.each([1, 2])('dup', (n) => { if (n === 1) expect(globalThis.__leak).toBe(1); });\n` });
+  const root = P({ 'src/a.test.js': `import { test, expect } from 'vitest'; test('a', () => { process.__leak = 1; expect(1).toBe(1); });\n`,
+    'src/b.test.js': `import { test, expect } from 'vitest'; test.each([1, 2])('dup', (n) => { if (n === 1) expect(process.__leak).toBe(1); });\n` });
   const r = cli(root, ['verify', '--mode', 'shared', '--orders', 'forward', '--no-quarantine']);
   assert.equal(r.code, 5, r.out);
 });
@@ -147,8 +147,8 @@ test('S3: without --mode, check uses the mode of the config', integration, () =>
 });
 
 test('S6: a user bail does not truncate verify', integration, () => {
-  const root = P({ 'src/a.test.js': fail, 'src/p.test.js': `import { test } from 'vitest'; test('p', () => { globalThis.__leak = 1; });\n`,
-    'src/q.test.js': `import { test, expect } from 'vitest'; test('q', () => { expect(globalThis.__leak).toBe(1); });\n` }, { bail: 1, maxWorkers: 1, fileParallelism: false });
+  const root = P({ 'src/a.test.js': fail, 'src/p.test.js': `import { test } from 'vitest'; test('p', () => { process.__leak = 1; });\n`,
+    'src/q.test.js': `import { test, expect } from 'vitest'; test('q', () => { expect(process.__leak).toBe(1); });\n` }, { bail: 1, maxWorkers: 1, fileParallelism: false });
   assert.equal(cli(root, ['verify', '--mode', 'shared', '--orders', 'forward', '--no-quarantine']).code, 5);
 });
 

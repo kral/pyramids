@@ -72,7 +72,7 @@ test('S4: the baseline is taken before the first file\'s top-level code (shared 
   }
 });
 
-test('S5: cookies, the URL, intervals and equality testers are reset after a file; added globals are reported', integration, () => {
+test('S5: cookies, the URL, intervals, equality testers and added globals are reset after a file', integration, () => {
   const root = P({
     'setup.js': `import { expect } from 'vitest'; expect.addEqualityTesters([(a, b) => (a && b && a.__eqAny && b.__eqAny ? true : undefined)]);\n`,
     'src/a.test.js': `import { test, expect } from 'vitest'; test('pollute', () => { document.cookie = 's=1'; history.pushState({}, '', '/users/5'); globalThis.__x = 1; globalThis.__iv = setInterval(() => { globalThis.__ticks = (globalThis.__ticks || 0) + 1; }, 1); expect.addEqualityTesters([() => true]); });\n`,
@@ -83,6 +83,7 @@ test('clean', async () => {
   const t0 = globalThis.__ticks || 0; await new Promise((r) => setTimeout(r, 30)); expect(globalThis.__ticks || 0).toBe(t0);
   expect(() => expect({ a: 1 }).toEqual({ a: 2 })).toThrow();
   expect({ __eqAny: 1 }).toEqual({ __eqAny: 2 }); // the setup file's tester is kept
+  expect('__x' in globalThis).toBe(false); // alpha.3: deleted after the file that added it
 });\n`,
   }, { ...jsdom, setupFiles: ['./setup.js'] });
   const r = cli(root, ['verify', '--mode', 'shared', '--orders', 'forward', '--no-quarantine']);
@@ -91,9 +92,8 @@ test('clean', async () => {
   const log = runLog(root);
   const end = log.find((x) => x.t === 'end' && x.file === 'src/a.test.js' && x.pollution);
   for (const k of ['dom/storage', 'timers', 'equality testers', 'added globals']) assert.ok(end.pollution.includes(k), k + ' ' + JSON.stringify(end));
-  const start = log.find((x) => x.t === 'start' && x.file === 'src/b.test.js' && x.dirty);
-  assert.deepEqual(start?.dirty.map((d) => d.kind), ['added globals'], JSON.stringify(start));
-  assert.ok(start.dirty[0].keys.includes('__x'));
+  assert.ok(!end.residual?.includes('added globals'), 'the added globals do not survive the reset ' + JSON.stringify(end));
+  assert.deepEqual(log.filter((x) => x.t === 'start' && x.file === 'src/b.test.js' && x.dirty), [], 'b starts clean');
 });
 
 test('S12 unit: node_modules checks and module names accept Windows separators', async () => {

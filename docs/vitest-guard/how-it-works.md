@@ -15,9 +15,10 @@ For every test file Vitest runs, in this order:
    costs a fetch and an evaluation per file in vm pools). Skipped with `setup: 'import'`, where your first setup file
    imports it.
 2. root `setupFiles` (projects with `extends: true`), then the project's `setupFiles`.
-3. shared mode only: `setup-tail.mjs`, which marks "all setup files have run" so extensions made by setup files
-   are not blamed on a test file. This needs `sequence.setupFiles: 'list'`, which vitest-guard sets (skipped when you
-   set `'parallel'`).
+3. shared mode only: `setup-tail.mjs`, which marks "all setup files have run". The shared-mode baseline (what the
+   resets restore: `process.env`, globals, DOM) is taken there, and extensions made by setup files are not blamed on
+   a test file. This needs `sequence.setupFiles: 'list'`, which vitest-guard sets; a `'parallel'` setting runs in
+   list order in shared mode (with a warning), and `tail: false` is refused there (the config does not load).
 
 Installed through a symlink, the setup files are copied to `node_modules/.vitest-guard/` (a real path inside the
 root) and that copy is used (refreshed when content differs).
@@ -43,16 +44,27 @@ property; contents mutable). At file start vitest-guard snapshots (first file) a
 
 - vm and shared: outer-realm state: `process.env` (restored after every file), `process` listeners, extra
   `process` properties, patched Node builtins;
-- shared only: DOM/storage, ~40 watched globals (`Date`, `setTimeout`, `fetch`, `localStorage`, ...), fake timers
-  left on, mounted React roots, window/document listeners added by non-library code, singleton probes (i18next,
-  TanStack Query core), built-in extensions (names added to built-in prototypes) and `expect.extend` matchers,
-  node_modules export state (with diagnostics).
+- shared only: DOM/storage, ~40 watched globals (`Date`, `setTimeout`, `fetch`, `localStorage`, ...), own
+  properties added to the global object, `navigator` properties (own and on its prototype), fake timers left on,
+  mounted React roots, window/document listeners added by non-library code, singleton probes (i18next, TanStack
+  Query core), built-in extensions (names added to built-in prototypes) and `expect.extend` matchers, node_modules
+  export state (with diagnostics).
 
 Anything dirty at start is reported as `[vitest-guard] <file> starts with state left by <previous file>: ...`
 (`onDirty`: warn/error/silent). After each file in shared mode the resets run: `useRealTimers`,
-`restoreAllMocks`, `unstubAllGlobals`/envs, unmount React roots in `act()`, remove tracked listeners, restore
-globals and DOM, reset the TanStack online/focus managers, and with `resetModules` `vi.resetModules()` plus removal
-of extensions the file added. What survives is "residual" and drives conflict edges.
+`restoreAllMocks`, `unstubAllGlobals`/envs, unmount React roots in `act()`, remove tracked listeners, clear the
+file's intervals and remove its equality testers, restore globals and DOM, delete the own properties of the global
+object the file added, put `navigator` properties back to their state after the file's setup files, reset the
+TanStack online/focus managers, and with `resetModules` `vi.resetModules()` plus removal of extensions the file
+added. What survives is "residual" and drives conflict edges.
+
+Who registered an equality tester or an interval, added a global or overrode a `navigator` property is read from the
+synchronous part of the stack at that moment (assignments to the global object reach a Proxy in its prototype chain;
+`Object.defineProperty` / `defineProperties` / `Reflect.defineProperty` are wrapped): a frame of the current test
+file makes it the file's (also when it calls a package function that registers), another project frame a project
+module's, only `node_modules` frames a package's. The file's state is removed after it, a project module's only with
+`resetModules` (the module is evaluated again), a package's is kept for the worker (it is cached, as its other
+state). Limits: [limitations.md](limitations.md#known-limits-010-alpha3).
 
 ## resetModules
 
@@ -73,9 +85,14 @@ is allowed.
 ## Quarantine
 
 `.vitest-guard/incompatible.json`: `{ version, vm: { <file>: info }, shared: { <file>: info } }`; `info` has
-`signature`, `tests`, `firstSeen`, `pool`, and optionally `after` + `reason` (order dependence) or `falseGreen: true`.
+`signature`, `tests`, `firstSeen`, `pool`, `config` (the config file that wrote it, relative to the root), and
+optionally `orderDependent: true` with `after` + `reason` (order dependence) or `falseGreen: true`.
 At config load, the entries for the active mode are validated and the files move to a `forks`, `isolate: true`
-project, excluded from the fast project. `check --prune` re-runs them fast and removes those that pass.
+project, excluded from the fast project (an entry of another config applies too when it names a file of this one).
+`check --prune` re-runs the current config's entries fast and removes those that pass: a false-green entry only when
+it also passes in isolated forks, an order-dependent one only when a lane replay of its `after` files passes (without
+`after` it is never released). Entries of another config (two guarded configs in one root) are never stale and never
+pruned; a version 1 entry without `config` whose file exists but is not listed by this config is kept as well.
 `conflicts.json`: `{ version, edges: [{ a: polluter, b: victim, kind: 'history', signature, seen }] }`, used by the
 planner only.
 
@@ -128,16 +145,19 @@ is `modes.json`. It is sample based ([limitations.md](limitations.md)).
 
 ### Format versions
 
-`incompatible.json`, `conflicts.json`, `pollution.json` and `durations.json` (the files a team can commit) are
-format version **1**. The `version` field comes first. A file without it counts as version 1, so hand-written
-files still work. vitest-guard always writes the version it supports. Its rules:
+`incompatible.json` is format version **2** (0.1.0-alpha.3: entries carry `config` and `orderDependent`);
+`conflicts.json`, `pollution.json` and `durations.json` (the other files a team can commit) are format version
+**1**. A version 1 `incompatible.json` is read as version 2 (entries without `config`; an entry whose signature
+starts with `order-dependent:` gets `orderDependent: true`) and written as version 2 by the next command that
+changes it; 0.1.0-alpha.2 and older then refuse it instead of pruning entries they do not understand. The
+`version` field comes first. A file without it counts as version 1, so hand-written files still work. vitest-guard always writes the version it supports. Its rules:
 
 - **Unknown fields are kept.** A load/save round trip preserves them, so a later minor version can add fields
   without breaking older copies.
-- **A higher (or invalid) version is refused.** It is never misread as version 1, and it is never rewritten in the
-  version 1 layout.
-  - The CLI exits 2 before it runs or writes anything: `.vitest-guard/incompatible.json has format version 2; this
-    @jirikral/vitest-guard (…) understands version 1 - upgrade @jirikral/vitest-guard`.
+- **A higher (or invalid) version is refused.** It is never misread as a version this vitest-guard knows, and it is
+  never rewritten in an older layout.
+  - The CLI exits 2 before it runs or writes anything: `.vitest-guard/incompatible.json has format version 3; this
+    @jirikral/vitest-guard (…) understands version 2 - upgrade @jirikral/vitest-guard`.
   - The config wrapper (a plain `vitest run`) refuses to load: Vitest exits 1 with the same message. Teams in the
     middle of an upgrade can set `VITEST_GUARD_NEWER_STATE=failsafe`: then every existing test file named anywhere
     in the newer `incompatible.json` runs isolated (forks) in every mode, so nothing that a newer version

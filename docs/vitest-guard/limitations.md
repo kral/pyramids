@@ -50,31 +50,37 @@ file failed and was neither quarantined nor explained (flaky and unexplained giv
 needs several predecessors at once is reported as "needs a combination of files" (all candidates listed); a
 non-reproducible failure stays FLAKY and blocks the gate until fixed or re-run.
 
-## Known limits after the review 3 re-review (open items)
+## Known limits (0.1.0-alpha.3)
 
-- **S2, order-dependent entries from `verify` are released by `check --prune`.** `verify` records an
-  order-dependent false red without its predecessors (`after`) and without an "order-dependent" marker, so
-  `check --prune` sees the file pass alone in the fast mode and releases it; the next `verify` quarantines it
-  again. This is not a false green (the entry protects against a false red), but a nightly `verify` + `check
-  --prune` job alternates between exit 4 results and never converges. Workaround: do not prune entries whose
-  signature starts with `order-dependent:` by hand, or run `check` (which records `after`) instead of `verify` for
-  them.
-- **S5, state that is reported but not reset.** Added own properties of the global object (`globalThis.__x`,
-  `window.__cfg`), properties defined on `navigator` and similar state are reported once per worker as `added
-  globals` (a `dirty` record and a warning with the default `onDirty: 'warn'`), but are not removed: a later file
-  in the same shared worker can still see them. Only `verify` finds a test that depends on such state. Use
-  `onDirty: 'error'` to make the gate fail on it.
-- **S6, the fallback directory walk of mode `auto`.** The file listing of mode `auto` uses Vitest's own globber,
-  which prunes excluded directories. Only when tinyglobby cannot be resolved from the project's Vitest does `auto`
-  fall back to a directory walk that visits every directory except `node_modules`, `.git` and `.vitest-guard` and
-  tests the user's `exclude` per file; on a repository with large build output that costs time at every config
-  load. Files that either listing misses still run, in the isolated catch-all project `auto:rest`.
-- **Equality testers and intervals of project modules without `resetModules`.** With `resetModules: false` a
-  project module (outside `node_modules`) is cached for the worker; an equality tester or interval it registers on
-  import is kept (as the module is) and reported as residual `equality testers` / `timers`. A file that does not
-  import the module can still see that tester or interval in a shared worker.
-- **`navigator` overrides.** Overrides of `navigator` properties (for example `navigator.language`) are neither
-  reset nor reported.
+0.1.0-alpha.3 closed the open items of alpha.2: added globals and `navigator` overrides are reset between the files
+of a shared worker (S5), testers and intervals a package registers when the test file calls it are removed after
+that file (note 1), `verify` records order-dependent entries so that `check --prune` keeps them (S2), two guarded
+configs in one root keep each other's quarantine entries (note 2), the shared-mode baseline is always taken after
+the setup files (note 3), and the fallback directory walk of mode `auto` prunes directories (S6). What is left:
+
+- **Who did it is read from the stack.** An equality tester, an interval, an added global or a `navigator` override
+  counts as the test file's when a frame of the test file is on the synchronous part of the stack at that moment
+  (also through a package function the file calls), as a project module's when another project frame is, and as a
+  package's when only `node_modules` frames are. A package function that registers only after an `await` (the
+  test file is then only an async frame) counts as the package's: its tester or interval stays for the worker. A
+  package that registers once and remembers it (`if (installed) return`) does not register again in the next file
+  after the reset removed its registration.
+- **Added globals of unknown origin are reported, not deleted.** Own properties of the global object are seen when
+  they are created by assignment (`globalThis.x = …`, `window.x = …`, `Object.assign`) or by
+  `Object.defineProperty` / `defineProperties` / `Reflect.defineProperty`. A name created another way (for
+  example by `var` in a sloppy-mode script) or one that cannot be deleted stays and is reported as `added globals`
+  (a `dirty` record and a warning with the default `onDirty: 'warn'`); use `onDirty: 'error'` to fail on it. In vm
+  mode every file has its own global object, so nothing leaks there.
+- **Equality testers, intervals, globals and `navigator` overrides of project modules without `resetModules`.**
+  With `resetModules: false` a project module (outside `node_modules`) is cached for the worker; what it registers
+  on import is kept (as the module is) and reported as residual `equality testers` / `timers` / `added globals` /
+  `navigator`. A file that does not import the module can still see it in a shared worker.
+- **Order-dependent entries without known predecessors.** When `verify` finds an order-dependent failure only in
+  the `planned` order, or the bisection of a long predecessor list does not reproduce it, the entry is recorded with
+  `orderDependent: true` and no `after`; `check --prune` never releases it: delete it by hand and run `verify`.
+- **Quarantine entries of version 1 files** carry no `config`. Such an entry counts as the current config's when the
+  config lists the file, is kept (never pruned) when the file exists but the config does not list it, and is stale
+  only when the file is gone.
 
 ## What vitest-guard does not cover
 

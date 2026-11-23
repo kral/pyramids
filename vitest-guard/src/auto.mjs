@@ -15,6 +15,16 @@ export { DOM_ENVS };
 // a test file under build/, dist/, coverage/ or a dot directory runs there, so it must be in a group here too.
 // Only directories that never hold the user's tests are skipped.
 const SKIP_DIRS = new Set(['node_modules', '.git', '.vitest-guard']);
+// S6 (alpha.3): the fallback walk also prunes build output and dot directories (large, and test files there are rare)
+// and every directory the user's exclude covers as a whole (`**/dist/**`). Pruning is safe: a file Vitest globs that
+// the walk does not list runs in the isolated catch-all project (auto:rest), never nowhere.
+export const PRUNE_DIRS = new Set(['dist', 'build', 'coverage', 'out', 'target', 'storybook-static', 'bower_components', 'jspm_packages']);
+const PROBE = '\uE001vitest-guard-probe\uE001';
+/** true when the walk may skip directory `rel` (root-relative, '/' separators) */
+export function prunedDir(rel, name, exclude) {
+  if (SKIP_DIRS.has(name) || PRUNE_DIRS.has(name) || name.startsWith('.')) return true;
+  return exclude.some((g) => { try { return matchesGlobDot(rel + '/' + PROBE, g) && matchesGlobDot(rel + '/' + PROBE + '/' + PROBE + '.test.js', g); } catch { return false; } });
+}
 
 /**
  * Test files matching include/exclude (root-relative, '/' separators). Synchronous: runs at config time.
@@ -36,7 +46,7 @@ export function listTestFiles(root, include, exclude, { maxFiles = 50000 } = {})
     for (const e of ents) {
       if (out.length >= maxFiles) { if (!warnedCap) { warnedCap = true; console.warn(`[vitest-guard] auto: more than ${maxFiles} test files: the rest is not in any group; use your own projects instead of mode 'auto'`); } return; }
       const r = rel ? rel + '/' + e.name : e.name;
-      if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) walk(path.join(dir, e.name), r); continue; }
+      if (e.isDirectory()) { if (!prunedDir(r, e.name, exclude)) walk(path.join(dir, e.name), r); continue; }
       if (!e.isFile()) continue;
       if (include.some((g) => matchesGlobDot(r, g)) && !exclude.some((g) => matchesGlobDot(r, g))) out.push(r);
     }
