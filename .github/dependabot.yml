@@ -1,0 +1,31 @@
+# Dependabot: weekly update PRs for GitHub Actions (pinned SHAs), the Rust analyzer and the npm packages.
+# Security advisories open PRs right away regardless of the schedule. Grouped to keep the PR count low;
+# every PR runs vto-ci, so an update lands only when the whole matrix is green.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly, day: monday }
+    groups:
+      actions: { patterns: ['*'] }
+
+  - package-ecosystem: cargo
+    directory: /analyzer
+    schedule: { interval: weekly, day: monday }
+    groups:
+      cargo: { patterns: ['*'] }
+
+  - package-ecosystem: npm
+    directories: ['/', '/vitest-guard', '/mcp', '/tui', '/collector/corpus', '/bench/trial']
+    schedule: { interval: weekly, day: monday }
+    # vitest-guard supports Vitest >=4.1 <6 and CI pins the tested versions: majors are bumped by hand
+    ignore:
+      - dependency-name: 'vitest'
+        update-types: ['version-update:semver-major']
+    groups:
+      npm-dev:
+        dependency-type: development
+        update-types: ['minor', 'patch']
+      npm-prod:
+        dependency-type: production
+        update-types: ['minor', 'patch']
