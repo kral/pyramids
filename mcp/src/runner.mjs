@@ -16,7 +16,7 @@ export class RunnerMixin {
    * kind: affected | full | tests | failed. filters (tests): [{file, line?, name?}] typed only.
    * instrumented:false → "clean" lane (no collector; map not updated) – e.g. the final check.
    */
-  async startRun({ kind = 'affected', filters, base, diff, bail = 0, timeoutS, instrumented = true, ids, lane } = {}) {
+  async startRun({ kind = 'affected', filters, base, diff, bail = 0, timeoutS, instrumented = true, ids, lane, origin = 'daemon' } = {}) {
     const st = this.store;
     const runId = `r${(st.state.runSeq = (st.state.runSeq || 0) + 1)}`;
     // re-runs of failed / explicit tests go to the fix lane while the main lane is busy (no waiting
@@ -25,7 +25,7 @@ export class RunnerMixin {
     if (!['main', 'fix', 'clean'].includes(lane)) throw userError('lane must be main, fix or clean');
     if (lane === 'fix' && (kind === 'affected' || kind === 'full')) throw userError('the fix lane only runs failed/explicit tests');
     const run = {
-      runId, kind, lane, status: 'queued', createdAt: Date.now(), counts: { pass: 0, fail: 0, skip: 0 }, failures: [], fixed: new Map(),
+      runId, kind, lane, origin, status: 'queued', createdAt: Date.now(), counts: { pass: 0, fail: 0, skip: 0 }, failures: [], fixed: new Map(),
       total: 0, files: 0, instrumented: lane !== 'clean' && instrumented, waiters: new Set(), events: 0, lastProgress: 0, coverageFiles: new Set(), passedIds: new Set(),
     };
     let specs = null, sel = null;

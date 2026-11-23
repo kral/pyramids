@@ -12,7 +12,6 @@ export interface VitestGuardOptions {
   respectPools?: boolean;
   /** mode 'auto': 'node' = files of a DOM-configured suite that never touch the DOM (measured, else static) move to the node group with environment node (opt-in; default routes by the configured environment) */
   nodeEnvironment?: 'node' | null;
-  quarantineFile?: string;
   /** bytes or Vitest string ('1.5GB', '30%'); default autoMemoryLimit(maxWorkers) */
   memoryLimit?: number | string;
   /** extra server.deps.inline entries */
@@ -64,10 +63,6 @@ export declare const SETUP_TAIL_FILE: string;
 export declare function setupFileFor(root: string, file?: string): string;
 export declare const DEFAULT_INCLUDE: string[];
 export declare const DEFAULT_EXCLUDE: string[];
-/** Raw quarantine file { version, vm, shared } (unvalidated). */
-/** Throws (fail closed) when the file is linked, unreadable, not JSON, has the wrong shape or a newer format version (unless VITEST_GUARD_NEWER_STATE=failsafe). */
-export declare function readQuarantineFile(root: string, file?: string): Record<string, unknown>;
 /** Name of mode auto's catch-all project: test files neither group lists run there, isolated. */
 export declare const AUTO_REST: string;
-export declare function readJson<T>(file: string, fallback: T): T;
 export declare const VitestGuardSequencer: unknown;

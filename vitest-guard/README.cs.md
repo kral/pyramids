@@ -38,7 +38,7 @@ rizika, která se reprodukovala nebo je potvrzuje dokumentace/zdroják Vitestu.
 
 ## Dokumentace
 
-Úplná dokumentace (anglicky): [../docs/vitest-guard/index.md](../docs/vitest-guard/index.md).
+Úplná dokumentace (anglicky): [docs/vitest-guard/index.md](https://github.com/kral/pyramids/blob/main/docs/vitest-guard/index.md).
 
 ## Rychlý start
 
@@ -284,7 +284,7 @@ Výsledek na fixture: samotné resety snížily selhání z 12 na 2 (i18next, `s
 1. **Graf konfliktů**: tvrdé hrany z historie (`conflicts.json`, zapisuje hunt), z `vi.mock('balíček')` proti importům
    balíčku, z různých factory pro stejný modul a ze *residual* znečištění singletonu (co přežilo resety) proti
    importérům. Měkké hrany ze sdílených stavových modulů. Moduly per testovací soubor bere z vto `fileload.modules`
-   (`--vto-raw <dir>`, FORMAT.md v2), jinak z importů testu.
+   (`--vto-raw <dir>`, [FORMAT.md](https://github.com/kral/pyramids/blob/main/FORMAT.md) v2), jinak z importů testu.
 2. **Rozdělení**: hladové barvení (LPT podle délky z `durations.json`, případně z vto `durationMs`) do `--lanes`
    pruhů (výchozí `cores-1`). Tvrdý konflikt nesmí být ve stejném pruhu, měkký stojí 25 % ideální zátěže pruhu.
    Co se nikam nevejde, jde do izolovaného koše (forks).

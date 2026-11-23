@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { triggerFiles } from './scan.mjs';
 import { Lane } from './lane-client.mjs';
+import { resolveGuard } from './guard-resolve.mjs';
 import { slash } from './platform.mjs';
 import { classify, writeEnvJson, splitWorkers } from './classify.mjs';
 import { findConfig } from './project.mjs';
@@ -178,7 +179,8 @@ export class LanesMixin {
   }
 
 }
+// S6: the project's installed @jirikral/vitest-guard first, the checkout's copy as the fallback; a protocol mismatch throws
 function resolveVitestGuard(root) {
-  for (const p of [path.join(root, 'node_modules', 'vitest-guard', 'src', 'index.mjs'), path.resolve(here, '../../vitest-guard/src/index.mjs')]) if (fs.existsSync(p)) return p;
-  return null;
+  const g = resolveGuard(root);
+  return g.dir ? path.join(g.dir, 'src', 'index.mjs') : null;
 }

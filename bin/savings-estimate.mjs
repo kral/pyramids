@@ -109,7 +109,8 @@ export function measuredFrom(records, { since = '30d', now = Date.now() } = {}) 
   // fixed cost of an affected run: its wall time minus the share of a full run of the same pool it executed (never negative)
   const fullWall = (pool) => median(basis.filter((r) => r.pool === pool).map((r) => r.wallMs));
   const over = partial.filter((r) => r.wallMs > 0 && fullWall(r.pool)).map((r) => Math.max(0, r.wallMs - (r.testsRun / r.suiteTotal) * fullWall(r.pool)) / 60000);
-  const local = runs.filter((r) => !r.ci);
+  const local = runs.filter((r) => !r.ci && r.origin !== 'agent'); // agent runs are entered with --agent-runs, never counted twice
+  const localAll = runs.filter((r) => !r.ci);
   const days = new Set(local.map((r) => String(r.at).slice(0, 10))).size;
   return {
     runs: runs.length, since,
@@ -118,7 +119,7 @@ export function measuredFrom(records, { since = '30d', now = Date.now() } = {}) 
     runAll: affected.length ? fellBack.length / affected.length : null, affectedRuns: affected.length,
     overhead: over.length ? median(over) : null, overheadRuns: over.length,
     poolGain: forks && fast && fast < forks ? 1 - fast / forks : null,
-    localRunsPerDay: days ? local.length / days : null, localDays: days,
+    localRunsPerDay: days ? local.length / days : null, localDays: days, localAgentRuns: localAll.length - local.length,
   };
 }
 
@@ -179,7 +180,7 @@ function applyMeasured(o, m) {
   set('selected', m.selected, `measured (median of ${m.partialRuns} affected runs)`);
   set('run-all', m.runAll, `measured (${m.affectedRuns} affected runs)`);
   set('pool-gain', m.poolGain, 'measured (full runs: forks vs vitest-guard)');
-  set('local-runs', m.localRunsPerDay, `measured on this machine (${m.localDays} days; counts every non-CI run, AI-agent runs included, as the metrics do not record who started a run)`);
+  set('local-runs', m.localRunsPerDay, `measured on this machine (${m.localDays} days; counts non-CI runs started by the CLI/TUI/daemon; ${m.localAgentRuns} AI-agent run(s) excluded, enter them with --agent-runs; runs recorded before alpha.3 have no origin and count as local)`);
 }
 
 const r1 = (x) => Math.round(x * 10) / 10;

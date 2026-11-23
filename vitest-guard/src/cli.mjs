@@ -446,7 +446,12 @@ export async function cmdCheck(c, o) {
   const workers = readRunLogs(c.runDir);
   const failing = [...first.files].filter(([, v]) => v.status !== 'passed').map(([k]) => k);
   say(`${mode}${mode === 'shared' && o.plan !== false ? ' (planned)' : ''}: ${first.files.size} files, ${failing.length} failing ${failing.join(' ')}`);
-  if (auto) say(`auto: resolved mode per group: ${Object.entries(load(c, 'auto.json', {}).groups || {}).map(([g, m]) => `${g || 'root'} -> ${m}`).join(', ') || '(none)'}`);
+  if (auto) {
+    const aj = load(c, 'auto.json', {}) || {}, autoGroups = aj.groups || {};
+    // the catch-all auto:rest group is empty when Vitest lists no file beyond the dom/node groups (the normal case): do not print it
+    if (Number.isInteger(aj.listed) && expectedFiles.length <= aj.listed) delete autoGroups['auto:rest'];
+    say(`auto: resolved mode per group: ${Object.entries(autoGroups).map(([g, m]) => `${g || 'root'} -> ${m}`).join(', ') || '(none)'}`);
+  }
   // B1/B2: every file Vitest lists must have produced a result; a file that did not run never passed
   const notRun = expectedFiles.filter((f) => !first.files.has(f));
   if (notRun.length && !first.missing?.length) sayMissing(`the ${mode} run`, notRun, first.log);

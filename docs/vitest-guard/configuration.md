@@ -31,7 +31,6 @@ says how to resolve it first). The result is a config object; your own keys are 
 | `autoModes` | `Record<string, 'vm'\|'shared'\|'isolated'>` | none | `auto`: mode per group (`dom`, `node`) or project name; beats `modes.json` |
 | `respectPools` | boolean | `false` | `auto` with user projects: keep projects that set an explicit pool |
 | `nodeEnvironment` | `'node' \| null` | `null` | `auto`: opt in to moving DOM-free files of a DOM-configured suite to a node-environment group |
-| `quarantineFile` | string | `.vitest-guard/incompatible.json` | path (relative to root) of the quarantine file |
 | `memoryLimit` | number \| string | `autoMemoryLimit(maxWorkers)` | `vmMemoryLimit` for vm (bytes or Vitest string such as `'1.5GB'`) |
 | `inline` | `(string\|RegExp)[]` | `[]` | extra `server.deps.inline` entries |
 | `onDirty` | `'warn' \| 'error' \| 'silent'` | `'warn'` | what to do when a file starts with state left by the previous one |
@@ -56,9 +55,13 @@ says how to resolve it first). The result is a config object; your own keys are 
 | `setup` | `'file' \| 'import'` | `'file'` | `'import'`: your first setup file must start with `import '@jirikral/vitest-guard/setup'` (one module less per file) |
 
 Exported helpers: `autoMemoryLimit(maxWorkers)` (min of 50 % RAM / workers and 60 % of the V8 heap limit, at least
-512 MB), `readQuarantine(root, mode, file?)`, `readQuarantineFile(root, file?)`, `readJson(file, fallback)`, `setupFileFor(root, file?)`, `SETUP_FILE`, `SETUP_TAIL_FILE`,
-`DEFAULT_INCLUDE`, `DEFAULT_EXCLUDE`, `VitestGuardSequencer`. Subpath exports: `@jirikral/vitest-guard/setup`,
-`/sequencer`, `/realm`, `/envstore`.
+512 MB), `readQuarantine(root, mode, file?)`, `setupFileFor(root, file?)`, `SETUP_FILE`, `SETUP_TAIL_FILE`,
+`DEFAULT_INCLUDE`, `DEFAULT_EXCLUDE`. Subpath exports: `@jirikral/vitest-guard/setup` (for `setup: 'import'`) and
+`/envstore` (**internal**: the contract with vto, experimental, no stability guarantee before 1.0). The sequencer and
+the realm shims are internal files, not exports.
+
+The quarantine file is always `.vitest-guard/incompatible.json`: the CLI writes it and the config reads it. The former
+`quarantineFile` option was removed in 0.1.0-alpha.3; setting it throws an error.
 
 ## Environment variables
 

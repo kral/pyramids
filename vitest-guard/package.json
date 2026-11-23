@@ -1,6 +1,7 @@
 {
   "name": "@jirikral/vitest-guard",
-  "version": "0.1.0-alpha.2",
+  "version": "0.1.0-alpha.3",
+  "vitestGuardProtocol": 1,
   "description": "Makes Vitest fast pools (vmThreads, isolate:false) safe: realm shims, leak detection, quarantine, planned shared workers",
   "keywords": [
     "isolate",
@@ -30,8 +31,6 @@
       "default": "./src/index.mjs"
     },
     "./setup": "./src/setup.bundle.mjs",
-    "./sequencer": "./src/sequencer.mjs",
-    "./realm": "./src/realm.mjs",
     "./envstore": {
       "types": "./src/envstore.d.ts",
       "default": "./src/envstore.mjs"
