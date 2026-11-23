@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { project, wrappedConfig, cli, integration, indexFile } from './helpers.mjs';
 
-const empty = () => fs.mkdtempSync(path.join(os.tmpdir(), 'vmg-help-'));
+const empty = () => fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'vmg-help-'));
 
 test('help: global and every subcommand --help list the D3 exit codes and exit 0', () => {
   const dir = empty();

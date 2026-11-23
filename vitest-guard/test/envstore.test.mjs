@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { updateEnv, readEnv, mergeEnvEntry, normalizeEnvEntry, envRank, envKey, envFilePath, foldEnvRecords, removeEnvEntries, withEnvLock, ENV_FORMAT } from '../src/envstore.mjs';
 
 const store = fileURLToPath(new URL('../src/envstore.mjs', import.meta.url));
-const mk = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vmg-env-')));
+const mk = () => fs.realpathSync(fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'vmg-env-')));
 const N = (r) => normalizeEnvEntry(r, { producer: 't', at: 'T' });
 
 test('envstore: precedence miss > probe > static (pure rule)', () => {

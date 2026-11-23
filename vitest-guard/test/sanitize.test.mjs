@@ -7,7 +7,7 @@ import path from 'node:path';
 import { readQuarantine } from '../src/index.mjs';
 import { sanitize, sanitizeText, validateTestPaths } from '../src/safety.mjs';
 
-const mk = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vmg-san-')));
+const mk = () => fs.realpathSync(fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'vmg-san-')));
 const w = (root, f, txt) => { fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true }); fs.writeFileSync(path.join(root, f), txt); };
 const quiet = (fn) => { const l = console.log, wn = console.warn; let out = ''; console.log = console.warn = (...a) => { out += a.join(' ') + '\n'; }; try { fn(); } finally { console.log = l; console.warn = wn; } return out; };
 

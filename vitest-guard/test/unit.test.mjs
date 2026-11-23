@@ -73,7 +73,7 @@ test('scan detects mocks, factories, traits and top-level side effects', () => {
 });
 
 test('planner separates hard conflicts, overflows to isolated, balances, orders polluters last', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vmg-'));
+  const root = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'vmg-'));
   fs.mkdirSync(path.join(root, 't'));
   const w = (n, s) => fs.writeFileSync(path.join(root, 't', n), s);
   w('a.test.ts', `vi.mock('pkg', () => ({}));`); w('b.test.ts', `import x from 'pkg';`); w('c.test.ts', `import x from 'pkg';`);

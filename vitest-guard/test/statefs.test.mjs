@@ -19,7 +19,7 @@ const w = (root, f, txt) => { fs.mkdirSync(path.dirname(path.join(root, f)), { r
 const dirLink = (target, p) => fs.symlinkSync(target, p, 'junction');
 const quiet = (fn) => { const l = console.log, wn = console.warn; let out = ''; console.log = console.warn = (...a) => { out += a.join(' ') + '\n'; }; try { fn(); } finally { console.log = l; console.warn = wn; } return out; };
 const victimDir = () => {
-  const v = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vmg-victim-')));
+  const v = fs.realpathSync(fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'vmg-victim-')));
   fs.writeFileSync(path.join(v, 'w-1-1.jsonl'), 'precious\n');
   fs.mkdirSync(path.join(v, 'logs')); fs.writeFileSync(path.join(v, 'logs', 'precious.txt'), 'keep');
   return v;

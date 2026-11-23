@@ -15,7 +15,7 @@ const require = createRequire(import.meta.url);
 import { integration, vitestDir } from './helpers.mjs'; // no silent skip: fails without vitest unless VITEST_GUARD_TEST_NO_INTEGRATION=1
 
 function project(files) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vmg-test-'));
+  const root = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'vmg-test-'));
   for (const [f, src] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true }); fs.writeFileSync(path.join(root, f), src); }
   if (vitestDir) fs.symlinkSync(vitestDir, path.join(root, 'node_modules'));
   return root;
@@ -103,7 +103,7 @@ test('F8: private temp dir is 0700 with an unpredictable name, removed on cleanu
 test('F8: readOwnedFile refuses symlinks, hard links and non-private directories', { skip: process.platform === 'win32' && 'POSIX permission bits do not apply on Windows (per-user %TEMP% with ACLs)' }, () => {
   const t = privateTmp();
   try {
-    const victim = path.join(os.tmpdir(), `vmg-victim-${Date.now()}.txt`);
+    const victim = path.join(fs.realpathSync.native(os.tmpdir()), `vmg-victim-${Date.now()}.txt`);
     fs.writeFileSync(victim, 'secret');
     const link = t.file('link.json'); fs.symlinkSync(victim, link);
     assert.throws(() => readOwnedFile(link), /ELOOP|symbolic|not a regular/i);
@@ -130,7 +130,7 @@ test('F8 / PoC 8 end to end: planted files at the old predictable paths are neit
   fs.writeFileSync(forged, JSON.stringify({ testResults: [{ name: path.join(root, 'test/a.test.ts'), status: 'passed', assertionResults: [{ ancestorTitles: [], title: 'fails for real', status: 'passed', failureMessages: [] }] }] }));
   const planted = [];
   for (let i = 1; i <= 5; i++) for (const tag of ['poc8', 'run', 'check']) {
-    const p = path.join(os.tmpdir(), `vitest-guard-${process.pid}-${i}-${tag}.json`);
+    const p = path.join(fs.realpathSync.native(os.tmpdir()), `vitest-guard-${process.pid}-${i}-${tag}.json`);
     try { fs.rmSync(p, { force: true }); fs.symlinkSync(i % 2 ? victim : forged, p); planted.push(p); } catch {}
   }
   try {

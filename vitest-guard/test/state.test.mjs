@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const mk = () => fs.mkdtempSync(path.join(os.tmpdir(), 'vmg-state-'));
+const mk = () => fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'vmg-state-'));
 
 test('A4: volatile state goes to .vitest-guard/run/ (git-ignored), committed files stay in .vitest-guard/', async () => {
   const { ctx, statePath, saveState } = await import('../src/cli.mjs');

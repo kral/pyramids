@@ -26,7 +26,7 @@ export const integration = { skip: optedOut ? 'VITEST_GUARD_TEST_NO_INTEGRATION=
 
 /** Temp project. node_modules: 'link' = one symlink to our node_modules, 'real' = a real dir with one symlink per package (lets a test add its own packages). */
 export function project(files, { modules = 'link', prefix = 'vmg-test-' } = {}) {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), prefix)));
   if (vitestDir && modules === 'link') fs.symlinkSync(vitestDir, path.join(root, 'node_modules'));
   if (vitestDir && modules === 'real') {
     fs.mkdirSync(path.join(root, 'node_modules'));

@@ -19,7 +19,7 @@ const filler = (n) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`t
 test('D3: exit codes follow contracts/DECISIONS.md; --help/--version exit 0 without loading Vitest; usage errors exit 2', async () => {
   const { EXIT } = await import('../src/cli.mjs');
   assert.deepEqual(EXIT, { OK: 0, FAIL: 1, USAGE: 2, NEW_QUARANTINE: 4, FALSE_GREEN: 5 });
-  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'vmg-empty-')); // no vitest here at all
+  const empty = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'vmg-empty-')); // no vitest here at all
   const v = cli(empty, ['--version']); assert.equal(v.code, 0); assert.match(v.stdout, /^@jirikral\/vitest-guard \d+\.\d+\.\d+/);
   const h = cli(empty, ['--help']); assert.equal(h.code, 0); assert.match(h.stdout, /exit codes \(docs\/vitest-guard\/cli.md#exit-codes\):\n  0  ok\n  1  test failures/); assert.match(h.stdout, /compare/); assert.match(h.stdout, /calibrate/);
   const u = cli(empty, ['frobnicate']); assert.equal(u.code, 2); assert.match(u.stderr, /unknown command/); assert.match(u.stderr, /see --help/); assert.ok(u.stderr.split('\n').length < 5, 'not the whole usage text');
@@ -51,7 +51,7 @@ test('U-2: check / compare / calibrate / verify refuse a config that is not wrap
 });
 
 test('C-M7: a failure that is deterministic in vm (alone, or after a polluter) is quarantined with exit 4; only a pass on a same-conditions retry is FLAKY (exit 1)', integration, () => {
-  const marker = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'vmg-flaky-')), 'ran-once');
+  const marker = path.join(fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'vmg-flaky-')), 'ran-once');
   const root = project({
     'package.json': '{"type":"module"}',
     'vitest.config.mjs': wrappedConfig({ include: ['test/**/*.test.ts'], maxWorkers: 1 }, { mode: 'vm' }),
@@ -164,7 +164,7 @@ test('C-M6: the false green is also found when the gate order happens to hide it
 
 test('C-M6: shared-mode warning names the commit when HEAD moved since the verify', async () => {
   const { verifyStatus, verifyFile, configKey, gitHead } = await import('../src/verifystate.mjs');
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vmg-vs-')));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'vmg-vs-')));
   fs.writeFileSync(path.join(root, 'vitest.config.ts'), 'export default {}');
   fs.mkdirSync(path.join(root, '.git/refs/heads'), { recursive: true });
   fs.writeFileSync(path.join(root, '.git/HEAD'), 'ref: refs/heads/main\n');
@@ -187,7 +187,7 @@ test('C-M6: shared-mode warning names the commit when HEAD moved since the verif
 
 test('F5: installed through a symlink (npm i -D <path>) - Vitest comes from the consumer project, setup files are served, CLI works', integration, () => {
   // a copy of the package WITHOUT node_modules, outside the consumer: any bare `vitest` import from its real path fails
-  const pkg = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vmg-pkg-')));
+  const pkg = fs.realpathSync(fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'vmg-pkg-')));
   for (const n of ['src', 'bin', 'package.json']) fs.cpSync(path.join(pkgDir, n), path.join(pkg, n), { recursive: true });
   const name = readJson(path.join(pkg, 'package.json')).name;
   const root = project({
