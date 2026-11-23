@@ -5,7 +5,7 @@
 //   node .github/scripts/ci.mjs <step>… [--allow-skips]
 //   steps: install lint smoke analyzer collector mcp tui vitest-guard verify oddpath | all
 //   (`all` = everything except `install`; run `install` once on a fresh clone)
-//   VG_VITEST=<x.y.z> with the vitest-guard step: install that Vitest (--no-save) first, e.g. VG_VITEST=4.1.8
+//   VG_VITEST=<x.y.z> with the collector / mcp / vitest-guard steps: install that Vitest (--no-save) first, e.g. VG_VITEST=4.1.8
 //
 // Rules enforced here (REVIEW-2 A-4 / U-9):
 //   - a SKIPPED test is a failure unless it is on the platform allow-list below or the caller
@@ -117,6 +117,17 @@ const need = (p, hint) => { if (!fs.existsSync(path.join(REPO, p))) fail(`${p} i
 
 // ------------------------------------------------------------------ steps
 const NPM_DIRS = ['.', 'collector/corpus', 'mcp', 'mcp/test/fixture', 'tui', 'vitest-guard'];
+// VG_VITEST=<x.y.z>: run a step's suite against another Vitest than the lockfile's (installed --no-save, lockfile untouched)
+function useVitest(rel) {
+  const vg = process.env.VG_VITEST;
+  if (!vg) return;
+  if (!/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(vg)) fail(`VG_VITEST must be an exact version such as 4.1.8, got "${vg}"`);
+  sh('npm', ['install', '--no-save', '--ignore-scripts', '--legacy-peer-deps', '--no-audit', '--no-fund', `vitest@${vg}`], { cwd: path.join(REPO, rel) });
+  const have = JSON.parse(fs.readFileSync(path.join(REPO, rel, 'node_modules/vitest/package.json'), 'utf8')).version;
+  if (have !== vg) fail(`expected vitest ${vg} in ${rel}/node_modules, found ${have}`);
+  process.stdout.write(`  ${rel} runs against vitest ${have}\n`);
+}
+
 const STEPS = {
   /** `npm ci --ignore-scripts` in every package that has a lockfile (no install script ever runs) */
   install() {
@@ -154,6 +165,7 @@ const STEPS = {
   collector() {
     need('node_modules/oxc-parser', 'npm ci --ignore-scripts');
     need('collector/corpus/node_modules/vitest', 'npm --prefix collector/corpus ci --ignore-scripts');
+    useVitest('collector/corpus');
     node([path.join(REPO, 'collector/selftest.mjs')]);
     const r = node([path.join(REPO, 'collector/corpus/run.mjs')], { cwd: path.join(REPO, 'collector/corpus'), capture: true });
     process.stdout.write(r.out.split('\n').slice(-6).join('\n') + '\n');
@@ -164,6 +176,7 @@ const STEPS = {
   mcp() {
     need('mcp/node_modules', 'npm --prefix mcp ci --ignore-scripts');
     need('mcp/test/fixture/node_modules', 'npm --prefix mcp/test/fixture ci --ignore-scripts');
+    useVitest('mcp/test/fixture');
     if (!analyzerBin()) fail('analyzer binary missing: run the `analyzer` step or set VTO_ANALYZER');
     nodeTests(path.join(REPO, 'mcp'), testFiles(path.join(REPO, 'mcp/test')));
   },
@@ -178,14 +191,7 @@ const STEPS = {
   'vitest-guard'() {
     need('vitest-guard/node_modules/vitest', 'npm --prefix vitest-guard ci --ignore-scripts');
     // VG_VITEST=4.1.8: run the suite against another Vitest than the lockfile's (not saved, lockfile untouched)
-    const vg = process.env.VG_VITEST;
-    if (vg) {
-      if (!/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(vg)) fail(`VG_VITEST must be an exact version such as 4.1.8, got "${vg}"`);
-      sh('npm', ['install', '--no-save', '--ignore-scripts', '--legacy-peer-deps', '--no-audit', '--no-fund', `vitest@${vg}`], { cwd: path.join(REPO, 'vitest-guard') });
-      const have = JSON.parse(fs.readFileSync(path.join(REPO, 'vitest-guard/node_modules/vitest/package.json'), 'utf8')).version;
-      if (have !== vg) fail(`expected vitest ${vg} in vitest-guard/node_modules, found ${have}`);
-      process.stdout.write(`  vitest-guard runs against vitest ${have}\n`);
-    }
+    useVitest('vitest-guard');
     const pkg = JSON.parse(fs.readFileSync(path.join(REPO, 'vitest-guard/package.json'), 'utf8'));
     if (pkg.scripts?.['check:bundle']) node([path.join(REPO, 'vitest-guard/scripts/bundle-setup.mjs'), '--check'], { cwd: path.join(REPO, 'vitest-guard') });
     nodeTests(path.join(REPO, 'vitest-guard'), testFiles(path.join(REPO, 'vitest-guard/test')), { VITEST_GUARD_TEST_NO_INTEGRATION: '' });

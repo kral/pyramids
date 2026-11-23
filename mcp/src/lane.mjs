@@ -250,6 +250,15 @@ function detachClassic(rs) {
   return out;
 }
 
+// Selecting single tests of a file: Vitest 5 takes exact full names (`testNames`); Vitest 4.1 has no such option, only
+// `testNamePattern`, matched against the names joined by spaces (file suite first). The pattern is anchored at the end
+// and at a word boundary, so it can select a few extra tests with the same name suffix, never fewer.
+const escRe = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function nameFilter(names) {
+  if (Number(String(vitestVersion).split('.')[0]) >= 5) return { testNames: names };
+  return { testNamePattern: new RegExp(`(?:^| )(?:${names.map((n) => escRe(String(n).split(' > ').join(' '))).join('|')})$`) };
+}
+
 async function run(msg) {
   const t0 = performance.now();
   const cpu0 = process.cpuUsage();
@@ -273,7 +282,7 @@ async function run(msg) {
         const file = specId(path.resolve(root, s.file)); // Windows: '/' ids (D:/a/…), a '\\' id misses its name filter; elsewhere the exact on-disk name (no NFC)
         let projects = findProjects(file);
         if (!projects.length) projects = [vitest.getRootProject()];
-        for (const p of projects) specs.push(p.createSpecification(file, s.names?.length ? { testNames: s.names } : undefined));
+        for (const p of projects) specs.push(p.createSpecification(file, s.names?.length ? nameFilter(s.names) : undefined));
       }
     }
     const projects = {};

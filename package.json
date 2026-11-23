@@ -35,7 +35,7 @@
     "oxc-parser": "0.159.0"
   },
   "peerDependencies": {
-    "vitest": ">=5.1 <6"
+    "vitest": ">=4.1 <6"
   },
   "peerDependenciesMeta": {
     "vitest": {

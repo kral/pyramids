@@ -5,7 +5,7 @@
 #   analyzer   cargo test + release build on 5 targets, packed as @jirikral/vto-analyzer-* artifacts
 #   test       all packages (collector, daemon/MCP, TUI, vitest-guard, verify) + CLI smoke test on
 #              Linux / macOS / Windows with Node 22.22.2 (declared minimum: jsdom 31 needs ^22.22.2 || >=24.15), 22 and 24
-#   vitest-guard-v4  the vitest-guard suite on Vitest 4.1.8 (the lockfile has 5.1.1; peer range >=4.1 <6) on Linux + Windows
+#   vitest-guard-v4  vto (collector corpus, daemon/MCP) and vitest-guard on Vitest 4.1.8 (lockfiles have 5.1.1; peer range >=4.1 <6), Linux + Windows
 #   odd-path   the same checkout under "Můj projekt ěš/" (space + diacritics) on 3 OS
 #
 # Policy
@@ -125,7 +125,7 @@ jobs:
         run: node .github/scripts/ci.mjs verify
 
   vitest-guard-v4:
-    name: vitest-guard on vitest ${{ matrix.vitest }} (${{ matrix.os }})
+    name: vto + vitest-guard on vitest ${{ matrix.vitest }} (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -145,11 +145,15 @@ jobs:
         with: { persist-credentials: false }
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version: 24 }
-      - name: install vitest-guard (lockfile, no install scripts)
-        working-directory: vitest-guard
-        run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: vitest-guard suite on Vitest ${{ matrix.vitest }}
-        run: node .github/scripts/ci.mjs vitest-guard
+      - name: Rust toolchain (pinned, from the runner's rustup)
+        shell: bash
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --no-self-update
+          rustup default "$RUST_TOOLCHAIN"
+      - name: install (lockfiles, no install scripts)
+        run: node .github/scripts/ci.mjs install
+      - name: analyzer, collector corpus, daemon/MCP and vitest-guard on Vitest ${{ matrix.vitest }}
+        run: node .github/scripts/ci.mjs analyzer collector mcp vitest-guard
 
   odd-path:
     name: path with a space and diacritics (${{ matrix.os }})
