@@ -25,7 +25,33 @@ export function vitestVersion(root) {
 }
 
 /**
- * @returns {Promise<{code:number, files: Map<string,{status:string, tests: Map<string,string>, message?:string}>, cpu?:number, wallMs:number, log:string}>}
+ * Known causes of a file that fails to LOAD (file-level error, no test collected). Matched on the JSON reporter's
+ * file message (Vitest puts the error name/message/code there), so the cause is visible instead of just "failed".
+ */
+export const LOAD_FAILURES = {
+  'vm-context': {
+    code: 'ERR_VM_MODULE_DIFFERENT_CONTEXT',
+    short: 'vm module context',
+    label: 'vm module context (Vitest <5 vm pool cannot share these modules across contexts)',
+    re: /ERR_VM_MODULE_DIFFERENT_CONTEXT|Linked modules must use the same context/i,
+  },
+};
+/** key of the LOAD_FAILURES entry matching a file error message, else null */
+export function classifyLoadFailure(message) {
+  const m = String(message || '');
+  for (const [k, v] of Object.entries(LOAD_FAILURES)) if (v.re.test(m)) return k;
+  return null;
+}
+/** files (of a runVitest `files` map) that failed to load for a known cause: { kind: [file, ...] } (sorted), optionally only `only` */
+export function loadFailures(files, only = null) {
+  const out = {};
+  for (const [f, v] of files) { if (only && !only.includes(f)) continue; if (v.loadError) (out[v.loadError] ||= []).push(f); }
+  for (const k of Object.keys(out)) out[k].sort();
+  return out;
+}
+
+/**
+ * @returns {Promise<{code:number, files: Map<string,{status:string, tests: Map<string,string>, message?:string, loadError?:string}>, cpu?:number, wallMs:number, log:string}>}
  */
 export function runVitest({ root, config, mode, files = [], laneFile, args = [], env = {}, verbose = false, tag = 'run' }) {
   // F8: report in a fresh private 0700 dir (unpredictable name), read back without following symlinks
@@ -51,11 +77,13 @@ export function runVitest({ root, config, mode, files = [], laneFile, args = [],
           // N8: Vitest marks the file failed when a hook of a nested suite throws although every test passed
           const status = f.status === 'passed' ? 'passed' : f.status !== 'failed' && f.assertionResults.length && f.assertionResults.every((t) => t.status !== 'failed') && !f.message ? 'passed' : 'failed';
           const entry = { status, tests, message: f.message || failedTest?.failureMessages?.[0] || (status === 'failed' ? 'failed outside any test (a suite hook?)' : '') };
+          // file-level error and nothing collected = the file never loaded; remember a known cause
+          if (status === 'failed' && !f.assertionResults.length) { const le = classifyLoadFailure(f.message); if (le) entry.loadError = le; }
           // S1: the same file in two projects: fold pessimistically (failed if any project's run failed, per test too)
           const prev = res.files.get(rel);
           if (prev) {
             for (const [t, st] of tests) { const p0 = prev.tests.get(t); if (p0 === undefined || (p0 === 'passed' && st !== 'passed') || (p0 !== 'failed' && st === 'failed')) prev.tests.set(t, st); }
-            if (prev.status === 'passed' && entry.status !== 'passed') { prev.status = entry.status; prev.message = entry.message; }
+            if (prev.status === 'passed' && entry.status !== 'passed') { prev.status = entry.status; prev.message = entry.message; if (entry.loadError) prev.loadError = entry.loadError; }
           } else res.files.set(rel, entry);
         }
       } catch (e) { res.error = 'no JSON report: ' + e.message; }

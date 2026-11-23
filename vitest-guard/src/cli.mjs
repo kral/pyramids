@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { runVitest, signature, vitestBin, vitestVersion, childCpuSeconds } from './runner.mjs';
+import { runVitest, signature, vitestBin, vitestVersion, childCpuSeconds, LOAD_FAILURES, loadFailures } from './runner.mjs';
 import { readRunLogs, clearRunLogs, predecessors, updateDurations, heapReport, selfTime, ensureStateDir } from './logs.mjs';
 import { buildGraph, planLanes, readVto } from './plan.mjs';
 import { scanFile } from './scan.mjs';
@@ -320,6 +320,14 @@ function sayMissing(what, missing, log = '') {
   if (hints.length) say('  ' + hints.join('\n  '));
 }
 
+/** one line per known load-failure cause in a fast run: code, count, first 3 files (these files still count as failing) */
+function sayLoadFailures(files, mode) {
+  for (const [k, fs2] of Object.entries(loadFailures(files))) {
+    const d = LOAD_FAILURES[k];
+    say(`${mode}: ${fs2.length} file(s) failed to LOAD with ${d.code} (${d.label}); their tests never ran, they count as failing: ${fs2.slice(0, 3).join(' ')}${fs2.length > 3 ? ' ...' : ''}`);
+  }
+}
+
 export async function cmdRunPlanned(c, o, plan) {
   plan ||= o.replan === false ? load(c, 'plan.json', null) || (await cmdPlan(c, o)) : await cmdPlan(c, o);
   if (o.clean !== false) clearRunLogs(c.runDir);
@@ -448,6 +456,7 @@ export async function cmdCheck(c, o) {
   const workers = readRunLogs(c.runDir);
   const failing = [...first.files].filter(([, v]) => v.status !== 'passed').map(([k]) => k);
   say(`${mode}${mode === 'shared' && o.plan !== false ? ' (planned)' : ''}: ${first.files.size} files, ${failing.length} failing ${failing.join(' ')}`);
+  if (mode !== 'isolated') sayLoadFailures(first.files, mode);
   if (auto) {
     const aj = load(c, 'auto.json', {}) || {}, autoGroups = aj.groups || {};
     // the catch-all auto:rest group is empty when Vitest lists no file beyond the dom/node groups (the normal case): do not print it
@@ -831,8 +840,10 @@ export async function cmdCompare(c, o) {
       const failed = [...tests.values()].filter((x) => x === 'failed').length;
       // S9: no report, or a non-zero exit that no failing file explains (unhandled error, crashed worker): the run proves nothing
       const broken = r.error ? String(r.error) : r.code && !failed ? `Vitest exited with code ${r.code} although no file failed` : null;
-      res[mode] = { cpu: cpu0 !== null && cpu1 !== null ? Math.round((cpu1 - cpu0) * 10) / 10 : null, wall: Math.round((Date.now() - t0) / 100) / 10, tests, lost, failed, broken };
+      const loadFail = loadFailures(r.files, sample);
+      res[mode] = { loadFail, cpu: cpu0 !== null && cpu1 !== null ? Math.round((cpu1 - cpu0) * 10) / 10 : null, wall: Math.round((Date.now() - t0) / 100) / 10, tests, lost, failed, broken };
       if (lost.length) say(`compare: ${lost.length} file(s) produced no result in ${mode === 'isolated' ? 'forks' : mode}: ${lost.slice(0, 10).join(' ')}`);
+      if (mode !== 'isolated') sayLoadFailures(new Map([...r.files].filter(([f]) => sample.includes(f))), mode);
       if (broken) say(`compare: the ${mode === 'isolated' ? 'forks' : mode} run is not usable: ${broken}`);
     }
     const ref = res.isolated.tests;
@@ -854,24 +865,36 @@ export async function cmdCompare(c, o) {
       else { why = `best fast mode (${best}) saves only ${Math.round(gain * 100)} %: not worth the shared-realm risk`; }
     }
     if (!refOk) why = res.isolated.broken ? `the isolated reference run is not usable (${res.isolated.broken})` : 'the isolated reference run did not report every file';
-    rows.push({ project: project || '(root)', files: sample.length, of: all.length, isolated: metric('isolated'), vm: metric('vm'), shared: metric('shared'), vmMismatch: res.vm.falseGreen + res.vm.falseRed, sharedMismatch: res.shared.falseGreen + res.shared.falseRed, falseGreen: res.vm.falseGreen + res.shared.falseGreen, recommend: rec, why });
+    rows.push({ project: project || '(root)', files: sample.length, of: all.length, isolated: metric('isolated'), vm: metric('vm'), shared: metric('shared'), vmMismatch: res.vm.falseGreen + res.vm.falseRed, vmLoad: res.vm.loadFail, sharedLoad: res.shared.loadFail, vmLost: res.vm.lost.length, sharedLost: res.shared.lost.length, sharedMismatch: res.shared.falseGreen + res.shared.falseRed, falseGreen: res.vm.falseGreen + res.shared.falseGreen, recommend: rec, why });
   }
   } finally { swan.stop(); }
   const unit = childCpuSeconds() !== null ? 'CPU s' : 'wall s';
   const pct = (a, b) => (b ? `${a - b > 0 ? '+' : ''}${Math.round(((a - b) / b) * 100)} %` : '');
   if (Number.isFinite(n)) say(`note: a random sample can miss the few CPU-heavy files that decide the result (vm global access is slower in hot code); decide with --sample all`);
+  const notes = (load, lost) => [...Object.entries(load || {}).map(([k, f]) => `${f.length} file${f.length === 1 ? '' : 's'} fail${f.length === 1 ? 's' : ''} to load: ${LOAD_FAILURES[k].short}`), ...(lost ? [`${lost} file${lost === 1 ? '' : 's'} lost: run ended without a result`] : [])].join('; ');
   say(`mode comparison per project (${unit}, sample; mismatches = tests whose result differs from isolated forks):`);
-  for (const r of rows) say(`  ${r.project}: ${r.files}/${r.of} files | forks ${r.isolated} | vm ${r.vm} (${pct(r.vm, r.isolated)}${r.vmMismatch ? `, ${r.vmMismatch} mismatches` : ''}) | shared ${r.shared} (${pct(r.shared, r.isolated)}${r.sharedMismatch ? `, ${r.sharedMismatch} mismatches` : ''}) -> recommend ${r.recommend}: ${r.why}`);
+  for (const r of rows) say(`  ${r.project}: ${r.files}/${r.of} files | forks ${r.isolated} | vm ${r.vm} (${pct(r.vm, r.isolated)}${r.vmMismatch ? `, ${r.vmMismatch} mismatches` : ''}${notes(r.vmLoad, r.vmLost) ? `; ${notes(r.vmLoad, r.vmLost)}` : ''}) | shared ${r.shared} (${pct(r.shared, r.isolated)}${r.sharedMismatch ? `, ${r.sharedMismatch} mismatches` : ''}${notes(r.sharedLoad, r.sharedLost) ? `; ${notes(r.sharedLoad, r.sharedLost)}` : ''}) -> recommend ${r.recommend}: ${r.why}`);
   save(c, 'compare.json', { at: new Date().toISOString(), unit, rows });
   {
     const p = painter(colorEnabled());
-    const cell = (v, base, mm) => `${v}${base ? ` ${(() => { const s = pct(v, base); return v < base ? p.green(s) : p.yellow(s); })()}` : ''}${mm ? p.red(` ⚠${mm}`) : ''}`;
+    const cell = (v, base, mm, load, lost) => `${v}${base ? ` ${(() => { const s = pct(v, base); return v < base ? p.green(s) : p.yellow(s); })()}` : ''}${mm ? p.red(` ⚠${mm}`) : ''}${notes(load, lost) ? p.dim ? p.dim(` (${notes(load, lost)})`) : ` (${notes(load, lost)})` : ''}`;
     const tl = table(['project', 'files', `forks (${unit})`, 'vm', 'shared', 'recommend'],
-      rows.map((r) => [r.project, `${r.files}/${r.of}`, String(r.isolated), cell(r.vm, r.isolated, r.vmMismatch), cell(r.shared, r.isolated, r.sharedMismatch), p.bold(r.recommend)]), ['l', 'r', 'r', 'r', 'r', 'l'], p);
+      rows.map((r) => [r.project, `${r.files}/${r.of}`, String(r.isolated), cell(r.vm, r.isolated, r.vmMismatch, r.vmLoad, r.vmLost), cell(r.shared, r.isolated, r.sharedMismatch, r.sharedLoad, r.sharedLost), p.bold(r.recommend)]), ['l', 'r', 'r', 'r', 'r', 'l'], p);
     const mism = rows.some((r) => r.vmMismatch || r.sharedMismatch);
-    summary({ title: 'compare', verdict: 'ok', label: 'MEASURED', headline: `${rows.length} project(s); ⚠N = N tests whose result differs from forks`, facts: [['exit code', EXIT.OK]], tableLines: tl,
+    const lostAny = rows.filter((r) => r.vmLost || r.sharedLost);
+    const loadKinds = new Set(rows.flatMap((r) => [...Object.keys(r.vmLoad || {}), ...Object.keys(r.sharedLoad || {})]));
+    summary({ title: 'compare', verdict: 'ok', label: 'MEASURED', headline: `${rows.length} project(s); ⚠N = N tests whose result differs from forks`, facts: [...(loadKinds.size ? [['load failures', [...loadKinds].map((k) => `${LOAD_FAILURES[k].code} (${LOAD_FAILURES[k].short}): not a test difference, see below`).join('; ')]] : []), ...(lostAny.length ? [['lost files', lostAny.map((r) => `${r.project}: vm ${r.vmLost}, shared ${r.sharedLost}: the run ended without a result for them`).join('; ')]] : []), ['exit code', EXIT.OK]], tableLines: tl,
       next: [...(Number.isFinite(n) ? ['a sample can miss the CPU-heavy files: decide with `--sample all`'] : []), ...(mism ? ['mismatching modes are never recommended; see `vitest-guard verify`'] : []),
         ...rows.filter((r) => r.recommend === 'shared').map((r) => `${r.project}: gate on shared only after a clean \`vitest-guard verify --mode shared\``)] });
+  }
+  if (rows.some((r) => Object.keys(r.vmLoad || {}).length || Object.keys(r.sharedLoad || {}).length)) {
+    say(`\nWhy many tests mismatch: ${LOAD_FAILURES['vm-context'].code} / "Linked modules must use the same context"
+  Files that fail at import in a fast mode never ran their tests: the ⚠ number counts every test of those files as
+  different from forks, although nothing was found wrong in the tests themselves. Vitest <5 shares one module cache
+  across vm contexts, which Node refuses (the vm pool is reworked in Vitest 5).
+  Options: (1) upgrade to Vitest 5; (2) run those files isolated: \`vitest-guard check\` quarantines them (they fail in vm,
+  pass in forks); (3) \`server.deps.inline\` for the packages involved (the CJS/ESM modules named in the failing files).
+  The recommendation above is unchanged: a mode with mismatches or lost files is never recommended. See troubleshooting.md.`);
   }
   if (o.write !== false) {
     // mode 'auto' reads these per project/group (overridable with autoModes in the config)
