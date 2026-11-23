@@ -418,21 +418,25 @@ function integrityDiff(base, now) {
   return bad;
 }
 
+// vm mode promises a fresh realm per test file. Vitest 4.1 hands several files to one vm context when a vm project
+// runs with maxWorkers 1 (defineVitestGuardConfig's vm-file-isolation plugin prevents that); if a second file still
+// reaches this context, its globals and DOM come from the previous file: refuse (fail closed) instead of a false green.
+// The mark is written here, at the setup file's top level (runs for every file, also one whose tests are all skipped
+// and whose beforeAll never runs).
+if (inVm) {
+  const cur = rel(expect.getState().testPath);
+  const prevFile = globalThis[VM_CTX];
+  if (prevFile !== undefined && prevFile !== cur) throw new Error(`[vitest-guard] vm mode: ${safety.sanitize(cur)} runs in the same vm context as ${safety.sanitize(prevFile)} (globals and the DOM are shared, not fresh). ` +
+    'Vitest 4.1 does this for vm pools with maxWorkers 1: use defineVitestGuardConfig (its plugin sets isolate: true there), keep the plugin in projects that do not inherit the root config, or upgrade to Vitest 5.');
+  try { Object.defineProperty(globalThis, VM_CTX, { value: cur, configurable: true, enumerable: false, writable: false }); } catch {}
+}
+
 beforeAll(async () => {
   const b0 = realNow();
   try { await beforeAllBody(); } finally { selfMs += realNow() - b0; }
 });
 async function beforeAllBody() {
   file = rel(expect.getState().testPath);
-  // vm mode promises a fresh realm per test file. Vitest 4.1 hands several files to one vm context when a vm project
-  // runs with maxWorkers 1 (defineVitestGuardConfig's vm-file-isolation plugin prevents that); if a second file still
-  // reaches this context, its globals and DOM come from the previous file: refuse (fail closed) instead of a false green.
-  if (inVm) {
-    const prevFile = globalThis[VM_CTX];
-    if (prevFile !== undefined && prevFile !== file) throw new Error(`[vitest-guard] vm mode: ${safety.sanitize(file)} runs in the same vm context as ${safety.sanitize(prevFile)} (globals and the DOM are shared, not fresh). ` +
-      'Vitest 4.1 does this for vm pools with maxWorkers 1: use defineVitestGuardConfig (its plugin sets isolate: true there), keep the plugin in projects that do not inherit the root config, or upgrade to Vitest 5.');
-    try { Object.defineProperty(globalThis, VM_CTX, { value: file, configurable: true, enumerable: false, writable: false }); } catch {}
-  }
   worker.current = file;
   worker.seq++;
   heapStart = v8.getHeapStatistics().used_heap_size;

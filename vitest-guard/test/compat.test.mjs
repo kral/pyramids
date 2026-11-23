@@ -38,19 +38,17 @@ test('compat unit: the vm-file-isolation plugin isolates vm projects with one wo
   assert.deepEqual(run('5.1.1', [proj('vmThreads', 1)]), [false], 'Vitest 5 does not batch vm files');
 });
 
-test('compat unit: the plugin is added on Vitest 4 (root and non-inheriting vm projects), not on Vitest 5', () => {
+test('compat unit: the plugin goes into every vm config/project on any major (it checks vitest.version itself)', () => {
   const root = project({ 'src/a.test.js': '' });
   const single = (m) => withMajor(m, () => defineVitestGuardConfig({ root, plugins: [{ name: 'user' }], test: {} }, { verifyWarning: false }));
-  assert.deepEqual(names(single(4).plugins), ['user', PLUGIN]);
-  assert.deepEqual(names(single(5).plugins), ['user']);
+  for (const m of [4, 5, null]) assert.deepEqual(names(single(m).plugins), ['user', PLUGIN], `major ${m}`);
   assert.deepEqual(names(withMajor(4, () => defineVitestGuardConfig({ root, test: {} }, { mode: 'shared', verifyWarning: false })).plugins), [], 'shared mode needs no plugin');
   const multi = (m) => withMajor(m, () => defineVitestGuardConfig({ root, test: { projects: [{ test: { name: 'own' } }, { extends: true, test: { name: 'inh' } }, { plugins: [{ name: 'p' }], test: { name: 'nodevm', pool: 'threads', isolate: false } }] } }, { verifyWarning: false }));
-  const m4 = multi(4);
-  assert.deepEqual(names(m4.plugins), [PLUGIN]);
-  assert.deepEqual(m4.test.projects.map((p) => names(p.plugins)), [[PLUGIN], [], ['p']], 'v4: the non-inheriting vm project gets its own copy; an inheriting one and a shared one do not');
-  const m5 = multi(5);
-  assert.deepEqual(names(m5.plugins), []);
-  assert.deepEqual(m5.test.projects.map((p) => names(p.plugins)), [[], [], ['p']]);
+  for (const m of [4, 5, null]) {
+    const c = multi(m);
+    assert.deepEqual(names(c.plugins), [PLUGIN], `major ${m}: root`);
+    assert.deepEqual(c.test.projects.map((p) => names(p.plugins)), [[PLUGIN], [PLUGIN], ['p']], `major ${m}: every vm project carries its own copy (an undetected major never drops it); a shared one does not`);
+  }
 });
 
 test('compat unit: root setup files reach an inline project exactly when Vitest itself inherits the root config', () => {

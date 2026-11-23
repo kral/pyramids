@@ -378,7 +378,9 @@ function buildConfig(userConfig, g) {
   if (test.poolOptions) console.warn('[vitest-guard] test.poolOptions was removed in Vitest 4 and is ignored (use vmMemoryLimit / maxWorkers).');
   const root = path.resolve(userConfig.root || test.root || process.cwd());
   const major = vitestMajor(root);
-  const needVmPlugin = major === null || major < 5; // Vitest 4.1: vm files batched into one context (vmFileIsolationPlugin)
+  // Vitest 4.1 batches vm files into one context (vmFileIsolationPlugin). The plugin checks vitest.version itself, so it
+  // goes into every vm project unconditionally: a major that cannot be read here (pnpm workspace root) never drops it.
+  const needVmPlugin = true; void major;
   const quarantineFile = '.vitest-guard/incompatible.json';
   const laneFile = process.env.VITEST_GUARD_LANE_FILE;
   const lane = laneFile ? readLane(laneFile) : null;
@@ -450,7 +452,7 @@ function buildConfig(userConfig, g) {
         const projRoot = path.resolve(root, typeof (pt.root ?? p.root) === 'string' ? pt.root ?? p.root : '.');
         const files = validateTestPaths(projRoot, laneEntriesFor(projRoot, lane.files), { include, exclude, label: 'VITEST_GUARD_LANE_FILE', warn: lane.project !== null }).ok;
         if (!files.length) continue;
-        projects.push({ ...p, ...(mode === 'vm' && needVmPlugin && !inherits ? { plugins: withVmPlugin(p.plugins) } : {}), test: { ...pt, ...pool, ...seq, include: files.map(escapeGlob), exclude, setupFiles, provide: provide(mode) } });
+        projects.push({ ...p, ...(mode === 'vm' && needVmPlugin ? { plugins: withVmPlugin(p.plugins) } : {}), test: { ...pt, ...pool, ...seq, include: files.map(escapeGlob), exclude, setupFiles, provide: provide(mode) } });
         continue;
       }
       const qm = mode !== 'isolated' ? quarantine()[mode] : null;
@@ -465,7 +467,7 @@ function buildConfig(userConfig, g) {
         for (const x of pairs) if (v.map.has(x.rel)) { claimed.add(`${mode}\0${x.key}`); if (v.map.get(x.rel) !== x.rel) remaps.push({ mode, key: x.key, to: x.key.slice(0, x.key.length - x.rel.length) + v.map.get(x.rel) }); }
       }
       // Vitest 4: a project that does not inherit the root config does not get the root plugins either
-      const vmPlugins = mode === 'vm' && needVmPlugin && !inherits ? { plugins: withVmPlugin(p.plugins) } : {};
+      const vmPlugins = mode === 'vm' && needVmPlugin ? { plugins: withVmPlugin(p.plugins) } : {};
       projects.push({ ...p, ...vmPlugins, test: { ...pt, ...pool, ...seq, include, exclude: [...exclude, ...quarantined.map(escapeGlob)], setupFiles, provide: provide(mode) } });
       if (quarantined.length) projects.push({ ...p, test: { ...pt, name: `${name || 'project'}:isolated`, pool: 'forks', isolate: true, include: quarantined.map(escapeGlob), exclude, setupFiles: isoSetup, provide: provide('isolated') } });
     }
