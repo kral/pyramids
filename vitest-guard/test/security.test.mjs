@@ -12,7 +12,7 @@ import { validateTestPaths, privateTmp, readOwnedFile, validEdges, pickKnown } f
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
-import { integration, vitestDir } from './helpers.mjs'; // no silent skip: fails without vitest unless VITEST_GUARD_TEST_NO_INTEGRATION=1
+import { integration, vitestDir, VITEST_MAJOR } from './helpers.mjs'; // no silent skip: fails without vitest unless VITEST_GUARD_TEST_NO_INTEGRATION=1
 
 function project(files) {
   const root = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'vmg-test-'));
@@ -176,7 +176,9 @@ test('projects: each inline project is wrapped, explicit pools kept, setup first
   assert.equal(byName.node.test.pool, 'forks', 'explicit isolated pool is kept');
   assert.equal(byName.plain.test.pool, 'vmThreads', 'no explicit pool -> guard mode (vm)');
   assert.deepEqual(byName.dom.test.setupFiles, [SETUP_FILE, './root-setup.ts']);
-  assert.deepEqual(byName.plain.test.setupFiles, [SETUP_FILE, './p.ts'], 'non-extending project does not get root setup');
+  // Vitest 5 inline projects inherit the root config unless `extends: false`; Vitest 4 only with `extends: true`
+  if (VITEST_MAJOR >= 5) assert.deepEqual(byName.plain.test.setupFiles, [SETUP_FILE, './root-setup.ts', './p.ts'], 'v5: a project without `extends` inherits the root setup');
+  else assert.deepEqual(byName.plain.test.setupFiles, [SETUP_FILE, './p.ts'], 'v4: non-extending project does not get root setup');
   assert.equal(cfg.test.setupFiles, undefined);
   assert.equal(byName.dom.test.provide.vitestGuard.mode, 'vm');
   assert.equal(byName.node.test.provide.vitestGuard.mode, 'isolated');

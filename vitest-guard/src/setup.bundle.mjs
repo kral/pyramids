@@ -896,6 +896,7 @@ const T0 = performance.now(); // self-time accounting (logged as selfMs per file
 const PROF = process.env.VITEST_GUARD_PROFILE ? {} : null;
 const sect = (name, t) => { if (PROF) PROF[name] = (PROF[name] || 0) + performance.now() - t; };
 const W = Symbol.for('vitest-guard.worker');
+const VM_CTX = Symbol.for('vitest-guard.vmContextFile'); // vm mode: the test file this vm context belongs to
 // F12: the worker store is a non-writable, non-configurable property: a test file can no longer swap it for a
 // fresh object to erase the baseline (it can still mutate fields; the realms are not a security boundary)
 if (!Object.prototype.hasOwnProperty.call(process, W)) Object.defineProperty(process, W, { value: { seq: 0, prev: null, base: null, roots: new Set(), listeners: [], intervals: new Map(), patched: false, react: null, out: null }, writable: false, configurable: false, enumerable: false });
@@ -1175,7 +1176,7 @@ if (mode === 'shared' && !worker.patched) {
   worker.evaluatorHooked = await hookEvaluator();
   // R4: without the module-loader hook, globals packages define at import cannot be told apart and are deleted after
   // every file (fails red, never green); say so once per worker instead of failing mysteriously
-  if (!worker.evaluatorHooked && mode !== 'isolated') console.warn('[vitest-guard] could not hook Vitest\'s module loader (unsupported Vitest version?): globals that packages define at import are deleted after each file. Pin vitest >=5.1 <6, or list such globals in keepGlobals.');
+  if (!worker.evaluatorHooked && mode !== 'isolated') console.warn('[vitest-guard] could not hook Vitest\'s module loader (unsupported Vitest version?): globals that packages define at import are deleted after each file. Pin vitest >=4.1 <6, or list such globals in keepGlobals.');
   try {
     for (const [owner, name, multi] of [[Object, 'defineProperty', false], [Object, 'defineProperties', true], [Reflect, 'defineProperty', false]]) {
       const orig = owner[name];
@@ -1300,6 +1301,15 @@ beforeAll(async () => {
 });
 async function beforeAllBody() {
   file = rel(expect.getState().testPath);
+  // vm mode promises a fresh realm per test file. Vitest 4.1 hands several files to one vm context when a vm project
+  // runs with maxWorkers 1 (defineVitestGuardConfig's vm-file-isolation plugin prevents that); if a second file still
+  // reaches this context, its globals and DOM come from the previous file: refuse (fail closed) instead of a false green.
+  if (inVm) {
+    const prevFile = globalThis[VM_CTX];
+    if (prevFile !== undefined && prevFile !== file) throw new Error(`[vitest-guard] vm mode: ${safety.sanitize(file)} runs in the same vm context as ${safety.sanitize(prevFile)} (globals and the DOM are shared, not fresh). ` +
+      'Vitest 4.1 does this for vm pools with maxWorkers 1: use defineVitestGuardConfig (its plugin sets isolate: true there), keep the plugin in projects that do not inherit the root config, or upgrade to Vitest 5.');
+    try { Object.defineProperty(globalThis, VM_CTX, { value: file, configurable: true, enumerable: false, writable: false }); } catch {}
+  }
   worker.current = file;
   worker.seq++;
   heapStart = v8.getHeapStatistics().used_heap_size;

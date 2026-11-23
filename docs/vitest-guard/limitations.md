@@ -2,9 +2,29 @@
 
 ## Depends on Vitest internals
 
-- Vitest `>=5.1 <6` (developed against 5.1.1; CI tests only the version in the lockfile, 5.1.1, so 5.1.0 and later 5.x releases are accepted by the peer range but untested). The shared-mode planner relies on how Vitest 5.1.1 groups
-  specs and hands them to workers (`groupSpecs` / `pool.run`): with `isolate: false` and `maxWorkers: 1`, one
-  project's files go to one worker in sequencer order. A Vitest change here would break the lane model.
+- Vitest `>=4.1 <6` (since 0.1.0-alpha.4). Developed against 5.1.1, the version in the lockfile that CI tests.
+  4.1.8 was tested by hand: the full test suite ran green against a Vitest 4.1.8 install. Other 4.1.x and 5.x
+  releases fit the peer range but have not been tested. The shared-mode planner relies on how Vitest groups specs
+  and hands them to workers (`groupSpecs` / `pool.run`, the same in 4.1 and 5.1): with `isolate: false` and
+  `maxWorkers: 1`, one project's files go to one worker in sequencer order. A Vitest change here would break the
+  lane model.
+- Vitest 4.1 behaves differently from 5 in two ways that vitest-guard handles itself:
+  - **vm pools with one worker.** Vitest 4.1 resolves `isolate: false` for `vmThreads` / `vmForks`. With
+    `maxWorkers: 1` it then sends all of a project's files in one run request, and the vm worker creates one vm
+    context per request. All those files share one realm (globals, DOM, `document.title`, a mocked `fetch`), so vm
+    mode turns into an unreset shared mode. Vitest 5 never batches vm pools. This happens with vitest-guard's
+    single-worker lanes (`verify` forward / reversed), with `maxWorkers: 1`, and by default on 2-CPU machines.
+    On Vitest < 5, defineVitestGuardConfig adds a plugin (`vitest-guard:vm-file-isolation`). The plugin sets
+    `isolate: true` on every vm project whose worker count is not provably above 1. Each file then gets its own
+    run request in a fresh worker. That is correct but slower, because the worker is not reused. If a second test
+    file still reaches the same vm context (for example, the plugin was removed), the setup file fails that file
+    instead of letting it pass (fail closed). Because those single-worker vm runs do not reuse a worker on 4.1,
+    `verify --mode vm` lanes cannot see state that one file leaves in the worker process for the next (outside the
+    vm context, e.g. `process.env` or a native addon). The `gate` order, which reuses workers, still can.
+  - **Inline projects inherit the root config** only with `extends: true` on Vitest 4, but by default on Vitest
+    5 (unless `extends: false`). vitest-guard moves the root `setupFiles` into each project and follows the rule
+    of the installed major. On 5.x a project without `extends` keeps the root setup files. Before alpha.4 they
+    were dropped there.
 - It reads Vitest's JSON reporter output, `test.provide`/`inject`, `vitest list --filesOnly --json`, and the
   `BaseSequencer` of the running Vitest. A vitest-guard sequencer imports it from the project's Vitest.
 - Mitigations for risks exist only where they were reproduced or confirmed in Vitest docs/source. Newer Vitest

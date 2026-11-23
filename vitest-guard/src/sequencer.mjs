@@ -1,5 +1,5 @@
 // Sequencer that runs files in the order of a vitest-guard plan lane (VITEST_GUARD_LANE_FILE = json list of
-// root-relative paths, or { project, files }). With isolate:false + maxWorkers:1 Vitest 5.1.1 batches every file
+// root-relative paths, or { project, files }). With isolate:false + maxWorkers:1 Vitest 5.1.1 (and 4.1) batches every file
 // of the project into ONE worker run request in sequencer order (groupSpecs in vitest/dist/chunks/index.*.js),
 // so the order here is exactly the execution order in the shared worker.
 //
@@ -20,7 +20,7 @@ export async function importFromProject(root, spec) {
   for (const b of bases) {
     try { return await import(pathToFileURL(createRequire(b).resolve(spec)).href); } catch (e) { last = e; }
   }
-  throw new Error(`[vitest-guard] cannot resolve '${spec}' from ${root}: install vitest (>=5.1 <6) in that project. (${last?.message})`);
+  throw new Error(`[vitest-guard] cannot resolve '${spec}' from ${root}: install vitest (>=4.1 <6) in that project. (${last?.message})`);
 }
 
 export default class VitestGuardSequencer {

@@ -10,7 +10,7 @@ export function vitestBin(root) {
   const rq = createRequire(path.join(root, 'package.json'));
   // always the PROJECT's Vitest, never one next to vitest-guard (symlinked installs, monorepos)
   let pkg;
-  try { pkg = rq.resolve('vitest/package.json'); } catch { throw new Error(`vitest is not installed in ${root} (vitest-guard needs the project's own vitest >=5.1 <6: npm i -D vitest)`); }
+  try { pkg = rq.resolve('vitest/package.json'); } catch { throw new Error(`vitest is not installed in ${root} (vitest-guard needs the project's own vitest >=4.1 <6: npm i -D vitest)`); }
   return path.join(path.dirname(pkg), 'vitest.mjs');
 }
 

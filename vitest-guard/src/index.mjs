@@ -1,9 +1,10 @@
-// defineVitestGuardConfig(userConfig, guardOptions) – turns a plain Vitest 5 config into a fast, guarded one.
+// defineVitestGuardConfig(userConfig, guardOptions) – turns a plain Vitest 4.1 / 5 config into a fast, guarded one.
 import fs from 'node:fs';
 import os from 'node:os';
 import v8 from 'node:v8';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import VitestGuardSequencer from './sequencer.mjs';
 import { validateTestPaths, sanitize, escapeGlob, isInside, globProjectFiles } from './safety.mjs';
 import { readStateJson, readStateFile, writeStateFile } from './statefs.mjs';
@@ -55,6 +56,63 @@ export function setupFileFor(root, file = SETUP_FILE) {
   localCache.set(key, out);
   return out;
 }
+const majorCache = new Map();
+/**
+ * @internal Major version of the Vitest the project at `root` resolves (its own copy, else the one next to the cwd),
+ * null when none is found. VITEST_GUARD_VITEST_MAJOR overrides it (tests).
+ */
+export function vitestMajor(root) {
+  const forced = Number(process.env.VITEST_GUARD_VITEST_MAJOR);
+  if (Number.isInteger(forced) && forced > 0) return forced;
+  if (majorCache.has(root)) return majorCache.get(root);
+  let major = null;
+  for (const b of [path.join(root, 'package.json'), path.join(process.cwd(), 'package.json')]) {
+    try {
+      const pkg = createRequire(b).resolve('vitest/package.json');
+      const m = Number(String(JSON.parse(fs.readFileSync(pkg, 'utf8')).version).split('.')[0]);
+      if (Number.isInteger(m)) { major = m; break; }
+    } catch {}
+  }
+  majorCache.set(root, major);
+  return major;
+}
+
+/**
+ * Does an inline project inherit the root config? Vitest 4 only with `extends: true`; Vitest 5 by default (unless
+ * `extends: false` or a config-file path). An unknown version is treated as Vitest 5 (the developed-against line).
+ */
+export function inheritsRoot(p, major) {
+  if (major !== null && major < 5) return p?.extends === true;
+  return p?.extends !== false && typeof p?.extends !== 'string';
+}
+
+const VM_POOLS = new Set(['vmThreads', 'vmForks']);
+/**
+ * Vitest 4.1 resolves `isolate: false` for the vm pools and, with `maxWorkers: 1`, hands every file of a project to
+ * ONE worker run request (groupSpecs) - and a vm worker creates ONE vm context per run request, so all those files
+ * share one realm (globals, DOM, the jsdom document): vm mode silently becomes an unreset shared mode. Vitest 5
+ * excludes the vm pools from that batching. This plugin makes such projects `isolate: true` on Vitest < 5 (each
+ * file its own run request, in a fresh worker): correct, slower only where maxWorkers is 1 (lanes, 2-CPU machines).
+ * The setup file still refuses a vm context that a second test file reaches (fail closed).
+ */
+export function vmFileIsolationPlugin() {
+  return {
+    name: 'vitest-guard:vm-file-isolation',
+    configureVitest({ vitest }) {
+      const major = Number(String(vitest?.version ?? '').split('.')[0]);
+      if (major >= 5) return;
+      for (const p of vitest?.projects || []) {
+        const c = p?.config;
+        if (!c || !VM_POOLS.has(c.pool) || c.isolate !== false) continue;
+        let w = c.maxWorkers || vitest.config?.maxWorkers;
+        if (!w) { const n = os.availableParallelism(); w = vitest.config?.watch ? Math.max(Math.floor(n / 2), 1) : Math.max(n - 1, 1); }
+        if (!(typeof w === 'number' && w > 1)) c.isolate = true; // anything not provably > 1: isolate (fail closed)
+      }
+    },
+  };
+}
+const withVmPlugin = (plugins) => [...[].concat(plugins || []), vmFileIsolationPlugin()];
+
 export const DEFAULT_INCLUDE = ['**/*.{test,spec}.?(c|m)[jt]s?(x)'];
 export const DEFAULT_EXCLUDE = ['**/node_modules/**', '**/.git/**'];
 
@@ -243,7 +301,7 @@ function autoConfig(userConfig, g, root) {
       if (!p || typeof p !== 'object') return p;
       const pt = { ...(p.test || {}) };
       if (g.respectPools && pt.pool !== undefined) return p;
-      const env = pt.environment ?? (p.extends === true ? test.environment : undefined);
+      const env = pt.environment ?? (inheritsRoot(p, vitestMajor(root)) ? test.environment : undefined);
       const name = projectName(pt);
       const mode = pick(name, DOM_ENVS.has(env));
       groups[name] = mode;
@@ -319,6 +377,8 @@ function buildConfig(userConfig, g) {
   const test = { ...(userConfig.test || {}) };
   if (test.poolOptions) console.warn('[vitest-guard] test.poolOptions was removed in Vitest 4 and is ignored (use vmMemoryLimit / maxWorkers).');
   const root = path.resolve(userConfig.root || test.root || process.cwd());
+  const major = vitestMajor(root);
+  const needVmPlugin = major === null || major < 5; // Vitest 4.1: vm files batched into one context (vmFileIsolationPlugin)
   const quarantineFile = '.vitest-guard/incompatible.json';
   const laneFile = process.env.VITEST_GUARD_LANE_FILE;
   const lane = laneFile ? readLane(laneFile) : null;
@@ -374,7 +434,7 @@ function buildConfig(userConfig, g) {
         continue;
       }
       const pt = { ...(p.test || {}) };
-      const inherits = p.extends === true;
+      const inherits = inheritsRoot(p, major);
       const name = projectName(pt);
       const { mode, keepPool } = projectMode(envMode, pt, inherits ? test : null, g.mode);
       const pool = poolFor(mode, keepPool, pt, inherits ? test : null, g);
@@ -390,7 +450,7 @@ function buildConfig(userConfig, g) {
         const projRoot = path.resolve(root, typeof (pt.root ?? p.root) === 'string' ? pt.root ?? p.root : '.');
         const files = validateTestPaths(projRoot, laneEntriesFor(projRoot, lane.files), { include, exclude, label: 'VITEST_GUARD_LANE_FILE', warn: lane.project !== null }).ok;
         if (!files.length) continue;
-        projects.push({ ...p, test: { ...pt, ...pool, ...seq, include: files.map(escapeGlob), exclude, setupFiles, provide: provide(mode) } });
+        projects.push({ ...p, ...(mode === 'vm' && needVmPlugin && !inherits ? { plugins: withVmPlugin(p.plugins) } : {}), test: { ...pt, ...pool, ...seq, include: files.map(escapeGlob), exclude, setupFiles, provide: provide(mode) } });
         continue;
       }
       const qm = mode !== 'isolated' ? quarantine()[mode] : null;
@@ -404,7 +464,9 @@ function buildConfig(userConfig, g) {
         quarantined = v.ok;
         for (const x of pairs) if (v.map.has(x.rel)) { claimed.add(`${mode}\0${x.key}`); if (v.map.get(x.rel) !== x.rel) remaps.push({ mode, key: x.key, to: x.key.slice(0, x.key.length - x.rel.length) + v.map.get(x.rel) }); }
       }
-      projects.push({ ...p, test: { ...pt, ...pool, ...seq, include, exclude: [...exclude, ...quarantined.map(escapeGlob)], setupFiles, provide: provide(mode) } });
+      // Vitest 4: a project that does not inherit the root config does not get the root plugins either
+      const vmPlugins = mode === 'vm' && needVmPlugin && !inherits ? { plugins: withVmPlugin(p.plugins) } : {};
+      projects.push({ ...p, ...vmPlugins, test: { ...pt, ...pool, ...seq, include, exclude: [...exclude, ...quarantined.map(escapeGlob)], setupFiles, provide: provide(mode) } });
       if (quarantined.length) projects.push({ ...p, test: { ...pt, name: `${name || 'project'}:isolated`, pool: 'forks', isolate: true, include: quarantined.map(escapeGlob), exclude, setupFiles: isoSetup, provide: provide('isolated') } });
     }
     // F9: report quarantine entries that no project accepted
@@ -419,6 +481,7 @@ function buildConfig(userConfig, g) {
     }
     for (const r of remaps) warnOnce(`[vitest-guard] ${sanitize(quarantineFile)} (${r.mode}) entry ${sanitize(JSON.stringify(r.key), 200)} is spelled differently on disk (case or Unicode form): applied to ${sanitize(JSON.stringify(r.to), 200)}; re-spell the key (\`vitest-guard check\` rewrites it)`);
     if (anyVm) out.test.vmMemoryLimit = vmLimit();
+    if (anyVm && needVmPlugin) out.plugins = withVmPlugin(userConfig.plugins);
     out.test.projects = projects;
     return out;
   }
@@ -439,6 +502,7 @@ function buildConfig(userConfig, g) {
     return out;
   }
   const fast = mode === 'vm' ? { pool: 'vmThreads', vmMemoryLimit: vmLimit() } : { pool: g.sharedPool || 'threads', isolate: false };
+  if (mode === 'vm' && needVmPlugin) out.plugins = withVmPlugin(userConfig.plugins);
 
   if (lane) {
     // one lane of a shared-mode plan: exactly these (validated) files, one worker, plan order
