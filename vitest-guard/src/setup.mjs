@@ -296,6 +296,9 @@ if (mode === 'shared' && !worker.patched) {
   };
   const watched = (o) => o === globalThis || (o != null && (o === worker.navRef || o === worker.navProto));
   worker.evaluatorHooked = await hookEvaluator();
+  // R4: without the module-loader hook, globals packages define at import cannot be told apart and are deleted after
+  // every file (fails red, never green); say so once per worker instead of failing mysteriously
+  if (!worker.evaluatorHooked && mode !== 'isolated') console.warn('[vitest-guard] could not hook Vitest\'s module loader (unsupported Vitest version?): globals that packages define at import are deleted after each file. Pin vitest >=5.1 <6, or list such globals in keepGlobals.');
   try {
     for (const [owner, name, multi] of [[Object, 'defineProperty', false], [Object, 'defineProperties', true], [Reflect, 'defineProperty', false]]) {
       const orig = owner[name];
@@ -599,7 +602,18 @@ afterAll(async ({}, suite) => { // Vitest 5: fixtures first (must be destructure
         const who = worker.globalWho?.get(k);
         if (who === 'lib') { (worker.keysKnown ??= new Set()).add(k); continue; }
         // B1: no recorded origin (a plain assignment) = fail closed, deleted like the test file's own
-        if (who === undefined || who === 'file' || (who === 'project' && opts.resetModules)) { try { delete globalThis[k]; } catch {} if (!hasOwn.call(globalThis, k)) worker.globalWho.delete(k); }
+        if (who === undefined || who === 'file' || (who === 'project' && opts.resetModules)) {
+          try { delete globalThis[k]; } catch {}
+          if (!hasOwn.call(globalThis, k)) { worker.globalWho.delete(k); if (who === undefined) (worker.unknownDeleted ??= new Set()).add(k); }
+        }
+      }
+      // a package that creates its global lazily (inside a function a test calls) loses it here; name such globals once
+      // per worker so a later false red can be traced to `keepGlobals`
+      const fresh = [...(worker.unknownDeleted || [])].filter((k) => !(worker.unknownWarned ??= new Set()).has(k));
+      if (fresh.length) {
+        for (const k of fresh) worker.unknownWarned.add(k);
+        log({ t: 'deleted-globals', file, keys: fresh.slice(0, 50) });
+        if (worker.unknownWarned.size === fresh.length) console.warn(`[vitest-guard] deleted global(s) of unknown origin after ${file}: ${fresh.slice(0, 10).join(', ')}${fresh.length > 10 ? ', ...' : ''} (as a fresh fork would not have them). If a later file fails because a package created one of these lazily, add it to keepGlobals.`);
       } }
     // S5 (alpha.3): navigator properties go back to what they were after this file's setup files (a package that
     // overrode one at load, or a cached project module without resetModules, keeps it and is reported)
