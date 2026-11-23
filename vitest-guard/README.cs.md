@@ -13,7 +13,7 @@
 
 *English version: [README.md](README.md).*
 
-Vrstva, díky které jdou ve Vitestu 5.1.1 bezpečně zapnout oba rychlé režimy:
+Vrstva, díky které jdou ve Vitestu bezpečně zapnout oba rychlé režimy (podporovaný Vitest `>=4.1 <6`; v CI se testuje 4.1 a 5.1; měření níže: Vitest 5.1.1):
 
 | režim | Vitest | CPU na heavy podmnožině (39 souborů / 390 testů) |
 |---|---|---|

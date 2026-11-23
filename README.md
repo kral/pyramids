@@ -12,7 +12,7 @@ vto makes a Vitest suite answer in seconds instead of minutes, for people and fo
 
 Status: **alpha**. `@jirikral/vitest-guard` is on npm under the dist-tag `next` (`npm i -D @jirikral/vitest-guard@next`);
 vto itself is used from source. Linux, macOS and Windows are tested in CI
-(Node `^22.22.2 || >=24.15.0`, Vitest 5.1).
+(Node `^22.22.2 || >=24.15.0`, Vitest 4.1 or 5.1).
 
 > Do not run `npx vto` or `npx vitest-guard`: those unscoped npm names are not ours, and whoever owns them would
 > run their code on your machine. Use the local copy as shown below; vitest-guard alone: install it from npm as above.

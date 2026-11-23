@@ -4,6 +4,9 @@
 # `vitest run`, compare, check and verify in vm and shared mode, and injects two faults with an exact expected
 # exit code (a leaked global must be a false green = 5, a real failure must be 1). Results: job summary + artifact.
 #
+# Every leg runs on Vitest 5 (the lockfile's 5.1.1) and on Vitest 4.1 (4.1.8 installed over it, same plugin-react
+# and jsdom; both accept Vitest 4.1), with the same expectations.
+#
 # Runs by hand (Actions → vitest-guard-trial → Run workflow; size = test files per module, 8 ≈ 300 files /
 # 3000 tests) and when the workflow, the trial script or vitest-guard changes on main.
 name: vitest-guard-trial
@@ -32,15 +35,17 @@ concurrency:
 
 jobs:
   trial:
-    name: trial (${{ matrix.os }})
+    name: trial (${{ matrix.os }}, vitest ${{ matrix.vitest }})
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-15, windows-2025]
+        vitest: ['5', '4.1']
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     env:
       FILES_PER_MODULE: ${{ github.event.inputs.files_per_module || '3' }}
+      VITEST_AXIS: ${{ matrix.vitest }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -60,7 +65,11 @@ jobs:
         run: |
           cd vitest-guard
           TGZ=$(npm pack --pack-destination "$RUNNER_TEMP" | tail -n 1)
-          cd "$RUNNER_TEMP/vg-proj" && npm install --no-save --ignore-scripts --no-audit --no-fund "$RUNNER_TEMP/$TGZ"
+          # one install for both: a later `npm install --no-save` would prune the other (extraneous) package.
+          # Vitest 4.1 replaces the lockfile's 5.1.1 here; plugin-react 6 and jsdom 31 accept it (vite ^8 is shared).
+          EXTRA=""; [ "$VITEST_AXIS" = "4.1" ] && EXTRA="vitest@4.1.8"
+          cd "$RUNNER_TEMP/vg-proj" && npm install --no-save --ignore-scripts --legacy-peer-deps --no-audit --no-fund "$RUNNER_TEMP/$TGZ" $EXTRA
+          node -e "const v=require('vitest/package.json').version; console.log('vitest '+v); if(process.env.VITEST_AXIS==='4.1'?!v.startsWith('4.1.'):!v.startsWith('5.')){process.exit(1)}"
       - name: Trial
         shell: bash
         run: node .github/scripts/vg-trial.mjs "$RUNNER_TEMP/vg-proj" "$RUNNER_TEMP/vg-out"
@@ -68,6 +77,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: vitest-guard-trial-${{ matrix.os }}
+          name: vitest-guard-trial-${{ matrix.os }}-vitest${{ matrix.vitest }}
           path: ${{ runner.temp }}/vg-out
           retention-days: 14

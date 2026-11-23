@@ -13,7 +13,7 @@
 
 *Czech version: [README.cs.md](README.cs.md).*
 
-vitest-guard makes the two fast Vitest 5.1.1 modes safe to switch on:
+vitest-guard makes the two fast Vitest modes safe to switch on (supported Vitest `>=4.1 <6`; 4.1 and 5.1 are tested in CI; timings below: Vitest 5.1.1):
 
 | mode | Vitest | heavy suite, 312 files / 3193 tests, CPU s |
 |---|---|---|

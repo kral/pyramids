@@ -5,6 +5,7 @@
 //   node .github/scripts/ci.mjs <step>… [--allow-skips]
 //   steps: install lint smoke analyzer collector mcp tui vitest-guard verify oddpath | all
 //   (`all` = everything except `install`; run `install` once on a fresh clone)
+//   VG_VITEST=<x.y.z> with the vitest-guard step: install that Vitest (--no-save) first, e.g. VG_VITEST=4.1.8
 //
 // Rules enforced here (REVIEW-2 A-4 / U-9):
 //   - a SKIPPED test is a failure unless it is on the platform allow-list below or the caller
@@ -176,6 +177,15 @@ const STEPS = {
 
   'vitest-guard'() {
     need('vitest-guard/node_modules/vitest', 'npm --prefix vitest-guard ci --ignore-scripts');
+    // VG_VITEST=4.1.8: run the suite against another Vitest than the lockfile's (not saved, lockfile untouched)
+    const vg = process.env.VG_VITEST;
+    if (vg) {
+      if (!/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(vg)) fail(`VG_VITEST must be an exact version such as 4.1.8, got "${vg}"`);
+      sh('npm', ['install', '--no-save', '--ignore-scripts', '--legacy-peer-deps', '--no-audit', '--no-fund', `vitest@${vg}`], { cwd: path.join(REPO, 'vitest-guard') });
+      const have = JSON.parse(fs.readFileSync(path.join(REPO, 'vitest-guard/node_modules/vitest/package.json'), 'utf8')).version;
+      if (have !== vg) fail(`expected vitest ${vg} in vitest-guard/node_modules, found ${have}`);
+      process.stdout.write(`  vitest-guard runs against vitest ${have}\n`);
+    }
     const pkg = JSON.parse(fs.readFileSync(path.join(REPO, 'vitest-guard/package.json'), 'utf8'));
     if (pkg.scripts?.['check:bundle']) node([path.join(REPO, 'vitest-guard/scripts/bundle-setup.mjs'), '--check'], { cwd: path.join(REPO, 'vitest-guard') });
     nodeTests(path.join(REPO, 'vitest-guard'), testFiles(path.join(REPO, 'vitest-guard/test')), { VITEST_GUARD_TEST_NO_INTEGRATION: '' });

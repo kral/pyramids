@@ -3,7 +3,7 @@
 vitest-guard makes Vitest's two fast execution modes safe enough to use as the default for a whole suite. This page is
 the one-page overview; the other pages go deeper.
 
-> Status: pre-release `0.1.0-alpha.3`, published on npm under the dist-tag `next`: `npm i -D @jirikral/vitest-guard@next`
+> Status: pre-release `0.1.0-alpha.4`, published on npm under the dist-tag `next`: `npm i -D @jirikral/vitest-guard@next`
 > (pnpm: `pnpm add -D @jirikral/vitest-guard@next`, yarn: `yarn add -D @jirikral/vitest-guard@next`). Run the CLI through
 > an npm script or `node node_modules/@jirikral/vitest-guard/bin/vitest-guard.mjs`. **Never run `npx vitest-guard`**: the
 > unscoped name `vitest-guard` is not ours, and whoever owns it would run their code on your machine.
@@ -46,7 +46,7 @@ measurements (`vitest-guard calibrate`).
 
 - A suite of hundreds of files whose CPU time is dominated by per-file setup (jsdom/happy-dom, heavy imports).
 - You can afford a nightly isolated run and a one-time `compare`/`verify` pass.
-- Vitest >= 5.1 and < 6, Node `^22.22.2 || >=24.15.0`.
+- Vitest `>=4.1 <6` (4.1 and 5.1 are tested in CI), Node `^22.22.2 || >=24.15.0`.
 
 ## When not to use it
 

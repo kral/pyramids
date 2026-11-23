@@ -26,6 +26,7 @@ import base from './vitest.plain.config';
 export default defineVitestGuardConfig(base, { mode: 'vm' });
 `);
 
+const vitestVersion = JSON.parse(fs.readFileSync(path.join(proj, 'node_modules', 'vitest', 'package.json'), 'utf8')).version;
 const results = [];
 let failed = 0;
 function step(name, args, { expect, vitest = false } = {}) {
@@ -48,7 +49,7 @@ function step(name, args, { expect, vitest = false } = {}) {
 }
 
 const count = (dir) => fs.readdirSync(dir, { recursive: true }).filter((f) => /\.test\.tsx?$/.test(String(f))).length;
-console.log(`project: ${count(path.join(proj, 'test'))} test files, node ${process.version}, ${process.platform}`);
+console.log(`project: ${count(path.join(proj, 'test'))} test files, vitest ${vitestVersion}, node ${process.version}, ${process.platform}`);
 
 // 1. baseline: plain Vitest (forks)
 step('baseline vitest run (forks)', ['run', '--config', 'vitest.plain.config.ts', '--reporter=dot'], { vitest: true, expect: [0, 1] });
@@ -126,10 +127,10 @@ for (const f of ['incompatible.json', 'conflicts.json']) {
   const p = path.join(proj, '.vitest-guard', f);
   if (fs.existsSync(p)) fs.copyFileSync(p, path.join(out, f));
 }
-const md = [`### vitest-guard trial · ${process.platform} · node ${process.version}`, '', '| step | exit | expected | wall s |', '|---|---|---|---|',
+const md = [`### vitest-guard trial · vitest ${vitestVersion} · ${process.platform} · node ${process.version}`, '', '| step | exit | expected | wall s |', '|---|---|---|---|',
   ...results.map((r) => `| ${r.ok ? '✅' : '❌'} ${r.name} | ${r.exit} | ${r.expect ? r.expect.join(' / ') : '–'} | ${r.wallS} |`), ''].join('\n');
 fs.writeFileSync(path.join(out, 'summary.md'), md);
-fs.writeFileSync(path.join(out, 'results.json'), JSON.stringify({ platform: process.platform, node: process.version, results }, null, 2));
+fs.writeFileSync(path.join(out, 'results.json'), JSON.stringify({ vitest: vitestVersion, platform: process.platform, node: process.version, results }, null, 2));
 if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md + '\n');
 console.log(md);
 process.exit(failed ? 1 : 0);
