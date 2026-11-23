@@ -41,7 +41,7 @@ export default class VitestGuardSequencer {
     const rank = new Map(order.map((f, i) => [f, i]));
     // R4: lane entries are relative to the directory the CLI runs Vitest in (`base`), not to a project's own `root`
     const base = typeof raw?.base === 'string' ? raw.base : process.cwd();
-    let realBase = base; try { realBase = fs.realpathSync(base); } catch {}
+    let realBase = base; try { realBase = fs.realpathSync.native(base); } catch {}
     const relOf = (s) => { const r = path.relative(base, s.moduleId).split(path.sep).join('/'); return rank.has(r) ? r : path.relative(realBase, s.moduleId).split(path.sep).join('/'); };
     // B1: files of other (unguarded, e.g. config-file) projects are not in the lane: they keep their order after the lane.
     // Only when no file matches at all is the base wrong and the lane order cannot be applied (verify's per-worker

@@ -16,7 +16,7 @@ export const SETUP_FILE = fileURLToPath(new URL('./setup.bundle.mjs', import.met
 /** last setup file in shared mode: marks the end of the setup files (see setup-tail.mjs) */
 export const SETUP_TAIL_FILE = fileURLToPath(new URL('./setup-tail.mjs', import.meta.url));
 
-const realOr = (p) => { try { return fs.realpathSync(p); } catch { return p; } };
+const realOr = (p) => { try { return fs.realpathSync.native(p); } catch { return p; } };
 const localCache = new Map();
 /**
  * Path of one of vitest-guard's setup files as Vitest of the project at `root` can load it.

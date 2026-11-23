@@ -40,7 +40,9 @@ function parseArgs(argv) {
 }
 
 export function ctx(o) {
-  const root = path.resolve(o.root || process.cwd());
+  // canonical root (realpathSync.native: on Windows it also expands 8.3 short names such as RUNNER~1, which Vitest
+  // reports in long form - otherwise every listed file looks outside the root)
+  let root = path.resolve(o.root || process.cwd()); try { root = fs.realpathSync.native(root); } catch {}
   const dir = path.join(root, '.vitest-guard');
   const config = o.config ? path.resolve(o.config) : findConfigFile(root) || undefined;
   // A4: committed state = .vitest-guard/{incompatible,conflicts}.json only; everything volatile lives in .vitest-guard/run/

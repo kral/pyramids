@@ -173,7 +173,7 @@ function checkEntry(root, entry, include, exclude, names = new Map(), files = nu
   return { path: p };
 }
 
-function safeRealpath(p) { try { return fs.realpathSync(p); } catch { return null; } }
+function safeRealpath(p) { try { return fs.realpathSync.native(p); } catch { return null; } }
 
 /** Keep only well-formed conflict edges whose both ends are in `files` (an already validated list). */
 export function validEdges(edges, files) {

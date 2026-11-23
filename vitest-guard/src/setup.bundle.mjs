@@ -829,7 +829,7 @@ function checkEntry(root, entry, include, exclude, names = new Map(), files = nu
   return { path: p };
 }
 
-function safeRealpath(p) { try { return fs.realpathSync(p); } catch { return null; } }
+function safeRealpath(p) { try { return fs.realpathSync.native(p); } catch { return null; } }
 
 /** Keep only well-formed conflict edges whose both ends are in `files` (an already validated list). */
 function validEdges(edges, files) {
@@ -1068,7 +1068,7 @@ if (opts.react !== false && worker.react === null) {
   worker.react = 'ok';
   try {
     const rq = createRequire(path.join(root, 'package.json'));
-    const real = (p) => fs.realpathSync(p);
+    const real = (p) => fs.realpathSync.native(p);
     const fromRoot = real(rq.resolve('react'));
     const seen = { '<root>': fromRoot };
     // only packages the project itself declares (a nested project must not pick up a parent's node_modules)

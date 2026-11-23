@@ -191,7 +191,7 @@ if (opts.react !== false && worker.react === null) {
   worker.react = 'ok';
   try {
     const rq = createRequire(path.join(root, 'package.json'));
-    const real = (p) => fs.realpathSync(p);
+    const real = (p) => fs.realpathSync.native(p);
     const fromRoot = real(rq.resolve('react'));
     const seen = { '<root>': fromRoot };
     // only packages the project itself declares (a nested project must not pick up a parent's node_modules)
