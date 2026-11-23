@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { project, wrappedConfig, cli, vitestRun, integration, readJson, pkgDir, vitestDir } from './helpers.mjs';
+import { project, wrappedConfig, cli, vitestRun, integration, readJson, pkgDir, vitestDir, VITEST_MAJOR } from './helpers.mjs';
 
 // without a cache Vitest runs bigger files first: the padding makes the polluter run before its victims
 const PAD = '// ' + 'polluter runs first '.repeat(20) + '\n';
@@ -50,6 +50,8 @@ test('U-2: check / compare / calibrate / verify refuse a config that is not wrap
   assert.equal(ok.code, 0, ok.out); assert.match(ok.out, /vm: 2 files, 0 failing/);
 });
 
+// Vitest 4.1 with maxWorkers 1 runs each vm file in a fresh worker (see limitations.md): no worker-level state carries over
+const V4_FRESH_WORKERS = VITEST_MAJOR !== null && VITEST_MAJOR < 5;
 test('C-M7: a failure that is deterministic in vm (alone, or after a polluter) is quarantined with exit 4; only a pass on a same-conditions retry is FLAKY (exit 1)', integration, () => {
   const marker = path.join(fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'vmg-flaky-')), 'ran-once');
   const root = project({
@@ -66,9 +68,15 @@ test('C-M7: a failure that is deterministic in vm (alone, or after a polluter) i
   }, { modules: 'real' }); // own node_modules/.vite: Vitest's result cache (failed files first) must not come from another test
   const r = cli(root, ['check', '--mode', 'vm']);
   const q = readJson(path.join(root, '.vitest-guard/incompatible.json'));
-  assert.match(r.out, /ORDER-DEPENDENT in vm \(deterministic, not flaky\): test\/b-victim\.test\.ts fails after test\/a-platform\.test\.ts/, r.out);
-  assert.doesNotMatch(r.out, /FLAKY[^\n]*b-victim/, 'the victim must not be called flaky');
-  assert.deepEqual(q.vm['test/b-victim.test.ts']?.after, ['test/a-platform.test.ts']);
+  if (V4_FRESH_WORKERS) {
+    // Vitest 4.1 + maxWorkers 1: every vm file runs in a fresh worker (vm-file-isolation plugin), so the worker-level
+    // state of a-platform never reaches b-victim: nothing order-dependent to find
+    assert.doesNotMatch(r.out, /(failing|ORDER-DEPENDENT|FLAKY|QUARANTINED)[^\n]*b-victim/, r.out); assert.equal(q.vm['test/b-victim.test.ts'], undefined);
+  } else {
+    assert.match(r.out, /ORDER-DEPENDENT in vm \(deterministic, not flaky\): test\/b-victim\.test\.ts fails after test\/a-platform\.test\.ts/, r.out);
+    assert.doesNotMatch(r.out, /FLAKY[^\n]*b-victim/, 'the victim must not be called flaky');
+    assert.deepEqual(q.vm['test/b-victim.test.ts']?.after, ['test/a-platform.test.ts']);
+  }
   assert.ok(q.vm['test/c-realm.test.ts'], 'vm-incompatible file quarantined');
   assert.match(r.out, /FLAKY[^\n]*test\/d-flaky\.test\.ts/); assert.equal(q.vm['test/d-flaky.test.ts'], undefined, 'flaky files are not quarantined');
   assert.equal(r.code, 1, 'a flaky failure is not "ok": exit 1 (D3), it wins over 4');
@@ -87,6 +95,7 @@ test('C-M7: without the flaky file the same check exits 4 (new quarantine), neve
     ...filler(2),
   }, { modules: 'real' });
   const r = cli(root, ['check', '--mode', 'vm']);
+  if (V4_FRESH_WORKERS) { assert.match(r.out, /vm: 4 files, 0 failing/, r.out); assert.equal(r.code, 0, r.out); return; } // see the test above
   assert.match(r.out, /vm: 4 files, 1 failing test\/b-victim\.test\.ts/, r.out);
   assert.equal(r.code, 4, r.out);
   assert.ok(readJson(path.join(root, '.vitest-guard/incompatible.json')).vm['test/b-victim.test.ts']);
@@ -216,10 +225,12 @@ test('F5: installed through a symlink (npm i -D <path>) - Vitest comes from the 
   assert.equal(l.code, 0, l.out);
 });
 
+const lock0 = () => readJson(path.join(pkgDir, 'package-lock.json'));
 test('install: package metadata lets `npm ci && npm test` work from a clean clone', () => {
   const pkg = readJson(path.join(pkgDir, 'package.json'));
   assert.match(pkg.name, /^@[\w-]+\/vitest-guard$/, 'scoped name: `npx vitest-guard` must never fetch the unrelated npm package');
-  assert.equal(pkg.peerDependencies.vitest, '>=5.1 <6');
+  assert.equal(pkg.peerDependencies.vitest, '>=4.1 <6');
+  assert.equal(lock0().packages[''].peerDependencies.vitest, pkg.peerDependencies.vitest, 'lockfile root mirrors the peer range');
   assert.ok(pkg.devDependencies.vitest && pkg.devDependencies.jsdom, 'own tests need vitest + jsdom');
   const lock = readJson(path.join(pkgDir, 'package-lock.json'));
   assert.equal(lock.packages[''].name, pkg.name); assert.ok(lock.packages['node_modules/vitest']?.version, 'lockfile pins vitest');

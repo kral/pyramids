@@ -1,6 +1,6 @@
 {
   "name": "@jirikral/vitest-guard",
-  "version": "0.1.0-alpha.3",
+  "version": "0.1.0-alpha.4",
   "vitestGuardProtocol": 1,
   "description": "Makes Vitest fast pools (vmThreads, isolate:false) safe: realm shims, leak detection, quarantine, planned shared workers",
   "keywords": [
@@ -49,7 +49,7 @@
     "node": "^22.22.2 || >=24.15.0"
   },
   "peerDependencies": {
-    "vitest": ">=5.1 <6"
+    "vitest": ">=4.1 <6"
   },
   "devDependencies": {
     "jsdom": "^31.0.1",

@@ -21,6 +21,8 @@ try { modulesDir = path.dirname(path.dirname(require.resolve('vitest/package.jso
 if (modulesDir) { try { require.resolve('jsdom'); } catch { missing = 'jsdom'; } }
 export const vitestDir = missing ? null : modulesDir;
 if (missing && !optedOut) throw new Error(`vitest-guard tests need ${missing} (devDependency): run \`npm ci\` in vitest-guard/. To run only the unit tests set VITEST_GUARD_TEST_NO_INTEGRATION=1.`);
+/** major version of the installed Vitest (the suite runs against 5.x in CI and against a 4.1 install by hand) */
+export const VITEST_MAJOR = vitestDir ? Number(JSON.parse(fs.readFileSync(path.join(vitestDir, 'vitest', 'package.json'), 'utf8')).version.split('.')[0]) : null;
 /** node:test options for tests that spawn Vitest */
 export const integration = { skip: optedOut ? 'VITEST_GUARD_TEST_NO_INTEGRATION=1' : false };
 
