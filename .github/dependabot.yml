@@ -22,6 +22,9 @@ updates:
     ignore:
       - dependency-name: 'vitest'
         update-types: ['version-update:semver-major']
+      # TypeScript 7 (native compiler) has no JS compiler API; the collector corpus transpiles with it
+      - dependency-name: 'typescript'
+        update-types: ['version-update:semver-major']
     groups:
       npm-dev:
         dependency-type: development
