@@ -161,6 +161,7 @@ export function readEnv(root) {
   return { files, producer: typeof doc?.producer === 'string' ? doc.producer : null, updatedAt: typeof doc?.updatedAt === 'string' ? doc.updatedAt : null };
 }
 
+const SETTLE_MS = 2000; // a claim untouched this long has no writer left
 const ORPHAN_MS = 10000; // a `.folding` claim older than this belongs to a fold that failed or died
 
 // Windows: replacing a file that another process has open (a concurrent reader) fails with
@@ -269,7 +270,10 @@ export function foldEnvRecords(root, { producer = 'vitest-guard' } = {}) {
   } catch {}
   // a worker that opened the file just before the rename may still append to the claim: a claim that grew after it
   // was read is not deleted (a later fold reads it again; merging the same record twice changes nothing)
-  const drop = () => { for (const [p, n] of done) { try { if (fs.statSync(p).size === n) fs.rmSync(p, { force: true }); } catch {} } };
+  // A size check alone races: an append can land between the stat and the unlink (lost record, seen on macOS CI).
+  // Delete a claim only once it has also been quiet for SETTLE_MS (no writer appends that long after opening the file);
+  // a younger one stays and is read again by a fold after ORPHAN_MS (merging the same record twice changes nothing).
+  const drop = () => { for (const [p, n] of done) { try { const st = fs.statSync(p); if (st.size === n && Date.now() - st.mtimeMs >= SETTLE_MS) fs.rmSync(p, { force: true }); } catch {} } };
   if (!recs.length) { drop(); return readEnv(root).files; }
   // vto raw records only fill gaps (the daemon folds them with its own rules too); own records use the full precedence
   const cur = readEnv(root).files;

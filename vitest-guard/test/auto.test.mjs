@@ -57,7 +57,7 @@ test('auto: evidence order - pragma > DOM miss > own probe > vto > static; confi
   assert.match(r.why['m.test.ts'], /failed in node group/);
   assert.match(r.why['d.test.ts'], /never touched DOM/);
   assert.match(r.why['p.test.tsx'], /pragma/);
-  assert.ok(!fs.readdirSync(path.join(root, '.vitest-guard/run')).some((n) => n.startsWith('env-')), 'records folded into env.json');
+  assert.ok(!fs.readdirSync(path.join(root, '.vitest-guard/run')).some((n) => n.startsWith('env-') && n.endsWith('.jsonl')), 'records claimed and folded into env.json (a fresh claim may stay until it settles)');
   assert.deepEqual(readEnvEvidence(root)['m.test.ts'].miss, { key: 'document' }, 'miss is sticky');
   assert.deepEqual(classifyFiles(root, files, 'node', { nodeEnvironment: 'node' }).dom, [], 'configured node environment: nothing moves to dom without a pragma');
 });
