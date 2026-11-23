@@ -206,8 +206,8 @@ are kept; a measured entry is never replaced by a static one.
   "producer": "vto-daemon",
   "updatedAt": "2026-11-21T06:40:47.388Z",
   "files": {
-    "tests/app/App.test.tsx":      { "group": "dom",  "source": "probe",  "env": "jsdom", "dom": true,  "at": "…" },
-    "tests/game/hash.test.ts":     { "group": "node", "source": "probe",  "env": "node",  "dom": false, "at": "…" },
+    "tests/app/Shell.test.tsx":      { "group": "dom",  "source": "probe",  "env": "jsdom", "dom": true,  "at": "…" },
+    "tests/core/hash.test.ts":     { "group": "node", "source": "probe",  "env": "node",  "dom": false, "at": "…" },
     "tests/util/format.test.ts":   { "group": "node", "source": "probe",  "env": "jsdom", "dom": false, "at": "…" },
     "tests/new/Thing.test.tsx":    { "group": "dom",  "source": "static", "at": "…" }
   }

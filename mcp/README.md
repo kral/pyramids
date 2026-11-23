@@ -89,7 +89,7 @@ CPU budget on this box = 1 worker (cores − 1) per single lane; the two lanes g
 | project / run | one lane | two lanes | Δ wall | Δ CPU |
 |---|---|---|---|---|
 | the real-world suite (1992 tests: 113 jsdom + 136 node-env files), full | 408 s / 195 s CPU (their config: vmThreads both projects) | 227 s / 188 s CPU | **−44 %** | −4 % |
-| the real-world suite, edit `src/game/hash.ts` (180 tests) | 61–68 s / 31.5–32.7 s CPU | 39–44 s / 33.7–37.1 s CPU | **−35 %** | +3 … +14 % |
+| the real-world suite, edit `src/core/hash.ts` (180 tests) | 61–68 s / 31.5–32.7 s CPU | 39–44 s / 33.7–37.1 s CPU | **−35 %** | +3 … +14 % |
 | the real-world suite, one lane with `maxWorkers: 2` (same worker count as two lanes), full | 264 s / 197 s CPU, 11 timeouts under load | 227 s / 188 s CPU, 0 failures | −14 % | −5 % |
 | the real-world suite, one lane `maxWorkers: 2`, edit (180 tests) | 35–69 s / 35–52 s CPU (noisy, timeouts) | 39–44 s / 34–37 s CPU | ≈ | ≈ |
 | bench-project (all jsdom), full | 94 s / 44.8 s CPU (vm) | 98 s / 51.9 s CPU with 8 DOM-free jsdom files in forks | +4 % | **+16 %** |

@@ -409,5 +409,5 @@ suite), so it stays opt-in until verify has been clean for a while.
 ## Lab and tests
 
 Reproductions, fixtures and scripts are in `/home/claude/vmguard-lab` (`repro/*`, `shared/`, `mem/`, `heavy/`,
-`fort/`). Tests: `npm test` (`test/unit.test.mjs`, `test/security.test.mjs`). It needs `vitest` installed;
+`lab/`). Tests: `npm test` (`test/unit.test.mjs`, `test/security.test.mjs`). It needs `vitest` installed;
 without it the integration tests are skipped.
