@@ -50,6 +50,7 @@ says how to resolve it first). The result is a config object; your own keys are 
 | `detectPollution` | boolean | follows `diag` | end-of-file pollution diff (feeds the planner) |
 | `ignoreListeners` | string[] | `[]` | process event names whose added listeners are not reported |
 | `ignoreModules` | string[] | `[]` (+ built-in stylis entries) | node_modules paths whose exports hold scratch state (also learned after 3 consecutive changes) |
+| `keepGlobals` | string[] | `[]` | shared: names of own properties of the global object that the reset after each file never deletes nor reports (escape hatch for a register-once package that sets a global from a hook or a test; see limitations). Vite's / Vitest's own `__vite*` / `__vitest*` / `__VITEST_*` globals and `__coverage__` are always kept |
 | `sharedPool` | `'threads' \| 'forks'` | `'threads'` | pool used by shared mode |
 | `alwaysProjects` | boolean | `false` | emit `test.projects` even without quarantine |
 | `setup` | `'file' \| 'import'` | `'file'` | `'import'`: your first setup file must start with `import '@jirikral/vitest-guard/setup'` (one module less per file) |

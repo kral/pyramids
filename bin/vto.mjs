@@ -152,7 +152,7 @@ function version() {
   try { return JSON.parse(fs.readFileSync(path.join(HOME, 'package.json'), 'utf8')).version ?? 'unknown'; } catch { return 'unknown'; }
 }
 // A message never echoes raw user input: control characters would reach the terminal / CI log.
-const show = (s) => String(s).replace(/[\x00-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, '?').slice(0, 200);
+const show = (s, max = 200) => String(s).replace(/[\x00-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, '?').slice(0, max);
 function fail(msg, code = 2) { process.stderr.write(`vto: ${msg}\n     see vto --help\n`); process.exit(code); }
 
 function nodeOk() {
@@ -249,7 +249,7 @@ async function exec(target, args, env, { forHelp = false } = {}) {
       const g = resolveGuard(root);
       if (g.dir) script = path.join(g.dir, 'bin', 'vitest-guard.mjs');
       if (g.source === 'checkout' && !forHelp) process.stderr.write(`vto: @jirikral/vitest-guard is not installed in ${show(root)}: using the copy in this checkout (${g.version}); install it in the project to run the version that wraps your config\n`);
-    } catch (e) { process.stderr.write(`vto: ${show(e.message)}\n`); return 2; }
+    } catch (e) { process.stderr.write(`vto: ${show(e.message, 2000)}\n`); return 2; } // the whole message: the remedy is at its end
   }
   if (!fs.existsSync(script)) { process.stderr.write(`vto: ${target.node} is missing from this installation (${HOME})\n`); return 2; }
   if (target.needs && !fs.existsSync(path.join(HOME, target.needs)) && !forHelp) { process.stderr.write(`vto: ${target.missing}\n`); return 2; }

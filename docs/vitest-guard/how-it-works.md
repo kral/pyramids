@@ -59,12 +59,15 @@ TanStack online/focus managers, and with `resetModules` `vi.resetModules()` plus
 added. What survives is "residual" and drives conflict edges.
 
 Who registered an equality tester or an interval, added a global or overrode a `navigator` property is read from the
-synchronous part of the stack at that moment (assignments to the global object reach a Proxy in its prototype chain;
-`Object.defineProperty` / `defineProperties` / `Reflect.defineProperty` are wrapped): a frame of the current test
-file makes it the file's (also when it calls a package function that registers), another project frame a project
-module's, only `node_modules` frames a package's. The file's state is removed after it, a project module's only with
-`resetModules` (the module is evaluated again), a package's is kept for the worker (it is cached, as its other
-state). Limits: [limitations.md](limitations.md#known-limits-010-alpha3).
+synchronous part of the stack at that moment (`Object.defineProperty` / `defineProperties` /
+`Reflect.defineProperty` are wrapped): a frame of the current test file makes it the file's (also when it calls a
+package function that registers), another project frame a project module's, only `node_modules` frames a package's.
+Globals that appear while Vitest's module evaluator evaluates a `node_modules` package are the package's. A global
+created by a plain assignment (`globalThis.x = …`) has no recorded origin and counts as the file's (fail closed;
+nothing sits in the prototype chain of the global object, so an assignment to an undeclared identifier still throws
+a `ReferenceError`). The file's state is removed after it, a project module's only with `resetModules` (the module
+is evaluated again), a package's is kept for the worker (it is cached, as its other state); `keepGlobals` names
+globals that are never removed. Limits: [limitations.md](limitations.md#known-limits-010-alpha3).
 
 ## resetModules
 

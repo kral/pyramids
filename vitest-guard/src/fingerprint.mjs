@@ -177,12 +177,19 @@ export function restoreDom(base) {
 }
 
 // S5: own properties of the global object that a file added (globalThis.__cfg = …, window.x = …). The setup file
-// deletes them after the file when the stack showed the test file chain (or a project module, with resetModules) as
-// their origin; a package in node_modules (cached for the whole worker) that defined one on first import keeps it,
-// and a name of unknown origin is reported.
-const LIB_GLOBALS = /^(__vite|__vitest|IS_REACT_ACT_ENVIRONMENT$|__EMOTION_|__REACT_DEVTOOLS_|regeneratorRuntime$|__core-js)/;
+// deletes them after the file unless a package in node_modules (cached for the whole worker) defined it while it was
+// evaluated, or a cached project module did without resetModules; a plain assignment has no recorded origin and is
+// deleted (B1: fail closed).
+// B2 (alpha.3 gate): Vite's and Vitest's own globals in any case (`__vitest_worker__`, `__VITEST_COVERAGE__` - the
+// istanbul store the instrumented modules create during a file and Vitest collects after it -, `__VITEST_MOCKER_ROOT__`,
+// `__vite_ssr_*`) and istanbul's default `__coverage__` are never tracked (never deleted, never reported).
+export const LIB_GLOBALS = /^(?:__vite|__coverage__$|IS_REACT_ACT_ENVIRONMENT$|__EMOTION_|__REACT_DEVTOOLS_|regeneratorRuntime$|__core-js)/i;
+// `keepGlobals` option: names a project declares as worker-lifetime state (a register-once package)
+let keepGlobals = new Set();
+export function setKeepGlobals(names) { keepGlobals = new Set((Array.isArray(names) ? names : []).filter((n) => typeof n === 'string')); }
+export const isKeptGlobal = (k) => LIB_GLOBALS.test(k) || keepGlobals.has(k);
 export function captureGlobalKeys() {
-  try { return new Set(Object.getOwnPropertyNames(globalThis).filter((k) => !LIB_GLOBALS.test(k))); } catch { return new Set(); }
+  try { return new Set(Object.getOwnPropertyNames(globalThis).filter((k) => !isKeptGlobal(k))); } catch { return new Set(); }
 }
 /** keys in `now` that neither `base` nor `known` has */
 export function addedKeys(base, now, known = null) {
