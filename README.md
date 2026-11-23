@@ -20,7 +20,7 @@ vto itself is used from source. Linux, macOS and Windows are tested in CI
 ## Quickstart (from source, about 5 minutes)
 
 ```sh
-git clone https://github.com/kral/pyramids.git vto && cd vto
+git clone https://github.com/kral/vto.git && cd vto
 npm ci --ignore-scripts
 npm --prefix mcp ci --ignore-scripts
 npm --prefix tui ci --ignore-scripts && npm --prefix tui run build   # only for `vto ui`

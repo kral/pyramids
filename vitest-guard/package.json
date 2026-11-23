@@ -14,12 +14,12 @@
   "license": "MIT OR Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kral/pyramids.git",
+    "url": "git+https://github.com/kral/vto.git",
     "directory": "vitest-guard"
   },
-  "homepage": "https://github.com/kral/pyramids/tree/main/docs/vitest-guard",
+  "homepage": "https://github.com/kral/vto/tree/main/docs/vitest-guard",
   "bugs": {
-    "url": "https://github.com/kral/pyramids/issues"
+    "url": "https://github.com/kral/vto/issues"
   },
   "type": "module",
   "bin": {

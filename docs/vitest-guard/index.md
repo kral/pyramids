@@ -71,4 +71,4 @@ measurements (`vitest-guard calibrate`).
 | [security.md](security.md) | what it is not, what it writes, what is validated |
 | [limitations.md](limitations.md) | what does not help, residual risks |
 
-Package README: [vitest-guard/README.md](https://github.com/kral/pyramids/blob/main/vitest-guard/README.md) (measurements and risk tables in detail).
+Package README: [vitest-guard/README.md](https://github.com/kral/vto/blob/main/vitest-guard/README.md) (measurements and risk tables in detail).

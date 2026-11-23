@@ -36,7 +36,7 @@ Mitigations exist **only** for risks that reproduced or that the Vitest docs and
 ## Documentation
 
 Full documentation (getting started, modes, CLI, configuration, internals, CI, troubleshooting, security,
-limitations): [docs/vitest-guard/index.md](https://github.com/kral/pyramids/blob/main/docs/vitest-guard/index.md).
+limitations): [docs/vitest-guard/index.md](https://github.com/kral/vto/blob/main/docs/vitest-guard/index.md).
 
 ## Quick start
 
