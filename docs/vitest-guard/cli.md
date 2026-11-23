@@ -101,7 +101,7 @@ Prints a layer self-time line, the leakiest files by heap delta, dirty file star
 
 ## verify
 
-`vitest-guard verify [filters...] [--sample N|all] [--seed S] [--orders a,b] [--no-quarantine] [--no-plan]`
+`vitest-guard verify [filters...] [--sample N|all] [--seed S] [--orders a,b] [--lanes N] [--no-quarantine] [--no-plan]`
 
 Compares every test of the fast mode with isolated forks. Fast side runs in several orders:
 
@@ -113,7 +113,17 @@ Compares every test of the fast mode with isolated forks. Fast side runs in seve
 | `shuffle` | one worker per project, seeded shuffle (`--seed`) |
 | `planned` | the planner's lanes; needs `--mode shared` |
 
-Default orders: vm `gate,reversed`; shared `gate,forward,reversed`. `--no-plan` removes `planned` (explicitly
+Default orders: vm `gate,reversed`; shared `gate,forward,reversed`. On Vitest < 5 (or when the project's Vitest
+version cannot be read), `--mode vm` without `--orders` skips the single-worker orders (`forward`, `reversed`,
+`shuffle`). There every file of a single-worker vm run gets a fresh vm context and a fresh worker process (the
+`vitest-guard:vm-file-isolation` plugin), so the file order cannot change a result. Those runs only cost time (about
+as long as the forks reference). The `gate` order (workers reused, so it also sees state a file leaves in the worker
+process) and the forks comparison still run. Exit codes stay the same. verify prints why it skipped them and lists
+them in the summary (`orders skipped`). The record (`ordersSkipped`) still counts as a complete vm verify. An explicit
+`--orders` always runs exactly the orders it names, e.g. a nightly full check on 4.1:
+`vitest-guard verify --mode vm --orders gate,forward,reversed`. The lanes of one single-worker order (one per
+project) run side by side, at most `--lanes` at a time (default CPUs - 1). Orders run one after another, so a file
+never runs twice at the same time. `--no-plan` removes `planned` (explicitly
 asking for only `planned` together with `--no-plan` is exit 2). `--sample N` compares a seeded random sample and
 marks the record incomplete (the shared-mode warning of `vitest run` then stays). Results: false green (passes
 fast, fails isolated) -> exit 5; a lane or the reference that did not report every file it was given -> exit 1 and no

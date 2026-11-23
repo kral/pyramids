@@ -6,6 +6,7 @@
 //  - inline projects inherit the root config only with `extends: true` on Vitest 4, by default on Vitest 5.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { project, wrappedConfig, vitestRun, cli, integration, pkgDir } from './helpers.mjs';
@@ -106,4 +107,48 @@ export default c;\n`,
   if (MAJOR >= 5) { assert.equal(r.code, 0, r.log); assert.ok(st.length === 3 && st.every((f) => f.status === 'passed'), r.log); return; } // Vitest 5 never shares a vm context
   assert.notEqual(r.code, 0, r.log);
   assert.ok(st.some((f) => f.status === 'failed' && /runs in the same vm context as/.test(f.message || '')), r.log + JSON.stringify(st));
+});
+
+// verify --mode vm on Vitest 4.1: a single-worker vm lane isolates every file (fresh vm context and worker), so the
+// default skips the order lanes; the gate order and the forks comparison still run
+const okFile = `import { test, expect } from 'vitest'; test('ok', () => { expect(1).toBe(1); });\n`;
+const fgFile = `import { test, expect } from 'vitest'; import { isMainThread } from 'node:worker_threads'; test('fg', () => { expect(isMainThread).toBe(false); });\n`;
+const frFile = `import { test, expect } from 'vitest'; import { isMainThread } from 'node:worker_threads'; test('fr', () => { expect(isMainThread).toBe(true); });\n`;
+const vmProject = (extra, t = {}) => project({ 'package.json': '{"type":"module"}', 'vitest.config.mjs': wrappedConfig({ environment: 'jsdom', ...t }, { mode: 'vm', verifyWarning: false }), 'src/a.test.js': okFile, 'src/b.test.js': okFile, ...extra });
+
+test('compat: verify --mode vm skips the single-worker orders on Vitest 4.1 only (default orders); the gate still finds false green / false red', integration, async () => {
+  const skips = MAJOR < 5;
+  const clean = vmProject({});
+  const v = cli(clean, ['verify', '--mode', 'vm']);
+  assert.equal(v.code, 0, v.out);
+  if (skips) {
+    assert.match(v.out, /skipping the single-worker order\(s\) reversed: on Vitest 4\.\d+ vm: every file runs in a fresh worker/);
+    assert.match(v.out, /orders gate: false-green 0, false-red 0/);
+    assert.match(v.out, /orders skipped\s+reversed \(Vitest 4\.\d+ vm: every file runs in a fresh worker\)/);
+  } else {
+    assert.doesNotMatch(v.out, /skipping the single-worker|orders skipped/);
+    assert.match(v.out, /orders gate \+ reversed: false-green 0, false-red 0/);
+  }
+  const rec = JSON.parse(fs.readFileSync(path.join(clean, '.vitest-guard/run/verify-vm.json'), 'utf8'));
+  assert.deepEqual(rec.orders, skips ? ['gate'] : ['gate', 'reversed']);
+  assert.deepEqual(rec.ordersSkipped, skips ? ['reversed'] : undefined);
+  const { verifyStatus } = await import('../src/verifystate.mjs');
+  assert.equal(verifyStatus(clean, 'vm', { configFile: path.join(clean, 'vitest.config.mjs') }).ok, true, 'a skipped single-worker order does not make the vm record incomplete');
+
+  const fg = cli(vmProject({ 'src/fg.test.js': fgFile }), ['verify', '--mode', 'vm', '--no-quarantine']);
+  assert.equal(fg.code, 5, fg.out);
+  assert.match(fg.out, new RegExp(`FALSE GREEN.*src/fg\\.test\\.js > fg  \\[order: gate${skips ? '' : ', reversed'}\\]`));
+  const fr = cli(vmProject({ 'src/fr.test.js': frFile }), ['verify', '--mode', 'vm', '--no-quarantine']);
+  assert.equal(fr.code, 1, fr.out);
+  assert.match(fr.out, new RegExp(`false red.*src/fr\\.test\\.js > fr  \\[order: gate${skips ? '' : ', reversed'}\\]`));
+  assert.match(fr.out, /fail in the gate order but pass isolated/);
+});
+
+test('compat: an explicit --orders runs exactly the named orders on every major; the lanes of one order run side by side', integration, () => {
+  const root = vmProject({ 'src/fg.test.js': fgFile }, { projects: [{ extends: true, test: { name: 'p1', include: ['src/a.test.js', 'src/fg.test.js'] } }, { extends: true, test: { name: 'p2', include: ['src/b.test.js'] } }] });
+  const v = cli(root, ['verify', '--mode', 'vm', '--orders', 'gate,forward,reversed', '--lanes', '2', '--no-quarantine']);
+  assert.equal(v.code, 5, v.out);
+  assert.doesNotMatch(v.out, /skipping the single-worker|orders skipped|ORDER MISMATCH|NOT RUN/);
+  assert.match(v.out, /orders gate \+ forward \+ reversed: false-green 1, false-red 0/);
+  assert.match(v.out, /FALSE GREEN.*src\/fg\.test\.js > fg  \[order: gate, forward, reversed\]/);
 });

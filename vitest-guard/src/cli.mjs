@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { runVitest, signature, vitestBin, childCpuSeconds } from './runner.mjs';
+import { runVitest, signature, vitestBin, vitestVersion, childCpuSeconds } from './runner.mjs';
 import { readRunLogs, clearRunLogs, predecessors, updateDurations, heapReport, selfTime, ensureStateDir } from './logs.mjs';
 import { buildGraph, planLanes, readVto } from './plan.mjs';
 import { scanFile } from './scan.mjs';
@@ -592,7 +592,18 @@ async function prune(c, q, mode) {
 //   reversed  one worker per project, reverse order   (forward + reversed put every pair of files in both orders)
 //   shuffle   one worker per project, seeded shuffle (--seed)
 //   planned   shared mode: the planner's lanes (`vitest-guard run`)
+// On Vitest < 5 the single-worker vm orders run every file in a fresh worker (vm-file-isolation plugin: isolate true),
+// so the file order cannot change a result there; by default they are skipped (an explicit --orders still runs them).
 const VERIFY_ORDERS = ['gate', 'forward', 'reversed', 'shuffle', 'planned'];
+const LANE_ORDERS = ['forward', 'reversed', 'shuffle'];
+/** results of `jobs` (thunks returning promises) in job order, at most `limit` running at once */
+async function pooled(jobs, limit) {
+  const out = new Array(jobs.length);
+  let next = 0;
+  const worker = async () => { while (next < jobs.length) { const k = next++; out[k] = await jobs[k](); } };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(Number(limit) || 1, jobs.length)) }, worker));
+  return out;
+}
 const badNumber = (o, k) => o[k] !== undefined && o[k] !== 'all' && !(Number.isFinite(Number(o[k])) && Number(o[k]) >= 1);
 export async function cmdVerify(c, o) {
   for (const k of ['sample', 'seed']) if (badNumber(o, k) && !(k === 'seed' && Number(o.seed) === 0)) { console.error(`[vitest-guard] verify: --${k} must be a positive number${k === 'sample' ? ' or "all"' : ''}, got ${JSON.stringify(String(o[k]))}\nsee --help`); return EXIT.USAGE; }
@@ -615,6 +626,21 @@ export async function cmdVerify(c, o) {
   const bad = orders.filter((x) => !VERIFY_ORDERS.includes(x));
   if (bad.length || !orders.length) { console.error(`[vitest-guard] verify: unknown --orders ${bad.join(',')} (known: ${VERIFY_ORDERS.join(', ')})\nsee --help`); return EXIT.USAGE; }
   if (orders.includes('planned') && mode !== 'shared') { console.error('[vitest-guard] verify: --orders planned needs --mode shared\nsee --help'); return EXIT.USAGE; }
+  // Vitest < 5, mode vm, default orders: a single-worker vm lane isolates every file (fresh vm context AND fresh worker
+  // process), which is the forks reference in another order. An unreadable version counts as < 5 (the plugin then
+  // isolates too); the gate order (workers reused) and the forks comparison always run.
+  const skipped = [];
+  let skipWhy = '';
+  if (mode === 'vm' && !o.orders) {
+    const version = vitestVersion(c.root);
+    const major = version ? Number(version.split('.')[0]) : NaN;
+    if (!(major >= 5)) {
+      skipped.push(...orders.filter((x) => LANE_ORDERS.includes(x)));
+      skipWhy = `Vitest ${version ? version.split('.').slice(0, 2).join('.') : '(version unknown)'} vm: every file runs in a fresh worker`;
+      orders.splice(0, orders.length, ...orders.filter((x) => !skipped.includes(x)));
+      if (skipped.length) say(`verify: skipping the single-worker order(s) ${skipped.join(', ')}: on ${skipWhy} (vm context and worker process), so the file order cannot change a result; the gate order (workers reused) is compared with isolated forks. Run them anyway with --orders gate,forward,reversed`);
+    }
+  }
 
   const q = loadQuarantine(c);
   for (const m of ['vm', 'shared']) q[m] = q[m] && typeof q[m] === 'object' ? q[m] : {};
@@ -630,7 +656,7 @@ export async function cmdVerify(c, o) {
   for (const order of orders) {
     if (order === 'gate') { const r = await runVitest({ root: c.root, config: c.config, mode, files: complete ? [] : sample, verbose: c.verbose, tag: 'verify-gate' }); runs.push({ order, r, expected: sample }); continue; }
     if (order === 'planned') { const r = await cmdRunPlanned(c, { ...o, clean: false }, await cmdPlan(c, o, sample)); runs.push({ order, r, expected: sample }); continue; }
-    const parts = [], expected = [];
+    const jobs = [], expected = [];
     let i = 0;
     for (const [project, pf] of byProject) {
       const m = modeOf(project);
@@ -638,9 +664,11 @@ export async function cmdVerify(c, o) {
       let files = pf.filter((f) => !q[m][f]).sort(); // quarantined files run in forks in the gate: nothing to compare
       if (order === 'reversed') files.reverse();
       if (order === 'shuffle') files = files.map((f) => [rnd(), f]).sort((a, b) => a[0] - b[0]).map((x) => x[1]);
-      if (files.length) { const tag = `verify-${order}-${i++}`; parts.push(await runLane(c, files, tag, project, m)); expected.push(files); laneRuns.push({ order, lane: `lane-${tag}.json`, files }); }
+      if (files.length) { const tag = `verify-${order}-${i++}`; jobs.push(() => runLane(c, files, tag, project, m)); expected.push(files); laneRuns.push({ order, lane: `lane-${tag}.json`, files }); }
     }
-    runs.push({ order, r: merge(parts, expected), laneOnly: true, expected: expected.flat() });
+    // the lanes of one order (one per project, each its own Vitest process with one worker) run side by side, up to
+    // --lanes, as the planner's lanes do; two orders never overlap, so a file never runs twice at the same time
+    runs.push({ order, r: merge(await pooled(jobs, c.lanes), expected), laneOnly: true, expected: expected.flat() });
   }
   // R4: a lane must really have run in the requested order (a sequencer that ignored it compares one order twice)
   { const logged = readRunLogs(c.runDir);
@@ -749,7 +777,7 @@ export async function cmdVerify(c, o) {
   if (incomplete.length) say(`INCOMPLETE: ${incomplete.join('; ')}: this verify proves nothing for those files (exit 1, no clean record written)`);
   // S1: an incomplete comparison is never recorded as a verify (the shared-mode warning of `vitest run` stays)
   if (!incomplete.length) {
-    const record = { at: new Date().toISOString(), mode, head: gitHead(c.root), configKey: configKey(c.root, c.config), orders, sample: sample.length, of: all.length, complete, falseGreen, falseRed, knownRed, quarantined };
+    const record = { at: new Date().toISOString(), mode, head: gitHead(c.root), configKey: configKey(c.root, c.config), orders, ...(skipped.length ? { ordersSkipped: skipped, ordersSkippedWhy: skipWhy } : {}), sample: sample.length, of: all.length, complete, falseGreen, falseRed, knownRed, quarantined };
     save(c, `verify-${mode}.json`, record);
     if (auto && Object.values(groups).includes('shared')) save(c, 'verify-shared.json', record); // what the shared-mode warning of the config reads
   }
@@ -761,7 +789,7 @@ export async function cmdVerify(c, o) {
   summary({ title: `verify · ${mode}`, verdict: verdictOf(code), label: code === EXIT.FALSE_GREEN ? 'FALSE GREEN' : code === EXIT.NEW_QUARANTINE ? 'QUARANTINE' : code === EXIT.FAIL ? (incomplete.length ? 'INCOMPLETE' : 'FAIL') : 'SAFE',
     headline: code === EXIT.OK ? `${mode} matches isolated forks on ${sample.length}${complete ? '' : ` of ${all.length}`} files${bothFail.size ? ` (${bothFail.size} test(s) fail in both)` : ''}` : code === EXIT.FALSE_GREEN ? `${falseGreen.length} test(s) pass in ${mode} but fail in isolated forks`
       : code === EXIT.FAIL && incomplete.length ? `the comparison is incomplete (${incomplete.join('; ')})` : code === EXIT.FAIL && gateRed.length ? `${gateRed.length} test(s) fail in the gate order but pass isolated` : `${falseRed.length} test(s) fail in ${mode} only (order-dependent)`,
-    facts: [['orders', orders.join(', ')], ['files compared', complete ? `${sample.length} (all)` : `${sample.length} of ${all.length}`, complete ? undefined : 'yellow'],
+    facts: [['orders', orders.join(', ')], ['orders skipped', skipped.length ? `${skipped.join(', ')} (${skipWhy})` : undefined], ['files compared', complete ? `${sample.length} (all)` : `${sample.length} of ${all.length}`, complete ? undefined : 'yellow'],
       ['false green', falseGreen.length, falseGreen.length ? 'red' : 'green'], ['false red', falseRed.length, falseRed.length ? 'yellow' : 'green'], ['fail in both modes', bothFail.size || undefined, 'yellow'],
       ['known conflicts', knownRed.length || undefined], ['quarantined now', quarantined.length || undefined, 'yellow'], ['exit code', code]],
     next: [...(falseGreen.length ? ['false-green files now run in isolated forks, where they FAIL: that failure is real, fix the test'] : []),
@@ -983,7 +1011,9 @@ options:
   --sample N|all      files to compare (default all; N = seeded random sample, the result is then "incomplete")
   --seed S            seed of the sample and of the shuffle order (default 1)
   --orders a,b,...    gate, forward, reversed, shuffle, planned (default: vm gate,reversed; shared gate,forward,reversed;
-                      'planned' needs --mode shared)
+                      'planned' needs --mode shared). Vitest < 5 with mode vm: the default skips forward/reversed/
+                      shuffle (every file runs in a fresh worker there); an explicit --orders runs what it names
+  --lanes N           single-worker lanes of one order (one per project) running at once (default: CPUs - 1)
   --no-quarantine     report only, do not write incompatible.json
   --no-plan           never run the planned order (error if --orders names only planned)
 exit: 5 false green wins over 1 (incomplete, red gate, unrecorded false red) over 4 (new quarantine) over 0.` },

@@ -67,7 +67,8 @@ export function verifyStatus(root, mode, { configFile = findConfigFile(root), qu
   // compared another pool layout and proves nothing
   if (configMode && rec.mode === 'auto' && configMode !== 'auto') return { ok: false, record: rec, reason: `the last verify (${rec.at}) ran in mode ${String(rec.mode)}, the config runs in mode ${configMode}` };
   // N5: a verify that skipped default orders (e.g. --orders gate) did not put every pair of files in both orders
-  const need = rec.mode === 'vm' ? ['gate', 'reversed'] : ['gate', 'forward', 'reversed'];
+  // (vm on Vitest < 5 skips its single-worker orders on purpose: every file runs in a fresh worker there)
+  const need = (rec.mode === 'vm' ? ['gate', 'reversed'] : ['gate', 'forward', 'reversed']).filter((x) => !(rec.mode === 'vm' && x !== 'gate' && Array.isArray(rec.ordersSkipped) && rec.ordersSkipped.includes(x)));
   if (Array.isArray(rec.orders) && need.some((x) => !rec.orders.includes(x))) return { ok: false, record: rec, reason: `the last verify (${rec.at}) ran only the orders ${rec.orders.join(', ')} (needs ${need.join(', ')})` };
   if (rec.complete === false) return { ok: false, record: rec, reason: `the last verify covered only a sample (${rec.sample} of ${rec.of} files)` };
   if (!rec.configKey || rec.configKey !== configKey(root, configFile, quarantineFile)) return { ok: false, record: rec, reason: `the config or the quarantine changed since the last verify (${rec.at})` };
