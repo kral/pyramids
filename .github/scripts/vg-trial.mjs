@@ -33,7 +33,7 @@ function step(name, args, { expect, vitest = false } = {}) {
   const t0 = Date.now();
   const r = spawnSync(process.execPath, [vitest ? VITEST : BIN, ...args], {
     cwd: proj, encoding: 'utf8', maxBuffer: 512 * 1024 * 1024,
-    env: { ...process.env, NO_COLOR: '1', VTO_NO_ANIMATION: '1' },
+    env: { ...process.env, NO_COLOR: '1' },
   });
   const wall = Math.round((Date.now() - t0) / 100) / 10;
   const log = `$ ${vitest ? 'vitest' : 'vitest-guard'} ${args.join(' ')}\n${r.stdout || ''}${r.stderr || ''}${r.error ? '\n' + r.error.stack : ''}`;

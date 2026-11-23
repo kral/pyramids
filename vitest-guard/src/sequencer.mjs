@@ -1,10 +1,10 @@
-// Sequencer that runs files in the order of a vitest-guard plan lane (VITEST_GUARD_LANE_FILE = json list of
+// Sequencer that runs files in the order of a `vitest-guard verify` lane (VITEST_GUARD_LANE_FILE = json list of
 // root-relative paths, or { project, files }). With isolate:false + maxWorkers:1 Vitest 5.1.1 (and 4.1) batches every file
 // of the project into ONE worker run request in sequencer order (groupSpecs in vitest/dist/chunks/index.*.js),
 // so the order here is exactly the execution order in the shared worker.
 //
 // It deliberately does NOT `import 'vitest/node'` statically: when the package is installed through a symlink
-// (`npm i -D ../vto/vitest-guard`, workspaces, pnpm link) Node resolves bare imports from the REAL path of this file,
+// (`npm i -D ../vitest-guard`, workspaces, pnpm link) Node resolves bare imports from the REAL path of this file,
 // where there is no `vitest` (or worse: a second copy). Vitest only needs `new Sequencer(ctx)`, `sort` and `shard`;
 // without a lane file both delegate to the BaseSequencer of the Vitest copy that is actually running (resolved
 // from the project root).

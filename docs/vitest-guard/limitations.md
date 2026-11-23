@@ -4,10 +4,10 @@
 
 - Vitest `>=4.1 <6` (since 0.1.0-alpha.4). Developed against 5.1.1; CI tests 4.1.8 and 5.1.1
   (the test suite on Linux and Windows, the React trial on Linux, macOS and Windows). Other 4.1.x and 5.x
-  releases fit the peer range but have not been tested. The shared-mode planner relies on how Vitest groups specs
+  releases fit the peer range but have not been tested. The single-worker lanes of `verify` rely on how Vitest groups specs
   and hands them to workers (`groupSpecs` / `pool.run`, the same in 4.1 and 5.1): with `isolate: false` and
   `maxWorkers: 1`, one project's files go to one worker in sequencer order. A Vitest change here would break the
-  lane model.
+  lane model (`verify` checks that a lane ran in the requested order and fails with "ORDER MISMATCH" otherwise).
 - Vitest 4.1 behaves differently from 5 in two ways that vitest-guard handles itself:
   - **vm pools with one worker.** Vitest 4.1 resolves `isolate: false` for `vmThreads` / `vmForks`. With
     `maxWorkers: 1` it then sends all of a project's files in one run request, and the vm worker creates one vm
@@ -45,14 +45,13 @@
   contexts save per-file environment setup and part of the import cost, they do not make test code faster, and
   global access in a vm context is slower in hot code. Use `shared` or forks there.
 - Suites where the gain is under 10 %: `compare` recommends forks.
-- `auto` calibrated did not beat the best single mode on either validated suite (both preferred `shared`).
 - Layer overhead: +2.0 to +4.0 % (vm, heavy suite), self-time 2.8-3.8 ms per file (vm), 6-8 ms (shared), 17 ms
   with diagnostics. On the real-world suite guarded vs plain was +5.7 %, within noise under load.
 - Under heavy machine load a guarded run produced extra timeouts in CPU-bound tests (load-induced).
 
-## Calibration and verify are samples
+## Compare and verify are samples
 
-`calibrate` uses 20 files per group by default and `compare` 30: a random sample can miss the few CPU-heavy files
+`compare` uses 30 files per project by default: a random sample can miss the few CPU-heavy files
 (vm global access) and a file outside the sample that is green only in shared mode is never compared again, because
 `check` re-runs failing files only. Decide with `--sample all`, confirm `shared` with `verify --mode shared --sample
 all`. A `verify --sample N` record is marked incomplete, so the config warning stays.
@@ -60,8 +59,8 @@ all`. A `verify --sample N` record is marked incomplete, so the config warning s
 ## Residual risks (review items M6, M7)
 
 **M6, order-dependent false greens in shared mode** (reviewed: green in `vitest run` while 3 tests failed in forks;
-`verify` and `check` did not see it because the fast side ran only in the planner's order). Fixes in the code:
-`verify` runs the fast side in the order the gate uses plus forward/reversed (and optionally shuffle/planned); the
+`verify` and `check` did not see it because the fast side ran only in one order). Fixes in the code:
+`verify` runs the fast side in the order the gate uses plus forward/reversed (and optionally shuffle); the
 leak detector fingerprints names on built-in prototypes and `expect.extend` matchers (the tail setup file marks
 the end of setup files so they are not blamed on a test); extensions a file adds are removed after it
 (with `resetModules`); `vitest run` warns when no clean `verify` exists for the commit/config. Residual:
@@ -84,7 +83,7 @@ non-reproducible failure stays FLAKY and blocks the gate until fixed or re-run.
 of a shared worker (S5), testers and intervals a package registers when the test file calls it are removed after
 that file (note 1), `verify` records order-dependent entries so that `check --prune` keeps them (S2), two guarded
 configs in one root keep each other's quarantine entries (note 2), the shared-mode baseline is always taken after
-the setup files (note 3), and the fallback directory walk of mode `auto` prunes directories (S6). What is left:
+the setup files (note 3), What is left:
 
 - **Who did it is read from the stack.** An equality tester, an interval, an added global or a `navigator` override
   counts as the test file's when a frame of the test file is on the synchronous part of the stack at that moment
@@ -118,8 +117,7 @@ the setup files (note 3), and the fallback directory walk of mode `auto` prunes 
   With `resetModules: false` a project module (outside `node_modules`) is cached for the worker; what it registers
   on import is kept (as the module is) and reported as residual `equality testers` / `timers` / `added globals` /
   `navigator`. A file that does not import the module can still see it in a shared worker.
-- **Order-dependent entries without known predecessors.** When `verify` finds an order-dependent failure only in
-  the `planned` order, or the bisection of a long predecessor list does not reproduce it, the entry is recorded with
+- **Order-dependent entries without known predecessors.** When the bisection of a long predecessor list does not reproduce it, the entry is recorded with
   `orderDependent: true` and no `after`; `check --prune` never releases it: delete it by hand and run `verify`.
 - **Quarantine entries of version 1 files** carry no `config`. Such an entry counts as the current config's when the
   config lists the file, is kept (never pruned) when the file exists but the config does not list it, and is stale
@@ -132,13 +130,11 @@ the setup files (note 3), and the fallback directory walk of mode `auto` prunes 
 - vm: `process` listeners, patched builtins and singletons stored on `process` are reported, not restored.
 - shared: state inside node_modules closures that is not visible in exports and has no probe (probes exist for
   i18next and TanStack Query core); `resetModules` resets project modules only; top-level assignments to globals outside the
-  ~40 watched ones are only found by `scan` (assignments inside a test or hook are not).
+  ~40 watched ones are not found statically (the end-of-file pollution diff of `check` sees what survives).
 - shared with `resetModules: false`: mock edges come from the static import graph only (no dynamic imports/aliases).
 - The node_modules export-state detector cannot tell scratch state from leaks (stylis is ignored by default).
 - Duplicate React detection finds physical copies only.
 - Windows: `compare` falls back to wall time because CPU time is read from `/proc` (Linux only); path handling of
   `hunt <victim>` expects `/`-separated paths as printed by `vitest list`. The tests and measurements were done on
   Linux; Windows/macOS behaviour of the CLI is not covered by the measurements (unverified).
-- A random sample-based classification: `auto` routes by configured environment by default; moving DOM-free files
-  (`nodeEnvironment: 'node'`) can change semantics and is opt-in.
 - Not a security boundary ([security.md](security.md)).

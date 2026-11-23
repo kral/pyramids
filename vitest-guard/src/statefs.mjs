@@ -1,5 +1,4 @@
-// Reads and writes below a repo-controlled `.vitest-guard/` directory (SECURITY review 3 S2, REVIEW-2 N5).
-// The same rules as vto's `.vto/` (mcp/src/safefs.mjs StateDir): a cloned repository or a PR can commit
+// Reads and writes below a repo-controlled `.vitest-guard/` directory. A cloned repository or a PR can commit
 // `.vitest-guard/`, `.vitest-guard/run/` or `.vitest-guard/run/logs/` as a symlink (or a Windows junction), so
 //  - every directory component from `.vitest-guard` down to the target is lstat-checked: a symlink, junction or
 //    non-directory is refused with a clear message, never followed; created directories are 0700 (POSIX) and

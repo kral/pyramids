@@ -9,14 +9,14 @@ import { project, wrappedConfig, cli, integration, indexFile } from './helpers.m
 
 const empty = () => fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'vmg-help-'));
 
-test('help: global and every subcommand --help list the D3 exit codes and exit 0', () => {
+test('help: global and every subcommand --help list the exit codes and exit 0', () => {
   const dir = empty();
-  const cmds = ['check', 'verify', 'compare', 'calibrate', 'plan', 'run', 'hunt', 'scan', 'report'];
+  const cmds = ['check', 'verify', 'compare', 'hunt'];
   const forms = [['--help'], ...cmds.flatMap((c) => [[c, '--help'], ['--help', c], ['help', c]])];
   for (const f of forms) {
     const r = cli(dir, f);
     assert.equal(r.code, 0, f.join(' ') + ': ' + r.out);
-    for (const n of ['0  ok', '1  test failures', '2  usage or config error', '3  run all', '4  new quarantine', '5  false green']) assert.ok(r.stdout.includes(n), `${f.join(' ')} lacks "${n}"`);
+    for (const n of ['0  ok', '1  test failures', '2  usage or config error', '4  new quarantine', '5  false green']) assert.ok(r.stdout.includes(n), `${f.join(' ')} lacks "${n}"`);
     if (f.length === 2 && f[0] !== '--help' && f[0] !== 'help') assert.ok(r.stdout.startsWith(`usage: vitest-guard ${f[0]}`), f.join(' '));
   }
   const bad = cli(dir, ['help', 'frobnicate']); assert.equal(bad.code, 2); assert.match(bad.stderr, /unknown command/);
@@ -24,7 +24,7 @@ test('help: global and every subcommand --help list the D3 exit codes and exit 0
 
 test('help: every option a command reads is documented in its help', async () => {
   const { helpFor } = await import('../src/cli.mjs');
-  const mustMention = { check: ['--prune', '--retries', '--no-confirm', '--no-hunt', '--no-plan', '--no-calibrate'], verify: ['--sample', '--seed', '--orders', '--no-quarantine', '--no-plan'], compare: ['--sample', '--project', '--no-write'], hunt: ['--before'], scan: ['--quarantine'], run: ['--no-heal', '--no-replan'], plan: ['--lanes', '--vto-raw'] };
+  const mustMention = { check: ['--prune', '--retries', '--no-confirm', '--no-hunt', '--compare'], verify: ['--sample', '--seed', '--orders', '--no-quarantine', '--lanes'], compare: ['--sample', '--project', '--seed'], hunt: ['--before'] };
   for (const [c, flags] of Object.entries(mustMention)) for (const f of flags) assert.ok(helpFor(c).includes(f), `${c} help lacks ${f}`);
 });
 
@@ -34,25 +34,32 @@ test('a boolean flag does not swallow the command; hunt without a victim is a us
   assert.equal(r.code, 2); assert.match(r.stderr, /unknown command "frobnicate"/);
 });
 
-test('verify --no-plan is honoured; --orders planned with --no-plan is a usage error; bad --sample is a usage error', integration, () => {
+test('verify: bad --sample and a missing hunt victim are usage errors; --orders planned was removed', integration, () => {
   const root = project({
     'package.json': '{"type":"module"}',
     'vitest.config.mjs': wrappedConfig({ include: ['test/**/*.test.ts'] }, { mode: 'shared' }),
     'test/a.test.ts': `import { it, expect } from 'vitest';\nit('a', () => { expect(1).toBe(1); });\n`,
     'test/b.test.ts': `import { it, expect } from 'vitest';\nit('b', () => { expect(2).toBe(2); });\n`,
   });
-  const base = ['verify', '--mode', 'shared'];
-  const contradiction = cli(root, [...base, '--orders', 'planned', '--no-plan']);
-  assert.equal(contradiction.code, 2, contradiction.out); assert.match(contradiction.stderr, /contradicts --no-plan/);
-  const r = cli(root, [...base, '--orders', 'gate,planned', '--no-plan']);
-  assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /skipping the planned order/); assert.match(r.out, /orders gate: /);
-  assert.doesNotMatch(r.out, /plan: \d+ lanes/, 'no plan may be built under --no-plan');
-  const withPlan = cli(root, [...base, '--orders', 'gate,planned']);
-  assert.equal(withPlan.code, 0, withPlan.out); assert.match(withPlan.out, /plan: \d+ lanes/);
+  const planned = cli(root, ['verify', '--mode', 'shared', '--orders', 'gate,planned']);
+  assert.equal(planned.code, 2, planned.out); assert.match(planned.stderr, /--orders planned was removed in 0\.2\.0/);
   const s = cli(root, ['verify', '--sample', 'many']);
   assert.equal(s.code, 2, s.out); assert.match(s.stderr, /--sample must be a positive integer/);
   const h = cli(root, ['hunt']); assert.equal(h.code, 2); assert.match(h.stderr, /missing <victim>/);
+});
+
+test('removed commands and options are usage errors that say what went (exit 2)', () => {
+  const root = project({ 'package.json': '{"type":"module"}' });
+  for (const [args, re] of [
+    [['plan'], /`plan` was removed in 0\.2\.0/], [['run'], /`run` was removed in 0\.2\.0/], [['scan'], /`scan` was removed/], [['report'], /`report` was removed/],
+    [['calibrate'], /`calibrate` was removed/], [['plan', '--help'], /`plan` was removed/], [['help', 'run'], /`run` was removed/],
+    [['check', '--mode', 'auto'], /`--mode auto` was removed/], [['check', '--no-plan'], /`--no-plan` was removed/], [['check', '--vto-raw', 'x'], /`--vto-raw` was removed/],
+    [['check', '--no-calibrate'], /`--no-calibrate` was removed/], [['check', '--commit-state'], /`--commit-state` was removed/],
+  ]) {
+    const r = cli(root, args);
+    assert.equal(r.code, 2, args.join(' ') + ': ' + r.out); assert.match(r.stderr, re, args.join(' '));
+    assert.match(r.stderr, /`vto` branch/);
+  }
 });
 
 test('reactPackages reaches the setup file through provide', integration, () => {
@@ -68,8 +75,7 @@ test('CLI argument errors are usage errors (exit 2)', () => {
   const none = cli(root, []); assert.equal(none.code, 2); assert.match(none.out, /usage: vitest-guard/);
   const unk = cli(root, ['check', '--bogus', 'src/a']); assert.equal(unk.code, 2); assert.match(unk.stderr, /unknown option --bogus/);
   const neg = cli(root, ['check', '--no-hnt']); assert.equal(neg.code, 2); assert.match(neg.stderr, /--no-hnt/);
-  for (const a of [['check', '--retries', 'x'], ['plan', '--lanes', 'abc'], ['verify', '--sample'], ['verify', '--sample', '2.5']]) {
+  for (const a of [['check', '--retries', 'x'], ['verify', '--lanes', 'abc'], ['verify', '--sample'], ['verify', '--sample', '2.5']]) {
     const r = cli(root, a); assert.equal(r.code, 2, a.join(' ') + r.out); assert.match(r.stderr, /must be a/);
   }
-  const scan = cli(root, ['scan', '--help']); assert.equal(scan.code, 0); assert.doesNotMatch(scan.stdout, /must be wrapped/);
 });

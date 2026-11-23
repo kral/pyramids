@@ -2,7 +2,7 @@
 // Runs once per test file in both fast modes:
 //   mode 'vm'     (vmThreads): realm shims, missing globals, outer-realm leak detector, env restore
 //   mode 'shared' (threads/forks + isolate:false): per-file reset hooks + full leak detector
-//   mode 'isolated' (forks quarantine / nightly): only records timing + heap (for the planner)
+//   mode 'isolated' (forks quarantine / nightly): only records timing + heap
 import { beforeAll, afterAll, expect, vi, inject } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -10,7 +10,7 @@ import v8 from 'node:v8';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { threadId } from 'node:worker_threads';
-import { getOuterGlobal, installHasInstanceShims, installMissingGlobals, createRealmEqualityTester, DOM_KEYS } from './realm.mjs';
+import { getOuterGlobal, installHasInstanceShims, installMissingGlobals, createRealmEqualityTester } from './realm.mjs';
 import * as fp from './fingerprint.mjs';
 import * as sfs from './statefs.mjs';
 import * as safety from './safety.mjs';
@@ -50,13 +50,6 @@ const diag = opts.diag ?? process.env.VITEST_GUARD_DIAG === '1';
 const moduleState = opts.moduleState ?? diag;
 const detectPollution = opts.detectPollution ?? diag;
 
-let autoGroup = null, autoHeal = false;
-try { autoGroup = inject('vitestGuardAuto') || null; autoHeal = !!inject('vitestGuardAutoHeal'); } catch {}
-const envName = () => { try { return globalThis.__vitest_worker__?.environment?.name ?? globalThis.__vitest_worker__?.ctx?.environment?.name ?? null; } catch { return null; } };
-
-// ---- mode 'auto': DOM probe (dom group) and DOM-miss detector (node group) ----
-// Records go to .vitest-guard/run/env-<pid>-<tid>.jsonl; the next config load folds them into env.json and
-// re-classifies (a node-group file that touched the DOM moves to the dom group: self-healing).
 // state writes never follow a symlink / junction in .vitest-guard/ (security review 3 S2): refused once per worker, with a warning
 function stateWrite(fn) {
   if (worker.stateRefused) return;
@@ -66,55 +59,7 @@ function stateWrite(fn) {
     console.warn(`${e.message}; this worker writes no vitest-guard state`);
   }
 }
-const GITIGNORE = '# vitest-guard volatile state (logs, plan, caches, durations): never commit\n*\n';
-function envRecord(rec) {
-  stateWrite(() => sfs.appendStateFile(path.join(stateDir, `env-${process.pid}-${threadId}.jsonl`), JSON.stringify(rec) + '\n'));
-}
-let domTouched = false, domVia = null;
-const probeSaved = [];
-let probeObserver = null;
-function probeRestore() { for (const [k, d] of probeSaved) { try { Object.defineProperty(globalThis, k, d); } catch {} } probeSaved.length = 0; }
-if (autoGroup === 'dom' && typeof globalThis.document !== 'undefined') {
-  // document mutations first (`document` itself is unforgeable on a vm-pool jsdom window, so it cannot be
-  // trapped); created BEFORE the traps so that the probe does not trip its own MutationObserver trap
-  try {
-    probeObserver = new globalThis.MutationObserver(() => { if (!domTouched) { domTouched = true; domVia = 'document mutation'; } probeObserver.disconnect(); });
-    probeObserver.observe(globalThis.document, { childList: true, subtree: true, attributes: true, characterData: true });
-  } catch {}
-  // getter traps on configurable DOM globals (first access restores them: zero cost afterwards)
-  for (const k of DOM_KEYS) {
-    const d = Object.getOwnPropertyDescriptor(globalThis, k);
-    if (!d || !d.configurable) continue;
-    probeSaved.push([k, d]);
-    Object.defineProperty(globalThis, k, {
-      configurable: true, enumerable: d.enumerable,
-      get() { if (!domTouched) { domTouched = true; domVia = k; } probeRestore(); return d.get ? d.get.call(globalThis) : d.value; },
-      set(v) { if (!domTouched) { domTouched = true; domVia = k; } probeRestore(); globalThis[k] = v; },
-    });
-  }
-}
-// node group: record-only traps on the DOM globals the node environment does not have. A getter returns
-// undefined (typeof checks keep working) and remembers the key; only a FAILED file that touched one counts as
-// a DOM miss, so library feature detection (`typeof window`) in passing files never moves a file.
-const nodeTouched = [];
-const nodeTraps = [];
-if (autoGroup === 'node' && autoHeal) {
-  for (const k of DOM_KEYS) {
-    if (k in globalThis) continue;
-    try {
-      Object.defineProperty(globalThis, k, { configurable: true, enumerable: false,
-        get() { if (!nodeTouched.includes(k)) nodeTouched.push(k); return undefined; },
-        set(v) { Object.defineProperty(globalThis, k, { value: v, writable: true, configurable: true, enumerable: true }); } });
-      nodeTraps.push(k);
-    } catch {}
-  }
-}
-const DOM_MISS = new RegExp(`\\b(${DOM_KEYS.join('|')}) is not defined\\b`);
-function collectErrors(task, out = []) {
-  for (const e of task.result?.errors || []) out.push(e);
-  for (const t of task.tasks || []) collectErrors(t, out);
-  return out;
-}
+const GITIGNORE = '# vitest-guard volatile state (run logs): never commit\n*\n';
 
 // ---- provenance: who caused a registration (equality tester, interval, global, navigator override) ----
 // Note 1 (alpha.3): the decision is the call site in the test file chain, not the registering module's path. Only the
@@ -479,7 +424,6 @@ async function beforeAllBody() {
     // R1: shared mode restores to the state after the first file's setup files (tail), else after its top level
     worker.base = { outer: mode === 'shared' ? pre?.outer ?? fp.captureOuter() : outerNow, ...(ctx || {}) };
     log({ t: 'start', file, seq: worker.seq, mode, pid: process.pid, tid: threadId, lane: LANE });
-    if (mode === 'shared') stateWrite(() => { const f = path.join(stateDir, 'settings.json'), t = JSON.stringify({ resetModules: !!opts.resetModules }); let old = null; try { old = sfs.readStateFile(f); } catch {} if (old !== t) sfs.writeStateFile(f, t); });
     return;
   }
   const dirty = fp.diffOuter(worker.base.outer, outerNow, { ignoreListeners: opts.ignoreListeners || [] });
@@ -524,28 +468,7 @@ async function beforeAllBody() {
   }
 }
 
-let pendingHint = null;
-afterAll(async ({}, suite) => { // Vitest 5: fixtures first (must be destructured), suite second
-  if (autoGroup === 'dom' && (probeSaved.length || probeObserver)) {
-    probeRestore();
-    try { probeObserver?.disconnect(); } catch {}
-    envRecord({ t: 'env', file: rel(expect.getState().testPath), env: envName(), dom: domTouched, via: domVia || undefined });
-  }
-  if (autoGroup === 'node' && autoHeal && suite) {
-    for (const k of nodeTraps.splice(0)) { try { const d = Object.getOwnPropertyDescriptor(globalThis, k); if (d && d.get) delete globalThis[k]; } catch {} }
-    const errors = collectErrors(suite);
-    const byMsg = errors.map((e) => DOM_MISS.exec(String(e?.message || ''))).find(Boolean);
-    const specific = nodeTouched.filter((k) => k !== 'window' && k !== 'navigator');
-    const key = byMsg ? byMsg[1] : errors.length && nodeTouched.length ? specific[0] || nodeTouched[0] : null;
-    if (key) {
-      const f = rel(expect.getState().testPath);
-      envRecord({ t: 'env-miss', file: f, env: envName(), key });
-      const hint = `[vitest-guard] auto: ${safety.sanitize(f)} touched the DOM global '${safety.sanitize(key, 80)}' but was classified as pure node (no DOM import/usage found statically). ` +
-        'It is recorded in .vitest-guard/run/env.json and runs in the dom group from the next run on (or add `// @vitest-environment jsdom`).';
-      console.error(hint);
-      pendingHint = hint; // thrown at the end of this hook so it shows up in every reporter
-    }
-  }
+afterAll(async () => {
   const a0 = realNow();
   const extLeftover = [];
   let testersLeft = false, navLeft = [];
@@ -554,7 +477,7 @@ afterAll(async ({}, suite) => { // Vitest 5: fixtures first (must be destructure
   // M6: what this file (not its setup files) added to built-ins / matchers
   const extAdded = mode === 'shared' && worker.extNow ? fp.diffExt(worker.extNow, fp.captureExt()) : [];
   if (detectPollution && worker.base) {
-    // what THIS file leaves behind before we reset it (used by the planner: polluters run last)
+    // what THIS file leaves behind before we reset it
     const p = fp.diffOuter(fileOuter || worker.base.outer, fp.captureOuter(), { ignoreListeners: opts.ignoreListeners || [] }).map((d) => d.kind);
     if (mode === 'shared') {
       if (fp.diffDom(worker.base.dom, fp.captureDom()).length) p.push('dom/storage');
@@ -643,7 +566,7 @@ afterAll(async ({}, suite) => { // Vitest 5: fixtures first (must be destructure
     } else extLeftover.push(...extAdded);
   }
   sect('after:resets', tr); tr = performance.now();
-  // residual = what is still dirty AFTER the resets (only this matters for the planner's conflict edges)
+  // residual = what is still dirty AFTER the resets
   let residual;
   if (pollution && worker.base) {
     const r = fp.diffOuter(worker.base.outer, fp.captureOuter(), { ignoreListeners: opts.ignoreListeners || [] }).map((d) => d.kind);
@@ -666,5 +589,4 @@ afterAll(async ({}, suite) => { // Vitest 5: fixtures first (must be destructure
   selfMs += realNow() - a0;
   log({ t: 'end', file, seq: worker.seq, durationMs: Math.round(durationMs * 10) / 10, heapStart, heapEnd, pollution, residual, selfMs: Math.round(selfMs * 100) / 100, ...(PROF ? { prof: Object.fromEntries(Object.entries(worker.prof).map(([k, v]) => [k, Math.round(v)])) } : {}) });
   worker.prev = file;
-  if (pendingHint) { const h = pendingHint; pendingHint = null; throw new Error(h); }
 });

@@ -16,33 +16,32 @@ import { project, wrappedConfig, cli, vitestRun, integration, readJson, pkgDir, 
 const PAD = '// ' + 'polluter runs first '.repeat(20) + '\n';
 const filler = (n) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`test/f${i + 1}.test.ts`, `import { it, expect } from 'vitest';\nit('filler ${i + 1}', () => { expect(${i} + 1).toBe(${i + 1}); });\n`]));
 
-test('D3: exit codes follow contracts/DECISIONS.md; --help/--version exit 0 without loading Vitest; usage errors exit 2', async () => {
+test('exit codes; --help/--version exit 0 without loading Vitest; usage errors exit 2', async () => {
   const { EXIT } = await import('../src/cli.mjs');
   assert.deepEqual(EXIT, { OK: 0, FAIL: 1, USAGE: 2, NEW_QUARANTINE: 4, FALSE_GREEN: 5 });
   const empty = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'vmg-empty-')); // no vitest here at all
   const v = cli(empty, ['--version']); assert.equal(v.code, 0); assert.match(v.stdout, /^@jirikral\/vitest-guard \d+\.\d+\.\d+/);
-  const h = cli(empty, ['--help']); assert.equal(h.code, 0); assert.match(h.stdout, /exit codes \(docs\/vitest-guard\/cli.md#exit-codes\):\n  0  ok\n  1  test failures/); assert.match(h.stdout, /compare/); assert.match(h.stdout, /calibrate/);
+  const h = cli(empty, ['--help']); assert.equal(h.code, 0); assert.match(h.stdout, /exit codes \(docs\/vitest-guard\/cli.md#exit-codes\):\n  0  ok\n  1  test failures/); assert.match(h.stdout, /compare/); assert.doesNotMatch(h.stdout, /calibrate|planner/);
   const u = cli(empty, ['frobnicate']); assert.equal(u.code, 2); assert.match(u.stderr, /unknown command/); assert.match(u.stderr, /see --help/); assert.ok(u.stderr.split('\n').length < 5, 'not the whole usage text');
   const n = cli(empty, ['check']); assert.equal(n.code, 2); assert.match(n.stderr, /vitest is not installed/);
   assert.equal(cli(empty, ['check', '--mode', 'turbo']).code, 2);
   assert.equal(cli(empty, ['check', '--config', 'nope.config.ts']).code, 2);
 });
 
-test('U-2: check / compare / calibrate / verify refuse a config that is not wrapped (exit 2, nothing measured or written)', integration, () => {
+test('U-2: check / compare / verify refuse a config that is not wrapped (exit 2, nothing measured or written)', integration, () => {
   const root = project({
     'package.json': '{"type":"module"}',
     'vitest.config.mjs': `export default { test: { include: ['test/**/*.test.ts'] } };\n`,
     'vitest.guard.config.mjs': wrappedConfig({ include: ['test/**/*.test.ts'] }, { mode: 'vm' }),
     ...filler(2),
   });
-  for (const cmd of ['check', 'compare', 'calibrate', 'verify', 'plan', 'run']) {
+  for (const cmd of ['check', 'compare', 'verify']) {
     const r = cli(root, [cmd]);
     assert.equal(r.code, 2, `${cmd}: ${r.out}`);
     assert.match(r.stderr, /vitest\.config\.mjs is not wrapped with defineVitestGuardConfig/, cmd);
     assert.match(r.stderr, /defineVitestGuardConfig\(defineConfig\(/, 'fix hint');
     assert.doesNotMatch(r.out, /recommend|files, 0 failing/, `${cmd} must not report a measurement`);
   }
-  assert.ok(!fs.existsSync(path.join(root, '.vitest-guard/run/modes.json')), 'no modes.json from an unwrapped config');
   assert.ok(!fs.existsSync(path.join(root, '.vitest-guard/run/compare.json')));
   assert.ok(!fs.existsSync(path.join(root, '.vitest-guard/incompatible.json')));
   // the same project with a wrapped config works
@@ -52,6 +51,26 @@ test('U-2: check / compare / calibrate / verify refuse a config that is not wrap
 
 // Vitest 4.1 with maxWorkers 1 runs each vm file in a fresh worker (see limitations.md): no worker-level state carries over
 const V4_FRESH_WORKERS = VITEST_MAJOR !== null && VITEST_MAJOR < 5;
+test('shared check: a victim that fails only after a polluter is quarantined with its predecessors and recorded in conflicts.json (exit 4), then runs green', integration, () => {
+  const root = project({
+    'package.json': '{"type":"module"}',
+    'vitest.config.mjs': wrappedConfig({ include: ['test/**/*.test.ts'], maxWorkers: 1, fileParallelism: false }, { mode: 'shared', verifyWarning: false }),
+    // outer-realm state a shared worker keeps: the polluter sets it (the resets do not know it), the victim fails with it
+    'test/a-polluter.test.ts': `import { it, expect } from 'vitest';\n${PAD}process.__vgSharedPollution = true;\nit('sets state', () => { expect(true).toBe(true); });\n`,
+    'test/b-victim.test.ts': `import { it, expect } from 'vitest';\nit('needs a clean process', () => { expect(process.__vgSharedPollution).toBeUndefined(); });\n`,
+    ...filler(2),
+  }, { modules: 'real' });
+  const r = cli(root, ['check', '--mode', 'shared']);
+  assert.equal(r.code, 4, r.out);
+  assert.match(r.out, /CONFLICT recorded: test\/b-victim\.test\.ts <- test\/a-polluter\.test\.ts/, r.out);
+  const q = readJson(path.join(root, '.vitest-guard/incompatible.json'));
+  assert.deepEqual(q.shared['test/b-victim.test.ts']?.after, ['test/a-polluter.test.ts']);
+  assert.deepEqual(readJson(path.join(root, '.vitest-guard/conflicts.json')).edges.map((e) => [e.a, e.b]), [['test/a-polluter.test.ts', 'test/b-victim.test.ts']]);
+  assert.match(r.out, /commit \.vitest-guard\/incompatible\.json and \.vitest-guard\/conflicts\.json/);
+  const again = cli(root, ['check', '--mode', 'shared']);
+  assert.equal(again.code, 0, again.out); // the victim now runs in isolated forks: converged
+});
+
 test('C-M7: a failure that is deterministic in vm (alone, or after a polluter) is quarantined with exit 4; only a pass on a same-conditions retry is FLAKY (exit 1)', integration, () => {
   const marker = path.join(fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'vmg-flaky-')), 'ran-once');
   const root = project({
@@ -240,7 +259,7 @@ test('install: package metadata lets `npm ci && npm test` work from a clean clon
   const fresh = spawnSync(process.execPath, [path.join(pkgDir, 'scripts/bundle-setup.mjs'), '--check'], { encoding: 'utf8' });
   assert.equal(fresh.status, 0, 'committed setup.bundle.mjs is stale: ' + fresh.stderr);
   // no static import of vitest in anything the config or the CLI loads in the main process
-  for (const f of ['index.mjs', 'cli.mjs', 'sequencer.mjs', 'runner.mjs', 'auto.mjs', 'envstore.mjs', 'verifystate.mjs', 'plan.mjs', 'logs.mjs', 'safety.mjs', 'scan.mjs'])
+  for (const f of ['index.mjs', 'cli.mjs', 'sequencer.mjs', 'runner.mjs', 'verifystate.mjs', 'logs.mjs', 'safety.mjs'])
     assert.doesNotMatch(fs.readFileSync(path.join(pkgDir, 'src', f), 'utf8'), /^import[^\n]*from\s+'vitest/m, f);
   assert.ok(vitestDir || process.env.VITEST_GUARD_TEST_NO_INTEGRATION === '1');
 });

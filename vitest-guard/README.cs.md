@@ -19,7 +19,7 @@ Vrstva, díky které jdou ve Vitestu bezpečně zapnout oba rychlé režimy (pod
 |---|---|---|
 | `isolated` (výchozí Vitest) | `pool: 'forks'`, `isolate: true` | 67,3 s |
 | **`vm`** | `pool: 'vmThreads'` | 11,8 s (**−82 %**, overhead vrstvy +2,1 %) |
-| **`shared`** | `pool: 'threads'`, `isolate: false` + `resetModules` (+ plánovač) | 5,3 s (**−92 %**), s plánovačem 5,8–6,0 s (−91 %) |
+| **`shared`** | `pool: 'threads'`, `isolate: false` + `resetModules` | 5,3 s (**−92 %**) |
 
 Celá heavy sada (312 souborů / 3193 testů): forks **480–498 s**, vitest-guard (vm) **66 s (−86 %)**, vitest-guard (shared)
 **16,1 s (−97 %)**. Oba režimy mají přesně stejných 5 selhaných testů jako forks. Holý `isolate:false` jich má
@@ -39,6 +39,10 @@ rizika, která se reprodukovala nebo je potvrzuje dokumentace/zdroják Vitestu.
 ## Dokumentace
 
 Úplná dokumentace (anglicky): [docs/vitest-guard/index.md](https://github.com/kral/vto/blob/main/docs/vitest-guard/index.md).
+
+> **Odstraněno ve verzi 0.2.0-alpha.0:** režim `auto` a `calibrate`, plánovač pro shared režim (`plan`, `run`, plánování
+> přes `--lanes`, `durations.json`, `pollution.json`), `scan`, `report`, animovaná labuť a veškerá integrace s vto. Žijí
+> na [větvi `vto`](https://github.com/kral/vto/tree/vto) (pozastaveno). Odstraněné příkazy a volby skončí exit kódem 2 s vysvětlením.
 
 ## Rychlý start
 
@@ -65,66 +69,11 @@ export default defineVitestGuardConfig(
 
 Přepínání bez úpravy konfigurace (syntaxe bash; PowerShell: `$env:VITEST_GUARD_MODE='vm'`, cmd: `set VITEST_GUARD_MODE=vm`): `VITEST_GUARD_MODE=vm|shared|isolated|off`, volby přes `VITEST_GUARD_OPTS='{"realm":false}'`.
 
-### `mode: 'auto'`: DOM skupina a node skupina, každá ve svém nejlepším režimu
-
-```ts
-export default defineVitestGuardConfig(config, { mode: 'auto' });
-```
-
-Zisk rychlého poolu závisí na souborech. vm kontexty šetří nastavení jsdom pro každý soubor. Čistě node soubory
-z nich nic nemají a platí za pomalejší přístup ke globálům v horkém kódu. `auto` proto rozdělí sadu na dvě skupiny
-a pro každou zvolí režim:
-
-- **Směrování podle nastaveného prostředí (výchozí)**: soubor patří do skupiny `dom`, když je jeho nastavené prostředí
-  (pragma `@vitest-environment`, jinak `environment` projektu nebo rootu) jsdom/happy-dom, jinak do `node`.
-  Přesunout soubory s jsdom, které na DOM nesáhnou, jinam beze změny prostředí stojí 2–3× CPU (ve forks se jsdom
-  staví pro každý soubor znovu) a změna prostředí mění sémantiku. Proto je to **opt-in**: `nodeEnvironment: 'node'`.
-- **S `nodeEnvironment: 'node'`** se soubory DOM sady přesunou do skupiny node, která běží s `environment: 'node'`.
-  Důkazy se berou od nejdůvěryhodnějšího:
-  1. explicitní pragma (nikdy se nepřepisuje);
-  2. zaznamenaný DOM miss (samooprava, viz níže), ten je trvalý;
-  3. **naměřený** přístup k DOM z `.vitest-guard/run/env.json`;
-  4. **statické** signály: `.tsx`/`.jsx`; importy `@testing-library/react|dom|user-event|jest-dom`, `react-dom`,
-     `jsdom`, `happy-dom`; `render(`/`renderHook(`/`screen.*`; použití `document.`/`window.`/`localStorage.` →
-     dom; jinak node.
-- **`.vitest-guard/run/env.json`** má formát **`vto-env/1`** (vto `mcp/PROTOCOL.md` §9), společný s vto daemonem:
-  `{ format, producer, updatedAt, files: { <cesta>: { group, source: 'probe'|'static', env, dom, at } } }`.
-  - Vlastní sonda vitest-guard (skupina dom) zapisuje `source: 'probe'`: getter pasti na DOM globály a
-    **MutationObserver** na dokumentu, takže se počítají i rendery přes reference získané před sondou (RTL
-    `screen`, `document.body` z importu).
-  - DOM miss se ukládá jako probe záznam s `dom: true` a rozšiřujícím polem `miss: { key }`.
-  - Záznamy jiných producentů zůstávají a měření nikdy nepřepíše statický záznam. Zápis je atomický (tmp +
-    rename).
-  - vitest-guard maže jen své záznamy per worker (`.vitest-guard/run/env-<pid>-<tid>.jsonl`) po jejich zapracování.
-    `env.json` se nikdy nemaže a neleží v čištěném `run/logs/`.
-- **Generované projekty** (bez vlastních `projects`): `dom` (vaše prostředí) a `node` (`environment: 'node'`).
-  Prázdné skupiny se vynechají. U **vlastních `projects`** (podporované od `2d7ddf9`) vaše rozdělení zůstane a
-  volí se jen režim projektu podle jeho prostředí. Explicitní pooly se nahradí, pokud nenastavíte
-  `respectPools: true`.
-- **Režim skupiny**: `autoModes` v konfiguraci (přepsání, např. `{ dom: 'vm', node: 'isolated' }`) >
-  `.vitest-guard/run/modes.json` > výchozí `dom → vm`, `node → shared`. `modes.json` zapisuje `vitest-guard calibrate`
-  (20 souborů na skupinu), `vitest-guard compare --sample all` a **automaticky první `vitest-guard check`** auto
-  konfigurace. Každý z nich měří forks vs vm vs shared per skupina a bere nejrychlejší režim bez rozdílů ve
-  výsledcích, nebo forks, když ušetří méně než 10 %. `check` na auto konfiguraci běží v režimu `auto`: každá
-  skupina ve svém režimu, karanténa jde do sekce režimu skupiny souboru.
-- **Samooprava** (s `nodeEnvironment: 'node'`):
-  - ve skupině node hlídají pasti jen pro záznam DOM globály, které node nemá (vrací `undefined`, takže
-    `typeof window` dál funguje);
-  - soubor, který po sáhnutí na takový globál **selže**, nebo selže s `document is not defined`, dostane chybu
-    navíc `[vitest-guard] auto: … touched the DOM global 'document' but was classified as pure node …`, zaznamená se
-    jako DOM miss a od dalšího běhu běží ve skupině dom;
-  - detekce prostředí v knihovnách u procházejících souborů nic nepřesune;
-  - soubor ze skupiny dom, který na DOM nesáhne, sonda příští běh přesune do node;
-  - soubory, jejichž importy sahají na DOM už při importu (jest-dom, RTL), zůstanou v dom.
-
 ### Volby (`defineVitestGuardConfig(config, volby)`)
 
 | volba | výchozí | význam |
 |---|---|---|
-| `mode` | `'vm'` | `'vm'` / `'shared'` / `'auto'` (režim per skupina, viz výše) |
-| `autoModes` | – | `auto`: režim per skupina/projekt, např. `{ dom: 'vm', node: 'shared' }`, má přednost před `modes.json` |
-| `respectPools` | `false` | `auto` s vlastními `projects`: ponechat explicitní pooly |
-| `nodeEnvironment` | `null` | `auto`: `'node'` = DOM-free soubory DOM sady přesunout do node skupiny s prostředím node (opt-in) |
+| `mode` | `'vm'` | `'vm'` / `'shared'` / `'isolated'` / `'off'` |
 | `memoryLimit` | `autoMemoryLimit()` | přepíše `vmMemoryLimit` |
 | `inline` | `[]` | doplní `server.deps.inline` |
 | `onDirty` | `'warn'` | špinavý stav na začátku souboru: `'warn'` / `'error'` / `'silent'` |
@@ -150,8 +99,8 @@ Env: `VITEST_GUARD_MODE`, `VITEST_GUARD_OPTS` (JSON s volbami), `VITEST_GUARD_DI
 
 `VITEST_GUARD_MODE` přepíše všechny projekty, to používá CLI (`check`, izolované re-runy). Setup vitest-guard běží v každém
 projektu první, před root i projektovými `setupFiles`. Karanténa je per projekt: vznikne sourozenec
-`<projekt>:isolated` ve `forks` s jen karanténními soubory daného projektu. Plánovač dělá pruhy per projekt (jeden
-proces = jeden projekt). Projekty zadané cestou/globem (`'packages/*'`) a funkce se neobalují, vitest-guard na ně jen
+`<projekt>:isolated` ve `forks` s jen karanténními soubory daného projektu.
+Projekty zadané cestou/globem (`'packages/*'`) a funkce se neobalují, vitest-guard na ně jen
 upozorní (obalte jejich konfiguraci zvlášť). Konfigurace jako funkce: zavolejte ji a předejte objekt.
 Ověřeno na reálné sadě (projekty `dom` + `node`, oba vmThreads).
 
@@ -159,27 +108,19 @@ Ověřeno na reálné sadě (projekty `dom` + `node`, oba vmThreads).
 
 ```
 npm run guard -- check  [--mode vm|shared] [--prune] [filtry…]
-npm run guard -- verify [--mode vm|shared] [--sample N|all] [--seed s]
-npm run guard -- plan   [--lanes N] [--vto-raw <dir>]
-npm run guard -- run    [--lanes N] [--no-heal]          # shared režim podle plánu
+npm run guard -- verify [--mode vm|shared] [--sample N|all] [--seed s] [--orders gate,forward,reversed,shuffle]
+npm run guard -- compare [--sample N|all] [--project a,b]
 npm run guard -- hunt   <soubor> [--before a,b,c]
-npm run guard -- scan   [--quarantine]
-npm run guard -- report
-npm run guard -- compare   [--sample N|all] [--project a,b] [--no-write]
-npm run guard -- calibrate [--sample N]
 ```
 
 - **check**: spustí sadu v rychlém režimu. Padající soubory pustí znovu izolovaně ve `forks` a porovná je **po testech**.
   Test, který izolovaně projde a v rychlém režimu ne, zařadí soubor do `.vitest-guard/incompatible.json` i se signaturou
-  chyby (cesty a čísla jsou normalizované). V režimu `shared` nejdřív hledá viníka (hunt): najde-li ho, zapíše
-  hranu do `.vitest-guard/conflicts.json` místo karantény (plánovač je příště rozdělí). Před zařazením do karantény se soubor pustí v rychlém režimu ještě jednou. Když projde, hlásí se jako FLAKY (typicky timeouty pod zátěží) a do karantény nejde (`--no-confirm` krok vypne). `--prune` vrací z karantény
+  chyby (cesty a čísla jsou normalizované). Soubor, který padá jen po jiných souborech, se bisektuje (hunt) a zařadí se do karantény
+  se seznamem souborů, po kterých padá (v režimu `shared` se dvojice navíc zapíše do `.vitest-guard/conflicts.json`). Před zařazením do karantény se soubor pustí v rychlém režimu ještě jednou. Když projde, hlásí se jako FLAKY (typicky timeouty pod zátěží) a do karantény nejde (`--no-confirm` krok vypne). `--prune` vrací z karantény
   soubory, které už v rychlém režimu procházejí.
 - **verify**: na vzorku pustí rychlý režim i izolované `forks` a porovná stav **každého testu**. *False green*
   (projde rychle, padá izolovaně) znamená exit 5. Takový případ reálně nastává, viz „Co vrstva nepokryje“.
-- **plan / run**: plánovač pro `shared` režim (viz níže). `run` je samoopravný: shared-only selhání bisektuje a zapamatuje si je.
 - **hunt**: bisekce souborů, které běžely před obětí ve stejném workeru (pořadí bere z běhového logu).
-- **scan**: statická analýza rizik pro `shared` režim, `--quarantine` riziková místa rovnou zakaranténuje (bez plánovače).
-- **report**: nejvíc „rostoucí“ soubory podle haldy a soubory, které začaly se špinavým stavem.
 - **compare** (i `check --compare`): pro každý projekt pustí vzorek (`--sample N`, výchozí 30; pro rozhodnutí
   `--sample all`) ve forks, vm a shared. Změří CPU celého stromu procesů Vitestu a spočítá testy s jiným výsledkem
   než forks. Pak doporučí režim per projekt: nejrychlejší bez rozdílů, nebo forks, když ušetří méně než 10 %.
@@ -191,13 +132,10 @@ Exit kódy (docs/vitest-guard/cli.md#exit-codes): `0` OK, `1` selhání testů (
 
 Soubory:
 - **commitovat** jen `.vitest-guard/incompatible.json` a `.vitest-guard/conflicts.json` (CODEOWNERS). Přepisují se jen
-  při změně obsahu, takže `vto affected` apod. nevidí falešné změny konfigurace.
+  při změně obsahu.
 - vše proměnlivé je v `.vitest-guard/run/` a **git ho ignoruje automaticky** (vitest-guard tam zapíše `.gitignore` s `*`):
-  logy běhů (`run/logs/`), pruhy, `durations.json`, `pollution.json`, `plan.json`, `files-cache.json`,
-  `settings.json`, `verify-*.json`, `compare.json`, pro `auto` i `env.json` (důkazy klasifikace) a `modes.json` (kalibrované režimy).
-- `--commit-state` nechá `durations.json` a `pollution.json` vedle commitovaných souborů (stejný plán na všech
-  strojích). Proměnlivé soubory, které starší verze zapsaly přímo do `.vitest-guard/`, se při dalším spuštění CLI
-  přesunou do `run/` (commitněte jejich odstranění).
+  logy běhů (`run/logs/`), soubory pruhů, `verify-*.json` a `compare.json`. Soubory, které zapisovaly starší verze
+  (`durations.json`, `pollution.json`, `plan.json`, `modes.json`, `env.json`, ...), se už nepoužívají: smažte je.
 
 ## Bezpečnost: vm/shared **nejsou** bezpečnostní izolace
 
@@ -215,10 +153,10 @@ soubor nebo závislost může pro **další soubory ve stejném workeru** podvrh
 - Úložiště workeru vitest-guard je nepřepisovatelná, nekonfigurovatelná vlastnost (`Symbol`) na `process`. Jeho
   obsah ale test změnit může. Kontrola integrity je pojistka proti nehodám a hloupým útokům, ne proti cílenému
   útočníkovi s možností spustit kód v testu.
-- **Data v `.vitest-guard/`** (commitovaná) se validují (F9): do `include` a plánů projdou jen doslovné, normalizované
+- **Data v `.vitest-guard/`** (commitovaná) se validují (F9): do `include` a hunt projdou jen doslovné, normalizované
   relativní cesty existujících souborů uvnitř repa (žádné `..`, absolutní cesty, glob znaky, symlinky ven), které
   odpovídají `include` a ne `exclude` daného projektu a které Vitest sám vylistuje. Ostatní se ignorují s varováním.
-  Totéž platí pro `VITEST_GUARD_LANE_FILE`, `conflicts.json`, `pollution.json`, `durations.json` a `hunt --before`.
+  Totéž platí pro `VITEST_GUARD_LANE_FILE`, `conflicts.json` a `hunt --before`.
   Doporučení: CODEOWNERS na `.vitest-guard/`.
 - **Dočasné soubory** (F8): JSON reporty Vitestu jdou do nového privátního adresáře `mkdtemp` (0700, nepředvídatelné
   jméno). Čtou se bez následování symlinků (`O_NOFOLLOW`) a jen tehdy, když adresář i soubor patří aktuálnímu
@@ -257,10 +195,10 @@ vitest-guard: **12 obětí padá**.
 
 | riziko | reprodukováno? | mitigace | zbytkové |
 |---|---|---|---|
-| stav na úrovni modulu v `src` (`let count`) | **ano** | `resetModules` (výchozí) **nebo**, při `resetModules: false`, plánovač: měkká hrana mezi soubory, které sdílejí stavový modul (heuristika `let`/mutovaná kolekce na top-levelu; moduly z vto `fileload` dat nebo z importů testu), plus historie | stav uvnitř closure detektor nevidí, chytí ho až samooprava |
+| stav na úrovni modulu v `src` (`let count`) | **ano** | `resetModules` (výchozí) | stav uvnitř closure detektor nevidí, chytí ho až samooprava |
 | singletony v `node_modules` (i18next init, react-query online/focusManager) | **ano** | sondy (i18next, query-core přes `vi.importActual`). query-core se resetuje, i18next se hlásí jako *residual*, takže vzniká **tvrdá hrana** na soubory, které i18next importují. Auto-detekce stavu CJS exportů všech načtených balíčků (primitiva + velikosti kolekcí) | balíčky bez sondy, jejichž stav není vidět v exportech |
 | `vi.mock` modulu ze `src` importovaného **přímo** testem (i různé factory), `vi.doMock` | ne (Vitest invaliduje samotný mockovaný modul) | konzervativně tvrdá hrana mezi soubory s různou factory | – |
-| **`vi.mock` modulu ze `src` importovaného tranzitivně** (test → komponenta → `api/client`) | **ano, obousměrně**: komponenta v cache si drží tu vazbu (reálnou nebo mock), kterou dostala jako první. Na celé heavy sadě (312 souborů) **309 selhaných testů** v 35 souborech s `vi.mock`, resety bez `resetModules` nepomohou (312) | **`resetModules: true` je výchozí** v shared režimu → plná sada má stejných 5 selhání jako forks. Při `resetModules: false` (`run --no-reset-modules`) přidá plánovač tvrdé hrany: soubor mockující M ↔ každý soubor, který M importuje bez mocku, nebo ho dosáhne přes jiný projektový modul. **I stejně napsaný `vi.mock` konfliktuje**: každý soubor má vlastní instance `vi.fn()` a komponenta v cache volá ty z prvního souboru. Heavy: 780 hran, 39 souborů do forks | při `resetModules: false` jen statický graf (dynamické importy, aliasy nevidí) |
+| **`vi.mock` modulu ze `src` importovaného tranzitivně** (test → komponenta → `api/client`) | **ano, obousměrně**: komponenta v cache si drží tu vazbu (reálnou nebo mock), kterou dostala jako první. Na celé heavy sadě (312 souborů) **309 selhaných testů** v 35 souborech s `vi.mock`, resety bez `resetModules` nepomohou (312) | **`resetModules: true` je výchozí** v shared režimu → plná sada má stejných 5 selhání jako forks. Při `resetModules: false` zůstává rozbité, nevypínejte ho. **I stejně napsaný `vi.mock` konfliktuje**: každý soubor má vlastní instance `vi.fn()` a komponenta v cache volá ty z prvního souboru. | – |
 | `vi.mock('balíček')` z `node_modules` | **ano** | statická hrana: mockující soubor ↔ soubory, které balíček importují (i přes zdrojové moduly) | – |
 | neobnovené mocky: `vi.spyOn` | **ne** | – | – |
 | neobnovené mocky: přímé přiřazení (`Date.now = vi.fn()`, `console.warn = vi.fn()`) | **ano** | snapshot ~40 sledovaných globálů (Date, Math.random, console.*, fetch, timery, matchMedia, observery, innerWidth…) a jejich obnovení | přiřazení do jiných globálů jen hlásí `scan` (`global-assign`) |
@@ -271,64 +209,14 @@ vitest-guard: **12 obětí padá**.
 | `localStorage` / `sessionStorage` | **ano** | `clear()` | – |
 | neodmontované React roots (`createRoot` bez `unmount`) | **ano** (interval dál mění `document.title`) | obalení `react-dom/client.createRoot`, odmontování v `act()` | – |
 | RTL cleanup | v labu je `cleanup` v setupu, samostatně se neprojevil | (váš setup) | – |
-| top-level side effects v testech | statická detekce (`scan`) | `scan --quarantine` nebo pořadí „polluter na konec“ | – |
 
-Výsledek na fixture: samotné resety snížily selhání z 12 na 2 (i18next, `src` stav). Plánovač se samoopravou je dostal na **0**, viz Měření.
+Výsledek na fixture: samotné resety snížily selhání z 12 na 2 (i18next, `src` stav). `check` pak zakaranténuje zbylé oběti, viz Měření.
 
 > **Poučení z plné sady:** fixture ani 39souborová podmnožina tranzitivní `vi.mock` neobsahovaly, proto se problém
 > ukázal až na 312 souborech. Bez `resetModules` je shared režim pro sady s `vi.mock` **nebezpečný**. Proto je reset
 > výchozí a vypnout ho má smysl jen se `verify --mode shared` na celé sadě.
 
-### Plánovač (shared)
-
-1. **Graf konfliktů**: tvrdé hrany z historie (`conflicts.json`, zapisuje hunt), z `vi.mock('balíček')` proti importům
-   balíčku, z různých factory pro stejný modul a ze *residual* znečištění singletonu (co přežilo resety) proti
-   importérům. Měkké hrany ze sdílených stavových modulů. Moduly per testovací soubor bere z vto `fileload.modules`
-   (`--vto-raw <dir>`, [FORMAT.md](https://github.com/kral/vto/blob/vto/FORMAT.md) v2), jinak z importů testu.
-2. **Rozdělení**: hladové barvení (LPT podle délky z `durations.json`, případně z vto `durationMs`) do `--lanes`
-   pruhů (výchozí `cores-1`). Tvrdý konflikt nesmí být ve stejném pruhu, měkký stojí 25 % ideální zátěže pruhu.
-   Co se nikam nevejde, jde do izolovaného koše (forks).
-3. **Pořadí v pruhu**: známé oběti první, znečišťovatelé (statické rysy, naměřené znečištění, historie) poslední.
-4. **Realizace ve Vitestu 5.1.1** (ověřeno ve zdrojáku `groupSpecs` / `pool.run`): s `isolate:false` a `maxWorkers:1`
-   Vitest pošle **všechny soubory projektu jedním run requestem do jednoho workeru** v pořadí sequenceru. S
-   `maxWorkers>1` se worker znovu použije jen tehdy, když je další úloha ve frontě ze stejného projektu, a soubory
-   si workery berou dynamicky. Několik projektů s `maxWorkers:1` musí mít různé `sequence.groupOrder`, takže běží
-   **sériově**. Přiřazení souboru k workeru proto v jednom procesu řídit nejde. `vitest-guard run` pouští **každý pruh
-   jako samostatný proces Vitestu** (`VITEST_GUARD_LANE_FILE` → přesný `include`, `maxWorkers: 1`, `VitestGuardSequencer`)
-   a izolovaný koš jako další proces.
-5. **Samooprava**: soubor, který ve shared padá a izolovaně projde, se bisektuje proti souborům, které před ním
-   běžely ve stejném workeru (log `.vitest-guard/run/w-*.jsonl`). Stojí to ~log2(n)+2 běhů, na fixture 9–10. Dvojice
-   jde do `conflicts.json` a další plán ji rozdělí.
-
 ## Měření
-
-### `mode: 'auto'` (reálná sada a heavy, celé sady, CPU s)
-
-Kopie v labu, originál reálná sada zůstal nedotčený. „současné“ = vlastní konfigurace repa (reálná sada:
-projekty `dom` + `node`, oba vmThreads; heavy: výchozí forks).
-
-| repo | varianta | CPU s | vs současné | vs forks | selhané testy |
-|---|---|---|---|---|---|
-| reálná sada (1992 testů) | současné (vmThreads + vmThreads) | 168,6 / 174,8 | – | −42 % | 0 |
-| | forks (vše izolovaně) | 297,1 | +73 % | – | 0 |
-| | vše vm (vitest-guard) | 178,3 | +4 % | −40 % | 1 (timeout pod zátěží) |
-| | vše shared (vitest-guard) | 119,2 | −30 % | −60 % | 0 |
-| | **auto, výchozí** (dom → vm, node → shared) | **143,5** | **−15 %** | −52 % | 0 |
-| | `calibrate` (jednorázově, 20 souborů na projekt) | 80,4 | | | |
-| | **auto, kalibrované** (`modes.json`: dom → shared, node → shared) | **114,3 / 120,5 / 112,1** | **−34 %** | **−62 %** | 0 (stejně jako forks a současné: žádné) |
-| heavy (3193 testů) | současné (forks) | 480 / 498 | – | – | 5 (předem existující) |
-| | **auto, výchozí** (všech 312 souborů dom → vm) | **74,4** | −85 % | −85 % | 5 |
-| | `calibrate` | 44,6 | | | |
-| | **auto, kalibrované** (dom → shared) | **17,6 / 17,1** | **−96 %** | −96 % | 5: seznam selhaných testů shodný s forks (porovnáno diffem) |
-| | první `vitest-guard check` (sám kalibruje, pak kontroluje v režimu auto) | 67,2 | | | 5, tytéž 3 předem existující soubory |
-
-Jak to číst: na obou repech vyšel jako nejlepší režim obou skupin `shared`. Kalibrované `auto` se tu proto rovná
-nejlepšímu jednotnému režimu (vše shared) v rámci šumu a nepřekoná ho. Výchozí nastavení bez kalibrace už na
-reálná sada porazí vlastní setup repa (−15 %), protože node projekt opustí vmThreads (tam +9–10 % proti forks).
-`auto` se vyplatí, když se skupiny liší (DOM-těžké UI vedle CPU-těžké čisté logiky), a jako bezpečný výchozí stav,
-který `calibrate` zpřesní. Kalibrace stojí na vzorku: když vybere `shared`, potvrďte to přes
-`verify --mode shared --sample all` (nightly), než se na něj spolehnete.
-
 
 Stroj: 2 sdílená jádra (load 3–8), měří se **CPU čas** (user+sys celého stromu procesů, bash `time`). Wall je
 zkreslený. Heavy = kopie `perf-lab/heavy` (MUI + emotion + RTL, jsdom), podmnožina `.1.test` = 39 souborů / 390 testů,
@@ -343,11 +231,9 @@ všechny varianty 390/390 zelené. Mediány, forks n=3, ostatní n=6, prokládan
 | vitest-guard s 1 souborem v karanténě | 13,0–13,6 | −80 % | (= cena 1 souboru ve forks, ~1,7 s) |
 | threads + isolate:false holý | 5,15 | −92,3 % | – |
 | **vitest-guard (shared, resety + detekce)** | **5,33** | **−92,1 %** | +3,5 % (párový medián +5 %) |
-| `vitest-guard run` (plán, 1 pruh, bez diagnostiky) | 5,78 | −91,4 % | +12 % (druhý proces, fixní ~0,6 s) |
-| `vitest-guard run` (plán + diagnostika + samooprava) | 6,02 | −91,1 % | +17 % |
 
-Vlastní čas vrstvy (`vitest-guard report`, wall, tedy horní odhad): vm 3,8 ms/soubor, shared 6 ms/soubor, s diagnostikou
-17 ms/soubor. Co pomohlo ze stavu v0 (vm +3,3 %, shared +16 %, plán +34 %): bez `projects`, když není karanténa
+Vlastní čas vrstvy (wall, tedy horní odhad): vm 3,8 ms/soubor, shared 6 ms/soubor, s diagnostikou
+17 ms/soubor. Co pomohlo ze stavu v0 (vm +3,3 %, shared +16 %): bez `projects`, když není karanténa
 (samotný 1 inline projekt stál ~4 %), outer-realm otisk kompilovaný jednou na worker (vm pool vypíná compilation
 cache a setup modul se kompiluje znovu pro každý soubor), inkrementální sken stavu `node_modules`, diagnostika jen
 pod CLI (`VITEST_GUARD_DIAG=1`), cache `vitest list`. Samotný prázdný setup soubor navíc stojí ve vmThreads ~2–3 %.
@@ -367,9 +253,6 @@ testů**.
 | threads + isolate:false holý | 29,8 / 29,3 | (−94 %) | **308–311** |
 | vitest-guard shared **bez** `resetModules` | 31,9 | – | **308** |
 | **vitest-guard shared (výchozí, `resetModules`)** | **16,1 / 16,1** | **−96,7 %** | **5** |
-| `vitest-guard run` (plán, bez diagnostiky) | 18,0 / 18,1 | −96,3 % | 5 |
-| `vitest-guard run --no-reset-modules` (780 mock hran → 39 souborů do forks) | 83,9 | −83 % | 5 |
-| `vitest-guard check --mode shared` (plán + diagnostika + izolovaný re-run 3 souborů) | 24,4–25,5 | – | 5 (exit 1 = předem existující) |
 
 Shared s `resetModules` je dokonce rychlejší než holý `isolate:false`, protože ten tráví čas v timeoutech
 padajících `findBy*`. Reset `src` modulů je levný, drahé `node_modules` (MUI, emotion, react-dom) zůstávají v cache.
@@ -383,12 +266,9 @@ Fixture shared režimu (48 souborů, 17 dvojic, 12 se reálně projeví; měřen
 | threads + isolate:false, 1 worker, nejhorší pořadí | 2,1 | **12** |
 | + vitest-guard resety | 2,5 | 2 (i18next, `src` stav) |
 | + `resetModules` (dnes výchozí) | – | 1 (i18next) |
-| `vitest-guard run`, 1 pruh, studený start | – | 2 → samooprava (9 a 10 běhů bisekce) → **0**, 0 |
-| `vitest-guard run`, 2 pruhy, studený start | 4,7 | 1 → samooprava (9 běhů) → **0**, 0 |
 | vitest-guard (vm), nejhorší pořadí | – | 0 (holý vmThreads: 1, `vi.stubEnv` přes `process.env`) |
 
-Zabráněno: resety 10/12, plán se samoopravou 12/12 od druhého běhu. i18next pár by plán rozdělil i bez bisekce,
-protože *residual* znečištění singletonu z prvního běhu vytvoří tvrdou hranu.
+Zabráněno: resety 10/12; `check` zakaranténuje zbylé oběti, takže od druhého běhu je výsledek 12/12.
 
 Paměť (`mem/`, 120 souborů, 1 worker, vmThreads): výchozí limit nikdy nerecykluje, špička ~330 MB. Únik na
 `process`: 1,1 GB. `vmMemoryLimit: 300MB` dělá 7 recyklací a stojí +44 % CPU (15,6 → 22,6 s).
@@ -408,7 +288,6 @@ Paměť (`mem/`, 120 souborů, 1 worker, vmThreads): výchozí limit nikdy nerec
 - Detektor stavu `node_modules` nerozliší „scratch“ stav parseru od úniku. stylis je ve výchozím ignore listu,
   další doplňte do `ignoreModules`.
 - Detektor duplicitního Reactu vidí jen fyzické kopie.
-- Plánovač s 1 pruhem (2 jádra → `cores-1 = 1`) posílá konfliktní soubory do izolovaného koše. Víc pruhů = míň izolace.
 
 ## Doporučený rollout
 
@@ -428,8 +307,8 @@ Paměť (`mem/`, 120 souborů, 1 worker, vmThreads): výchozí limit nikdy nerec
    na PR = někdo přidal vm-nekompatibilní test, commitnout aktualizaci karantény.
 4. **Nightly forks**: `VITEST_GUARD_MODE=isolated vitest run` (PowerShell: `$env:VITEST_GUARD_MODE='isolated'; npx vitest run`; cmd: `set VITEST_GUARD_MODE=isolated && npx vitest run`) (celá sada izolovaně) + `npm run guard -- verify --sample 500`
    (exit 5 = false green) + `npm run guard -- check --prune` (uvolní opravené soubory).
-5. **Shared až potom**, volitelně pro lokální/pre-push běhy: `npm run guard -- scan`, pak `npm run guard -- run`
-   (plán + samooprava). Commitovat `conflicts.json`. Nightly
+5. **Shared až potom**, volitelně pro lokální/pre-push běhy: `npm run guard -- check --mode shared`.
+   Commitovat `.vitest-guard/*.json`. Nightly
    `verify --mode shared`.
 
 ### Který režim jako výchozí
@@ -437,9 +316,6 @@ Paměť (`mem/`, 120 souborů, 1 worker, vmThreads): výchozí limit nikdy nerec
 **Per projekt**: jednou pusťte `vitest-guard compare --sample all`. Projekty s jsdom/happy-dom ve vm obvykle získají
 nejvíc. Čistě node projekty často nic nezískají nebo se zpomalí (reálná sada `node`: +9,0 %), tam použijte
 `shared` (s `resetModules`), nebo nechte `forks`. U `projects` nastavte pool per projekt, vitest-guard ho ponechá.
-
-**Výchozí bod**: `mode: 'auto'` (dom → vm, node → shared), pak `vitest-guard calibrate` a čistý nightly
-`verify --mode shared --sample all`, než se spolehnete na kalibrované `shared`.
 
 **Doporučení: `mode: 'vm'` jako výchozí v CI, `mode: 'shared'` (s výchozím `resetModules`) pro lokální a pre-push
 běhy a do CI ho povýšit, až bude nightly `verify --mode shared` na celé sadě nějakou dobu čistý.**
@@ -453,5 +329,4 @@ běhy a do CI ho povýšit, až bude nightly `verify --mode shared` na celé sad
 
 ## Lab
 
-Reprodukce, fixture a skripty: `/home/claude/vmguard-lab` (`repro/*`, `shared/`, `mem/`, `heavy/`, `scripts/run.mjs` =
-matice forks × vmThreads × jsdom/happy-dom). Testy vrstvy: `npm test` (`test/unit.test.mjs`, `test/security.test.mjs`; potřebuje nainstalovaný `vitest`, bez něj se integrační testy přeskočí). Anglická verze: [README.md](README.md).
+Testy vrstvy: `npm test` v tomto adresáři (`node --test test/*.test.mjs`; závislosti `npm ci`; bez Vitestu integrační testy selžou, pokud není `VITEST_GUARD_TEST_NO_INTEGRATION=1`). Anglická verze: [README.md](README.md).
