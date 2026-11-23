@@ -2,8 +2,8 @@
 
 ## Depends on Vitest internals
 
-- Vitest `>=4.1 <6` (since 0.1.0-alpha.4). Developed against 5.1.1, the version in the lockfile that CI tests.
-  4.1.8 was tested by hand: the full test suite ran green against a Vitest 4.1.8 install. Other 4.1.x and 5.x
+- Vitest `>=4.1 <6` (since 0.1.0-alpha.4). Developed against 5.1.1; CI tests 4.1.8 and 5.1.1
+  (the test suite on Linux and Windows, the React trial on Linux, macOS and Windows). Other 4.1.x and 5.x
   releases fit the peer range but have not been tested. The shared-mode planner relies on how Vitest groups specs
   and hands them to workers (`groupSpecs` / `pool.run`, the same in 4.1 and 5.1): with `isolate: false` and
   `maxWorkers: 1`, one project's files go to one worker in sequencer order. A Vitest change here would break the

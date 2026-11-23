@@ -58,6 +58,13 @@ jobs:
         run: |
           npm ci --ignore-scripts
           npm test
+      - name: vitest-guard suite on Vitest 4.1.8 (peer range >=4.1 <6; the lockfile has 5.1.1)
+        if: ${{ matrix.os == 'ubuntu-24.04' && matrix.node == '24' }}
+        working-directory: vitest-guard
+        run: |
+          npm install --no-save --ignore-scripts --legacy-peer-deps --no-audit --no-fund vitest@4.1.8
+          npm test
+          npm ci --ignore-scripts --no-audit --no-fund
       - name: the tests did not change what is published
         shell: bash
         run: |

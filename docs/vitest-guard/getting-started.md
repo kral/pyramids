@@ -1,6 +1,6 @@
 # Getting started
 
-Requirements: Node `^22.22.2 || >=24.15.0`, Vitest `>=5.1 <6` installed in your project (vitest-guard always uses the
+Requirements: Node `^22.22.2 || >=24.15.0`, Vitest `>=4.1 <6` (4.1 and 5.1 tested in CI) installed in your project (vitest-guard always uses the
 project's own Vitest; `package.json` declares it as a peer dependency).
 
 > `@jirikral/vitest-guard` is published on npm under the dist-tag `next` (pre-release). **Never run `npx vitest-guard`**: the unscoped name `vitest-guard` is not ours, and whoever owns it would run their code on your machine. Run the CLI through your project's install (below).

@@ -9,7 +9,7 @@ set for that session until `Remove-Item Env:VITEST_GUARD_MODE`); cmd: `set VITES
 | symptom | cause | what to do |
 |---|---|---|
 | `vitest-guard check` exits 2: "<config> is not wrapped with defineVitestGuardConfig" | the config the CLI loads does not go through `defineVitestGuardConfig`, so `VITEST_GUARD_MODE` would have no effect | wrap it, or pass `--config vitest.guard.config.ts`. Nothing is run or written in this case |
-| exits 2 "vitest is not installed in <root>" | vitest-guard uses the project's own Vitest (>=5.1 <6) | `npm i -D vitest@^5.1` in the project; check `--root` |
+| exits 2 "vitest is not installed in <root>" | vitest-guard uses the project's own Vitest (>=4.1 <6) | `npm i -D vitest@^5.1` in the project; check `--root` |
 | `defineVitestGuardConfig needs a plain config object` | config is a function or promise | resolve it first: `defineConfig(async (env) => defineVitestGuardConfig(await base(env)))` |
 | `x instanceof Array/Error/Map` false, `toStrictEqual` fails only in vm | objects from Node builtins or copied globals belong to the outer realm | the shims cover constructors listed in [how-it-works.md](how-it-works.md); user code such as `x.constructor === Array` is not covered: fix the code, or quarantine (`check` does it) |
 | MSW fails at import in vm | missing Web globals (streams, `BroadcastChannel`, ...) | vitest-guard copies them (`realm: true`, default). If you set `realm: false`, undo it. MSW + happy-dom also fails in forks (measured) |
@@ -64,4 +64,4 @@ isolation with the guard layer's logging). PowerShell: `$env:VITEST_GUARD_MODE='
 
 **Does it work with Vitest `projects`?** Yes, for inline project objects ([configuration.md](configuration.md)).
 
-**Does vitest-guard work with Jest or Vitest 4?** No: Vitest `>=5.1 <6` is the supported range.
+**Does vitest-guard work with Jest or Vitest 4?** Not with Jest. Vitest `>=4.1 <6` is the supported range (4.1 and 5.1 are tested in CI); Vitest 4.0 and older are not supported.
