@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import v8 from 'node:v8';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { threadId } from 'node:worker_threads';
 import { getOuterGlobal, installHasInstanceShims, installMissingGlobals, createRealmEqualityTester, DOM_KEYS } from './realm.mjs';
 import * as fp from './fingerprint.mjs';
@@ -214,6 +214,44 @@ if (opts.react !== false && worker.react === null) {
 sect('top:react', tS);
 if (worker.react === 'dup' && opts.react !== 'warn') throw new Error(worker.reactMsg);
 
+// B1 (alpha.3 gate): globals a package defines while it is evaluated. Vitest's module evaluator (the module that
+// runs this setup file: its path is on the stack of this module's top-level code) evaluates every module of a test
+// file: external ones through `runExternalModule` (Node's import, cached for the worker), inlined ones through
+// `runInlinedModule`. Own keys of the global object that appear during such an evaluation of a package are its own.
+// Returns false when the evaluator is not found (another Vitest, native module runner): then nothing is 'lib' by this
+// route and an unattributed global is deleted after the file (fail closed; `keepGlobals` is the escape hatch).
+const EVALUATOR_URL = (() => {
+  const st = new Error().stack || '';
+  const m = /((?:file:\/\/)?[^\s()]*[\\/]vitest[\\/]dist[\\/]module-evaluator\.js)/.exec(st);
+  return m ? (m[1].startsWith('file:') ? m[1] : pathToFileURL(m[1]).href) : null;
+})();
+async function hookEvaluator() {
+  let E = null;
+  try { if (EVALUATOR_URL) E = (await import(/* @vite-ignore */ EVALUATOR_URL)).VitestModuleEvaluator; } catch {}
+  const proto = E?.prototype;
+  if (!proto || typeof proto.runExternalModule !== 'function' || typeof proto.runInlinedModule !== 'function') return false;
+  if (proto.runExternalModule.__vitestGuard) return true;
+  const keysNow = () => { try { return Object.getOwnPropertyNames(globalThis); } catch { return []; } };
+  const claim = (before) => {
+    const had = new Set(before);
+    for (const k of keysNow()) if (!had.has(k) && !worker.globalWho.has(k)) worker.globalWho.set(k, 'lib');
+  };
+  const wrap = (name, isLib) => {
+    const orig = proto[name];
+    const w = async function (...a) {
+      if (!isLib(a)) return orig.apply(this, a);
+      const before = keysNow();
+      try { return await orig.apply(this, a); } finally { claim(before); }
+    };
+    Object.defineProperty(w, '__vitestGuard', { value: true });
+    proto[name] = w;
+  };
+  const inNm = (id) => typeof id === 'string' && /[\\/]node_modules[\\/]/.test(id) && !VITEST_FRAME.test(id);
+  wrap('runExternalModule', ([id]) => typeof id === 'string' && !/^(?:node:|data:)/.test(id) && !VITEST_FRAME.test(id));
+  wrap('runInlinedModule', ([, , mod]) => inNm(mod?.file ?? mod?.id ?? mod?.url));
+  return true;
+}
+
 // ---- shared mode: one-time instrumentation of the long-lived realm ----
 if (mode === 'shared' && !worker.patched) {
   worker.patched = true;
@@ -236,11 +274,18 @@ if (mode === 'shared' && !worker.patched) {
   };
   if (typeof window !== 'undefined') track(window, 'window');
   if (typeof document !== 'undefined') track(document, 'document');
-  // S5 (alpha.3): who adds an own property to the global object (`globalThis.x = …`, `window.x = …`, Object.assign,
-  // Object.defineProperty) or overrides a navigator property. A plain assignment of a name the global object does not
-  // have reaches its prototype chain: a Proxy there sees it (and then defines the property as an ordinary assignment
-  // would). Object.defineProperty / defineProperties / Reflect.defineProperty are wrapped (callable Proxies: same
-  // name, length and native toString). Only the provenance is recorded here; the resets after the file use it.
+  // S5 (alpha.3): who adds an own property to the global object or overrides a navigator property.
+  // B1 (alpha.3 gate): no Proxy in the prototype chain of the global object any more - with one there V8 routes a
+  // strict-mode assignment to an undeclared identifier (`reslt = sum`) to its `set` trap instead of throwing a
+  // ReferenceError (a false green). Provenance now comes from
+  //  - Object.defineProperty / defineProperties / Reflect.defineProperty (wrapped: callable Proxies, same name and
+  //    length): the call site, as for testers and intervals;
+  //  - Vitest's module evaluator: names that appear on the global object while a package is evaluated (an external
+  //    module - Node caches it for the whole worker -, or an inlined module from node_modules) are the package's ('lib');
+  //  - anything else (a plain `globalThis.x = …` / `window.x = …` / Object.assign from test or project code, or from a
+  //    package function a test calls) has no recorded origin: the reset after the file deletes it (fail closed, as a
+  //    fresh fork would not have it). `keepGlobals` keeps named globals of a register-once package.
+  // Only the provenance is recorded here; the resets after the file use it.
   const hasOwn = Object.prototype.hasOwnProperty;
   worker.globalWho = new Map(); worker.navWho = new Map();
   const note = (o, k) => {
@@ -250,13 +295,7 @@ if (mode === 'shared' && !worker.patched) {
     else if (o === worker.navProto) worker.navWho.set('prototype.' + k, whoCalled());
   };
   const watched = (o) => o === globalThis || (o != null && (o === worker.navRef || o === worker.navProto));
-  try {
-    const proto = Object.getPrototypeOf(globalThis);
-    if (proto) {
-      const px = new Proxy(proto, { set(t, k, v, r) { if (r === globalThis) note(globalThis, k); return Reflect.set(t, k, v, r); } });
-      worker.globalTrap = Reflect.setPrototypeOf(globalThis, px);
-    }
-  } catch {}
+  worker.evaluatorHooked = await hookEvaluator();
   try {
     for (const [owner, name, multi] of [[Object, 'defineProperty', false], [Object, 'defineProperties', true], [Reflect, 'defineProperty', false]]) {
       const orig = owner[name];
@@ -305,6 +344,8 @@ if (mode === 'shared' && !worker.patched) {
   } catch {}
 }
 
+// `keepGlobals`: names never tracked by the global-object reset (this module, and so the filter, is evaluated per file)
+fp.setKeepGlobals(opts.keepGlobals);
 // S5 (alpha.3): the navigator object whose overrides are recorded (re-read per file: an environment can replace it)
 if (mode === 'shared') {
   try { const n = globalThis.navigator; worker.navRef = n && typeof n === 'object' ? n : null; const p = worker.navRef && Object.getPrototypeOf(worker.navRef); worker.navProto = p && p !== Object.prototype ? p : null; } catch { worker.navRef = worker.navProto = null; }
@@ -557,7 +598,8 @@ afterAll(async ({}, suite) => { // Vitest 5: fixtures first (must be destructure
         if (worker.base.keys?.has(k) || fileCtx?.keys?.has(k)) continue;
         const who = worker.globalWho?.get(k);
         if (who === 'lib') { (worker.keysKnown ??= new Set()).add(k); continue; }
-        if (who === 'file' || (who === 'project' && opts.resetModules)) { try { delete globalThis[k]; } catch {} if (!hasOwn.call(globalThis, k)) worker.globalWho.delete(k); }
+        // B1: no recorded origin (a plain assignment) = fail closed, deleted like the test file's own
+        if (who === undefined || who === 'file' || (who === 'project' && opts.resetModules)) { try { delete globalThis[k]; } catch {} if (!hasOwn.call(globalThis, k)) worker.globalWho.delete(k); }
       } }
     // S5 (alpha.3): navigator properties go back to what they were after this file's setup files (a package that
     // overrode one at load, or a cached project module without resetModules, keeps it and is reported)

@@ -47,6 +47,8 @@ export interface VitestGuardOptions {
   ignoreListeners?: string[];
   /** node_modules paths (e.g. 'stylis/dist/umd/stylis.js') whose exported state is scratch state; also learned automatically after 3 consecutive changes */
   ignoreModules?: string[];
+  /** shared mode: own properties of the global object that the reset after each file never deletes nor reports (a register-once package that sets a global from a hook/test) */
+  keepGlobals?: string[];
   sharedPool?: 'threads' | 'forks';
   /** emit test.projects even without quarantine (default false: projects cost ~4 % CPU) */
   alwaysProjects?: boolean;

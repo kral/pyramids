@@ -333,7 +333,7 @@ function buildConfig(userConfig, g) {
     root, runDir: path.join(root, '.vitest-guard', 'run', 'logs'), stateDir: path.join(root, '.vitest-guard', 'run'),
     onDirty: g.onDirty || 'warn', react: g.react ?? true, reactPackages: g.reactPackages || [], realm: g.realm ?? true, probes: g.probes ?? true,
     restoreEnv: g.restoreEnv ?? true, reset: g.reset ?? true, resetModules: g.resetModules ?? true, // shared mode: required for vi.mock correctness (cached importers keep the first binding)
-    moduleState: g.moduleState, detectPollution: g.detectPollution, diag: g.diag, ignoreListeners: g.ignoreListeners || [], ignoreModules: g.ignoreModules || [], log: g.log ?? true,
+    moduleState: g.moduleState, detectPollution: g.detectPollution, diag: g.diag, ignoreListeners: g.ignoreListeners || [], ignoreModules: g.ignoreModules || [], keepGlobals: Array.isArray(g.keepGlobals) ? g.keepGlobals.filter((k) => typeof k === 'string') : [], log: g.log ?? true,
     integrity: g.integrity ?? true,
   };
   // shared mode: a tail setup file marks "setup files done" (M6); that needs the setup files to run in list order.

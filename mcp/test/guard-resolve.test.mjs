@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { resolveGuard, GUARD_PROTOCOL, protocolOf, CHECKOUT_GUARD_DIR } from '../src/guard-resolve.mjs';
 import { Metrics } from '../src/metrics.mjs';
 
@@ -34,6 +35,16 @@ test('S6: a protocol mismatch is a clear error, an older copy without protocol t
     const { d } = projectWith(pkg);
     try { assert.throws(() => resolveGuard(d), /protocol mismatch: this vto expects protocol 1.*9\.9\.9/); } finally { fs.rmSync(d, { recursive: true, force: true }); }
   }
+});
+
+test('gate note 5: `vto guard` prints the protocol-mismatch message in full (the remedy at its end)', () => {
+  const { d } = projectWith({});
+  try {
+    const bin = path.join(path.dirname(CHECKOUT_GUARD_DIR), 'bin', 'vto.mjs');
+    const r = spawnSync(process.execPath, [bin, 'guard', 'check', '--root', d], { cwd: d, encoding: 'utf8' });
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /protocol mismatch.*npm i -D @jirikral\/vitest-guard@next\) or update vto\./);
+  } finally { fs.rmSync(d, { recursive: true, force: true }); }
 });
 
 test('S6: without an installed copy the checkout is used', () => {

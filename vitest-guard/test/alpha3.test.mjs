@@ -87,6 +87,61 @@ test('S5 unit: navigator snapshots compare accessors by source and restore what 
   } finally { delete globalThis.navigator; }
 });
 
+// ---------------- release gate (alpha.3): B1, B2, keepGlobals ----------------
+test('gate B1: an assignment to an undeclared identifier still throws a ReferenceError in a shared worker (no false green)', integration, () => {
+  const root = P({
+    'src/calc.js': `export function total(items) { let sum = 0; for (const i of items) sum += i; reslt = sum; return sum; }\n`,
+    'src/a.test.js': `import { test, expect } from 'vitest'; import { total } from './calc.js'; test('total', () => { expect(total([1, 2])).toBe(3); });\n`,
+    'src/b.test.js': `import { test, expect } from 'vitest'; test('b expects the throw', () => { expect(() => { undeclaredName = 1; }).toThrow(ReferenceError); expect('undeclaredName' in globalThis).toBe(false); });\n`,
+  }, { environment: 'jsdom', ...one }, { mode: 'shared' });
+  const iso = vitestRun(root, [], { env: { VITEST_GUARD_MODE: 'isolated' } });
+  assert.deepEqual(iso.status, { 'src/a.test.js': 'failed', 'src/b.test.js': 'passed' });
+  const r = vitestRun(root, [], noWarn);
+  assert.equal(r.code, 1, r.out);
+  assert.deepEqual(r.status, { 'src/a.test.js': 'failed', 'src/b.test.js': 'passed' }, r.out);
+});
+
+test('gate B2 unit: Vitest / Vite / coverage globals are never tracked (istanbul\'s store survives the reset)', () => {
+  for (const k of ['__VITEST_COVERAGE__', '__coverage__', '__vitest_worker__', '__vitest_mocker__', '__VITEST_MOCKER_ROOT__', '__vite_ssr_import__', 'IS_REACT_ACT_ENVIRONMENT'])
+    assert.ok(fp.isKeptGlobal(k), k);
+  for (const k of ['__cfg', 'coverage', '__coverage__x', 'reslt']) assert.ok(!fp.isKeptGlobal(k), k);
+  globalThis.__VITEST_COVERAGE__ = {}; globalThis.__coverage__ = {}; globalThis.__vgGateProbe = 1;
+  try {
+    const keys = fp.captureGlobalKeys();
+    assert.ok(!keys.has('__VITEST_COVERAGE__') && !keys.has('__coverage__') && keys.has('__vgGateProbe'));
+  } finally { delete globalThis.__VITEST_COVERAGE__; delete globalThis.__coverage__; delete globalThis.__vgGateProbe; }
+});
+
+test('gate B2: a coverage store created during a file (as istanbul-instrumented modules do) is not deleted after it', integration, () => {
+  const mod = (n) => `globalThis.__VITEST_COVERAGE__ ??= {}; globalThis.__VITEST_COVERAGE__['${n}'] = 1; export const f = () => 1;\n`;
+  // the n-th file of the worker sees the stores of all n files (an earlier file's entry survived its reset)
+  const t = (n) => `import { test, expect } from 'vitest'; import { f } from './${n}.js';
+test('${n}', () => { expect(f()).toBe(1); expect(Object.keys(globalThis.__VITEST_COVERAGE__).length).toBe(process[Symbol.for('vitest-guard.worker')].seq); });\n`;
+  const root = P({ 'src/m1.js': mod('m1'), 'src/m2.js': mod('m2'), 'src/m3.js': mod('m3'), 'src/a.test.js': t('m1'), 'src/b.test.js': t('m2'), 'src/c.test.js': t('m3') },
+    { environment: 'jsdom', ...one }, { mode: 'shared', onDirty: 'error' });
+  const r = vitestRun(root, [], noWarn);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(Object.values(r.status), ['passed', 'passed', 'passed']);
+});
+
+test('gate: keepGlobals keeps the global of a register-once package called from a hook (and only that)', integration, () => {
+  const t = (i) => `import { test, expect, beforeAll } from 'vitest'; import { install } from 'oncelib'; beforeAll(() => install());
+test('t${i}', () => { expect(typeof globalThis.OncePolyfill).toBe('function'); expect(globalThis.__plain).toBeUndefined(); globalThis.__plain = ${i}; });\n`;
+  const files = { 'src/a.test.js': t(0), 'src/b.test.js': t(1), 'src/c.test.js': t(2) };
+  const once = { 'package.json': '{"name":"oncelib","version":"1.0.0","type":"module","main":"i.js"}', 'i.js': 'let done = false; export function install() { if (done) return; done = true; globalThis.OncePolyfill = class {}; }\n' };
+  const without = P(files, { environment: 'jsdom', ...one }, { mode: 'shared' }, { modules: 'real' });
+  pkg(without, 'oncelib', once);
+  const r0 = vitestRun(without, [], noWarn);
+  assert.equal(Object.values(r0.status).filter((x) => x === 'failed').length, 2, 'documented limit: every file after the first fails ' + r0.out);
+  const withKeep = P(files, { environment: 'jsdom', ...one }, { mode: 'shared', keepGlobals: ['OncePolyfill'] }, { modules: 'real' });
+  pkg(withKeep, 'oncelib', once);
+  const r = vitestRun(withKeep, [], noWarn);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(Object.values(r.status), ['passed', 'passed', 'passed']);
+  const v = cli(withKeep, ['verify', '--mode', 'shared', '--no-quarantine']);
+  assert.equal(v.code, 0, v.out);
+});
+
 // ---------------- note 1 (T2) ----------------
 test('note 1: a tester / interval a node_modules package registers when the test file calls it is removed after that file', integration, () => {
   const root = P({

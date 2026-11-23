@@ -65,12 +65,27 @@ the setup files (note 3), and the fallback directory walk of mode `auto` prunes 
   test file is then only an async frame) counts as the package's: its tester or interval stays for the worker. A
   package that registers once and remembers it (`if (installed) return`) does not register again in the next file
   after the reset removed its registration.
-- **Added globals of unknown origin are reported, not deleted.** Own properties of the global object are seen when
-  they are created by assignment (`globalThis.x = …`, `window.x = …`, `Object.assign`) or by
-  `Object.defineProperty` / `defineProperties` / `Reflect.defineProperty`. A name created another way (for
-  example by `var` in a sloppy-mode script) or one that cannot be deleted stays and is reported as `added globals`
-  (a `dirty` record and a warning with the default `onDirty: 'warn'`); use `onDirty: 'error'` to fail on it. In vm
-  mode every file has its own global object, so nothing leaks there.
+- **Register-once packages called from a hook or a test.** A package function such as
+  `install() { if (done) return; done = true; globalThis.OncePolyfill = … }` called in `beforeAll` of several files:
+  the first file of a worker gets the global, the reset deletes it after that file (it came from the test's call),
+  and the package, cached for the worker, never sets it again, so every later file of the worker fails although each
+  passes in forks. `check` cannot converge on this (whichever file runs first looks like the polluter). Workarounds:
+  call the function at the top level of a setup file (what a setup file sets is part of the baseline and stays), or
+  name the global in `keepGlobals: ['OncePolyfill']` (never tracked, never deleted, never reported).
+- **Added globals: provenance and the fail-closed reset.** Own properties of the global object that a file adds
+  are deleted after it, unless a package in `node_modules` created them while it was being evaluated (seen through
+  Vitest's module evaluator; such a package is cached for the worker and keeps its globals), a cached project module
+  created them by `Object.defineProperty` without `resetModules`, or they are named in `keepGlobals`. A plain
+  assignment (`globalThis.x = …`, `window.x = …`, `Object.assign`) outside a package evaluation has no recorded
+  origin and is deleted (as a fresh fork would not have it). If Vitest's module evaluator cannot be found (another
+  Vitest version, a native module runner), package globals created at import are deleted too: use `keepGlobals`. A
+  name that cannot be deleted stays and is reported as `added globals` (a `dirty` record and a warning with the
+  default `onDirty: 'warn'`); use `onDirty: 'error'` to fail on it. In vm mode every file has its own global
+  object, so nothing leaks there.
+- **Assignment to an undeclared identifier in vm mode.** In a vm context (`vmThreads` / `vmForks`) a strict-mode
+  assignment to an undeclared name (a typo such as `reslt = sum`) creates a global instead of throwing a
+  `ReferenceError` (behaviour of Node's vm contexts, not of vitest-guard): such a test can pass in vm mode and fail in
+  forks. `verify --mode vm` finds it. Shared mode throws as forks do.
 - **Equality testers, intervals, globals and `navigator` overrides of project modules without `resetModules`.**
   With `resetModules: false` a project module (outside `node_modules`) is cached for the worker; what it registers
   on import is kept (as the module is) and reported as residual `equality testers` / `timers` / `added globals` /
