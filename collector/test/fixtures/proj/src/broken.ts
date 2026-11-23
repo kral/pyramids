@@ -1,2 +1,0 @@
-export const before = 1;
-throw new Error('boom at import');

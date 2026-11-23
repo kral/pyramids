@@ -44,7 +44,7 @@ jobs:
         os: [ubuntu-24.04, macos-15, windows-2025]
         node: ['22.22.2', '24']
         # macOS arm64 hosted runners are capacity-limited (jobs "not acquired by Runner"): one macOS leg is enough
-        # here; the Node lower bound on macOS is covered by vto-ci and the trial pipeline.
+        # here; the Node lower bound on macOS is covered by ci and the trial pipeline.
         exclude:
           - { os: macos-15, node: '22.22.2' }
     runs-on: ${{ matrix.os }}

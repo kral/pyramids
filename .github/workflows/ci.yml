@@ -1,0 +1,86 @@
+# CI. Every job runs steps of .github/scripts/ci.mjs, so `node .github/scripts/ci.mjs all` on a developer
+# machine runs what CI runs (lint + the vitest-guard suite).
+#
+#   lint     node --check on every script, repo hygiene (pinned actions, docs, manifests)
+#   test     vitest-guard suite + committed setup bundle check on Linux / macOS / Windows with Node 22.22.2
+#            (declared minimum: jsdom 31 needs ^22.22.2 || >=24.15) and 24, on the lockfile's Vitest 5
+#   vitest4  the same suite on Vitest 4.1.8 (peer range >=4.1 <6), Linux + Windows
+#
+# Policy
+#   - a skipped test fails the job (ci.mjs; platform-specific skips are allow-listed there)
+#   - actions are pinned by commit SHA; installs are `npm ci --ignore-scripts` from lockfiles
+#   - least privilege: read-only token, no credentials left in the checkout, no secrets used,
+#     `pull_request` (never `pull_request_target`), no caches shared with fork PRs
+name: ci
+on:
+  push: { branches: [main] }
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+env:
+  NO_UPDATE_NOTIFIER: '1'
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 22 }
+      - run: node .github/scripts/ci.mjs lint
+
+  test:
+    name: test (${{ matrix.os }}, node ${{ matrix.node }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+        node: ['22.22.2', '24']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - name: 'temp dirs on the checkout drive (Windows: C vs D made relative paths cross drives)'
+        shell: bash
+        run: |
+          t="${RUNNER_TEMP}"
+          { echo "TEMP=$t"; echo "TMP=$t"; echo "TMPDIR=$t"; } >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: '${{ matrix.node }}' }
+      - name: install (lockfile, no install scripts)
+        run: node .github/scripts/ci.mjs install
+      - name: vitest-guard (bundle check + tests)
+        run: node .github/scripts/ci.mjs vitest-guard
+
+  vitest4:
+    name: test on vitest ${{ matrix.vitest }} (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+        vitest: ['4.1.8']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      VG_VITEST: ${{ matrix.vitest }}
+    steps:
+      - name: 'temp dirs on the checkout drive (Windows: C vs D made relative paths cross drives)'
+        shell: bash
+        run: |
+          t="${RUNNER_TEMP}"
+          { echo "TEMP=$t"; echo "TMP=$t"; echo "TMPDIR=$t"; } >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 24 }
+      - name: install (lockfile, no install scripts)
+        run: node .github/scripts/ci.mjs install
+      - name: vitest-guard on Vitest ${{ matrix.vitest }} (installed --no-save over the lockfile's)
+        run: node .github/scripts/ci.mjs vitest-guard

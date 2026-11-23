@@ -1,5 +1,4 @@
-# Supply-chain audit: known vulnerabilities in the Rust analyzer's crates (cargo audit, RustSec) and in the npm
-# lockfiles (npm audit, runtime and dev dependencies). Runs weekly, on lockfile changes and by hand.
+# Supply-chain audit: known vulnerabilities in the npm lockfiles (npm audit, runtime and dev dependencies). Runs weekly, on lockfile changes and by hand.
 # Read-only: no secrets, no publishing.
 name: audit
 
@@ -9,12 +8,10 @@ on:
   push:
     branches: [main]
     paths:
-      - 'analyzer/Cargo.lock'
       - '**/package-lock.json'
       - '.github/workflows/audit.yml'
   pull_request:
     paths:
-      - 'analyzer/Cargo.lock'
       - '**/package-lock.json'
       - '.github/workflows/audit.yml'
   workflow_dispatch:
@@ -26,30 +23,7 @@ concurrency:
   group: audit-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  RUST_TOOLCHAIN: '1.97.0'
-  CARGO_AUDIT_VERSION: '0.23.0'
-
 jobs:
-  cargo-audit:
-    name: cargo audit (analyzer)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Rust toolchain (pinned, from the runner's rustup)
-        shell: bash
-        run: |
-          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --no-self-update
-          rustup default "$RUST_TOOLCHAIN"
-      - name: Install cargo-audit (pinned, locked)
-        run: cargo install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked
-      - name: cargo audit
-        # fails on any RustSec vulnerability; unmaintained/yanked crates are reported as warnings
-        run: cargo audit --file analyzer/Cargo.lock
-
   npm-audit:
     name: npm audit (${{ matrix.dir }})
     runs-on: ubuntu-24.04
@@ -57,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        dir: ['.', 'vitest-guard', 'mcp', 'tui', 'collector/corpus', 'bench/trial']
+        dir: ['vitest-guard', 'bench/trial']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

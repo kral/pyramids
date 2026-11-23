@@ -1,54 +1,38 @@
 #!/usr/bin/env node
-// vto's own CI, as one script: `.github/workflows/vto-ci.yml` runs exactly these steps, and
-// `node .github/scripts/ci.mjs all` (= `npm run test:all`) runs them on a developer machine.
+// CI as one script: `.github/workflows/ci.yml` runs exactly these steps, and `node .github/scripts/ci.mjs all`
+// runs them on a developer machine. Dependency-free (node only).
 //
 //   node .github/scripts/ci.mjs <step>… [--allow-skips]
-//   steps: install lint smoke analyzer collector mcp tui vitest-guard verify oddpath | all
-//   (`all` = everything except `install`; run `install` once on a fresh clone)
-//   VG_VITEST=<x.y.z> with the collector / mcp / vitest-guard steps: install that Vitest (--no-save) first, e.g. VG_VITEST=4.1.8
+//   steps: install lint vitest-guard | all   (`all` = lint + vitest-guard; run `install` once on a fresh clone)
+//   VG_VITEST=<x.y.z> with the vitest-guard step: install that Vitest (--no-save) first, e.g. VG_VITEST=4.1.8
 //
-// Rules enforced here (REVIEW-2 A-4 / U-9):
+// Rules enforced here:
 //   - a SKIPPED test is a failure unless it is on the platform allow-list below or the caller
-//     passes --allow-skips / VTO_ALLOW_SKIPS=1 (integration tests used to skip themselves when a
-//     fixture was not installed, and a skip counted as green);
-//   - VTO_REQUIRE_INTEGRATION=1 is exported to every test so suites can fail instead of skipping;
-//   - every CLI must answer --help and --version with exit 0 (the main entry point once shipped
-//     with a syntax error that no job executed).
+//     passes --allow-skips / VG_ALLOW_SKIPS=1 (a skip is not a pass);
+//   - the committed setup bundle must be what the sources produce (check:bundle).
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const REPO = process.env.VTO_CI_REPO ? path.resolve(process.env.VTO_CI_REPO) : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const REPO = process.env.VG_CI_REPO ? path.resolve(process.env.VG_CI_REPO) : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const WIN = process.platform === 'win32';
-const EXE = WIN ? 'vto.exe' : 'vto';
 const argv = process.argv.slice(2);
-const ALLOW_SKIPS = argv.includes('--allow-skips') || process.env.VTO_ALLOW_SKIPS === '1';
+const ALLOW_SKIPS = argv.includes('--allow-skips') || process.env.VG_ALLOW_SKIPS === '1';
 // Skips that are legitimate on one platform: matched against "<test name> <skip reason>".
-const PLATFORM_SKIPS = WIN ? /symlink|posix|shebang|permission|chmod|\bpty\b|A-1:|O_NOFOLLOW|unix/i : null;
+const PLATFORM_SKIPS = WIN ? /symlink|posix|shebang|permission|chmod|\bpty\b|O_NOFOLLOW|unix/i : null;
 
 const log = (s) => process.stdout.write(`\n\x1b[1m▶ ${s}\x1b[0m\n`);
 const rel = (p) => path.relative(REPO, p) || '.';
 class StepError extends Error {}
 const fail = (msg) => { throw new StepError(msg); };
 
-function analyzerBin() {
-  const env = process.env.VTO_ANALYZER;
-  if (env) { if (!path.isAbsolute(env) || !fs.existsSync(env)) fail(`VTO_ANALYZER=${env} is not an absolute path of an existing file`); return env; }
-  const p = path.join(REPO, 'analyzer', 'target', 'release', EXE);
-  return fs.existsSync(p) ? p : null;
-}
-function baseEnv(extra = {}) {
-  const bin = analyzerBin();
-  return { ...process.env, CI: process.env.CI ?? 'true', VTO_REQUIRE_INTEGRATION: ALLOW_SKIPS ? '' : '1', ...(bin ? { VTO_ANALYZER: bin } : {}), ...extra };
-}
-/** Run a command (argv, no shell), streaming output; returns { status, out } with `capture`. */
-function sh(cmd, args, { cwd = REPO, env = baseEnv(), capture = false, ok = [0], input } = {}) {
+/** Run a command (argv, no shell except npm on Windows), streaming output; returns { status, out } with `capture`. */
+function sh(cmd, args, { cwd = REPO, env = process.env, capture = false, ok = [0] } = {}) {
   process.stdout.write(`  $ ${[path.basename(cmd), ...args].join(' ')}   (${rel(cwd)})\n`);
-  // npm/npx are .cmd shims on Windows: they need a shell there; every argument we pass is a constant of this file
+  // npm is a .cmd shim on Windows: it needs a shell there; every argument we pass is a constant of this file
   const shell = WIN && /^(npm|npx)$/.test(cmd);
-  const r = spawnSync(cmd, args, { cwd, env, encoding: 'utf8', shell, input, stdio: capture ? ['pipe', 'pipe', 'pipe'] : ['ignore', 'inherit', 'inherit'], maxBuffer: 256 * 1024 * 1024 });
+  const r = spawnSync(cmd, args, { cwd, env, encoding: 'utf8', shell, stdio: capture ? ['pipe', 'pipe', 'pipe'] : ['ignore', 'inherit', 'inherit'], maxBuffer: 256 * 1024 * 1024 });
   if (r.error) fail(`${cmd}: ${r.error.message}`);
   if (!ok.includes(r.status)) {
     if (capture) process.stdout.write(`${r.stdout ?? ''}${r.stderr ?? ''}`);
@@ -60,7 +44,7 @@ const node = (args, o) => sh(process.execPath, args, o);
 
 function listFiles(dir, test, out = []) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (e.name === 'node_modules' || e.name === 'target' || e.name === '.git' || e.name === 'dist') continue;
+    if (e.name === 'node_modules' || e.name === '.git' || e.name === 'dist') continue;
     const p = path.join(dir, e.name);
     if (e.isDirectory()) listFiles(p, test, out);
     else if (e.isFile() && test(p)) out.push(p);
@@ -77,7 +61,7 @@ function checkSkips(kind, skipped) {
 /** node:test with TAP output; fails on failures and on skips that are not allowed. */
 function nodeTests(cwd, files, env = {}) {
   if (!files.length) fail(`no test files in ${rel(cwd)}`);
-  const r = sh(process.execPath, ['--test', '--test-concurrency=1', '--test-reporter=tap', ...files.map((f) => path.relative(cwd, f))], { cwd, env: baseEnv(env), capture: true, ok: [0, 1] });
+  const r = sh(process.execPath, ['--test', '--test-concurrency=1', '--test-reporter=tap', ...files.map((f) => path.relative(cwd, f))], { cwd, env: { ...process.env, CI: process.env.CI ?? 'true', ...env }, capture: true, ok: [0, 1] });
   const lines = r.out.split('\n');
   const failed = lines.filter((l) => /^\s*not ok \d+/.test(l) && !/# (SKIP|TODO)/i.test(l));
   const skipped = lines.map((l) => /^\s*ok \d+ - (.*?) # SKIP\s*(.*)$/i.exec(l)).filter(Boolean).map((m) => `${m[1]} ${m[2]}`.trim());
@@ -89,55 +73,36 @@ function nodeTests(cwd, files, env = {}) {
     if (Number(m[2]) <= 255) continue;
     const file = m[1].replace(/\\\\/g, '\\');
     process.stdout.write(`  ${file} died with exit code ${m[2]} (0x${Number(m[2]).toString(16)}); re-running it alone for its stderr:\n`);
-    const d = spawnSync(process.execPath, [file], { cwd, env: baseEnv(env), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    const d = spawnSync(process.execPath, [file], { cwd, env: { ...process.env, ...env }, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
     process.stdout.write(`${(d.stdout || '').split('\n').slice(-30).join('\n')}\n--- stderr ---\n${(d.stderr || '').split('\n').slice(-60).join('\n')}\n--- exit ${d.status ?? d.signal} ---\n`);
   }
   if (r.status !== 0 || failed.length) { process.stdout.write(r.out.split('\n').filter((l) => !/^\s+(Test\.|async |at |node:)/.test(l)).join('\n') + r.err); fail(`${failed.length || 'some'} test(s) failed in ${rel(cwd)}`); }
   if (!count('tests')) fail(`0 tests ran in ${rel(cwd)}`);
   checkSkips(rel(cwd), skipped);
 }
-
-/** Vitest with a JSON report; same skip rule. */
-function vitestTests(cwd, env = {}) {
-  const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'vto-ci-')), 'vitest.json');
-  const vitest = path.join(cwd, 'node_modules', 'vitest', 'vitest.mjs');
-  if (!fs.existsSync(vitest)) fail(`vitest is not installed in ${rel(cwd)} (npm ci)`);
-  const r = node([vitest, 'run', '--reporter=default', '--reporter=json', `--outputFile.json=${out}`], { cwd, env: baseEnv(env), ok: [0, 1] });
-  let j;
-  try { j = JSON.parse(fs.readFileSync(out, 'utf8')); } catch { fail(`vitest wrote no JSON report in ${rel(cwd)}`); }
-  const all = j.testResults.flatMap((f) => f.assertionResults.map((a) => ({ ...a, file: path.relative(cwd, f.name) })));
-  const skipped = all.filter((a) => a.status === 'pending' || a.status === 'skipped' || a.status === 'todo').map((a) => `${a.file} > ${a.fullName}`);
-  process.stdout.write(`  tests ${all.length}, pass ${all.filter((a) => a.status === 'passed').length}, fail ${all.filter((a) => a.status === 'failed').length}, skipped ${skipped.length}\n`);
-  if (r.status !== 0) fail(`tests failed in ${rel(cwd)}`);
-  if (!all.length) fail(`0 tests ran in ${rel(cwd)}`);
-  checkSkips(rel(cwd), skipped);
-}
 const testFiles = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.test.mjs')).sort().map((f) => path.join(dir, f)) : []);
 const need = (p, hint) => { if (!fs.existsSync(path.join(REPO, p))) fail(`${p} is missing: ${hint}`); };
 
 // ------------------------------------------------------------------ steps
-const NPM_DIRS = ['.', 'collector/corpus', 'mcp', 'mcp/test/fixture', 'tui', 'vitest-guard'];
-// VG_VITEST=<x.y.z>: run a step's suite against another Vitest than the lockfile's (installed --no-save, lockfile untouched)
-function useVitest(rel) {
+// VG_VITEST=<x.y.z>: run the suite against another Vitest than the lockfile's (installed --no-save, lockfile untouched)
+function useVitest(dir) {
   const vg = process.env.VG_VITEST;
   if (!vg) return;
   if (!/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(vg)) fail(`VG_VITEST must be an exact version such as 4.1.8, got "${vg}"`);
-  sh('npm', ['install', '--no-save', '--ignore-scripts', '--legacy-peer-deps', '--no-audit', '--no-fund', `vitest@${vg}`], { cwd: path.join(REPO, rel) });
-  const have = JSON.parse(fs.readFileSync(path.join(REPO, rel, 'node_modules/vitest/package.json'), 'utf8')).version;
-  if (have !== vg) fail(`expected vitest ${vg} in ${rel}/node_modules, found ${have}`);
-  process.stdout.write(`  ${rel} runs against vitest ${have}\n`);
+  sh('npm', ['install', '--no-save', '--ignore-scripts', '--legacy-peer-deps', '--no-audit', '--no-fund', `vitest@${vg}`], { cwd: path.join(REPO, dir) });
+  const have = JSON.parse(fs.readFileSync(path.join(REPO, dir, 'node_modules/vitest/package.json'), 'utf8')).version;
+  if (have !== vg) fail(`expected vitest ${vg} in ${dir}/node_modules, found ${have}`);
+  process.stdout.write(`  ${dir} runs against vitest ${have}\n`);
 }
 
 const STEPS = {
-  /** `npm ci --ignore-scripts` in every package that has a lockfile (no install script ever runs) */
+  /** `npm ci --ignore-scripts` from the lockfile (no install script ever runs) */
   install() {
-    for (const d of NPM_DIRS) {
-      if (!fs.existsSync(path.join(REPO, d, 'package-lock.json'))) fail(`${d}/package-lock.json is missing – every package installs from a lockfile`);
-      sh('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: path.join(REPO, d) });
-    }
+    if (!fs.existsSync(path.join(REPO, 'vitest-guard/package-lock.json'))) fail('vitest-guard/package-lock.json is missing – every package installs from a lockfile');
+    sh('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: path.join(REPO, 'vitest-guard') });
   },
 
-  /** static checks: syntax of every script, repo hygiene (samples, docs, workflow pins) */
+  /** static checks: syntax of every script, repo hygiene (docs, workflow pins) */
   lint() {
     const scripts = listFiles(REPO, (p) => /\.(mjs|cjs)$/.test(p));
     let bad = 0;
@@ -150,96 +115,16 @@ const STEPS = {
     node([path.join(REPO, '.github/scripts/check-repo.mjs')]);
   },
 
-  /** every CLI answers --help and --version; the dispatcher's own tests */
-  smoke() {
-    node([path.join(REPO, '.github/scripts/smoke-cli.mjs')]);
-    nodeTests(REPO, [...testFiles(path.join(REPO, '.github/scripts/test')), ...testFiles(path.join(REPO, 'bin/test'))]);
-  },
-
-  analyzer() {
-    const target = process.env.VTO_CARGO_TARGET ? ['--target', process.env.VTO_CARGO_TARGET] : [];
-    sh('cargo', ['test', '--locked', ...target], { cwd: path.join(REPO, 'analyzer') });
-    sh('cargo', ['build', '--locked', '--release', ...target], { cwd: path.join(REPO, 'analyzer') });
-  },
-
-  collector() {
-    need('node_modules/oxc-parser', 'npm ci --ignore-scripts');
-    need('collector/corpus/node_modules/vitest', 'npm --prefix collector/corpus ci --ignore-scripts');
-    useVitest('collector/corpus');
-    node([path.join(REPO, 'collector/selftest.mjs')]);
-    const r = node([path.join(REPO, 'collector/corpus/run.mjs')], { cwd: path.join(REPO, 'collector/corpus'), capture: true });
-    process.stdout.write(r.out.split('\n').slice(-6).join('\n') + '\n');
-    if (/plugin (is )?missing|\bskip(ped)?\b.*plugin/i.test(r.out + r.err) && !ALLOW_SKIPS) fail('the corpus harness skipped itself (plugin not found)');
-    nodeTests(REPO, testFiles(path.join(REPO, 'collector/test')));
-  },
-
-  mcp() {
-    need('mcp/node_modules', 'npm --prefix mcp ci --ignore-scripts');
-    need('mcp/test/fixture/node_modules', 'npm --prefix mcp/test/fixture ci --ignore-scripts');
-    useVitest('mcp/test/fixture');
-    if (!analyzerBin()) fail('analyzer binary missing: run the `analyzer` step or set VTO_ANALYZER');
-    nodeTests(path.join(REPO, 'mcp'), testFiles(path.join(REPO, 'mcp/test')));
-  },
-
-  tui() {
-    need('tui/node_modules', 'npm --prefix tui ci --ignore-scripts');
-    const tsc = path.join(REPO, 'tui/node_modules/typescript/bin/tsc');
-    node([tsc, '-p', '.'], { cwd: path.join(REPO, 'tui') });             // typecheck + dist/ for the e2e tests and `vto ui`
-    vitestTests(path.join(REPO, 'tui'), { VTO_LANG: '' });
-  },
-
   'vitest-guard'() {
     need('vitest-guard/node_modules/vitest', 'npm --prefix vitest-guard ci --ignore-scripts');
-    // VG_VITEST=4.1.8: run the suite against another Vitest than the lockfile's (not saved, lockfile untouched)
     useVitest('vitest-guard');
-    const pkg = JSON.parse(fs.readFileSync(path.join(REPO, 'vitest-guard/package.json'), 'utf8'));
-    if (pkg.scripts?.['check:bundle']) node([path.join(REPO, 'vitest-guard/scripts/bundle-setup.mjs'), '--check'], { cwd: path.join(REPO, 'vitest-guard') });
-    nodeTests(path.join(REPO, 'vitest-guard'), testFiles(path.join(REPO, 'vitest-guard/test')), { VITEST_GUARD_TEST_NO_INTEGRATION: '' });
-  },
-
-  verify() {
-    need('node_modules/oxc-parser', 'npm ci --ignore-scripts');
-    if (!analyzerBin()) fail('analyzer binary missing: run the `analyzer` step or set VTO_ANALYZER');
-    nodeTests(REPO, testFiles(path.join(REPO, 'verify/test')));
-  },
-
-  /**
-   * The same checkout under a path with a space and diacritics ("Můj projekt ěš"): smoke, collector
-   * and verify end-to-end. In the workflow the job is checked out into such a path directly; locally
-   * the work tree is copied (node_modules linked) into the temp dir.
-   */
-  oddpath() {
-    if (/[^\x00-\x7f]/.test(REPO) && REPO.includes(' ')) {
-      process.stdout.write(`  already running in ${REPO}\n`);
-    } else {
-      const dst = path.join(fs.realpathSync(os.tmpdir()), `vto ci ${process.pid}`, 'Můj projekt ěš', 'vto');
-      fs.mkdirSync(dst, { recursive: true });
-      const skip = new Set(['node_modules', 'target', '.git', 'perf', 'bench']);
-      fs.cpSync(REPO, dst, { recursive: true, filter: (src) => !skip.has(path.basename(src)) });
-      for (const nm of ['node_modules', 'collector/corpus/node_modules', 'mcp/node_modules', 'mcp/test/fixture/node_modules', 'tui/node_modules', 'vitest-guard/node_modules']) {
-        if (fs.existsSync(path.join(REPO, nm))) fs.symlinkSync(path.join(REPO, nm), path.join(dst, nm), 'junction');
-      }
-      const bin = analyzerBin();
-      if (!bin) fail('analyzer binary missing: run the `analyzer` step or set VTO_ANALYZER');
-      try {
-        node([path.join(dst, '.github/scripts/ci.mjs'), 'oddpath', ...(ALLOW_SKIPS ? ['--allow-skips'] : [])], { cwd: dst, env: { ...process.env, VTO_CI_REPO: dst, VTO_ANALYZER: bin } });
-      } finally { fs.rmSync(path.dirname(path.dirname(dst)), { recursive: true, force: true }); }
-      return;
-    }
-    // the smoke test runs `vto ui --help`, which needs tui/dist
-    if (!fs.existsSync(path.join(REPO, 'tui/dist/cli.js'))) {
-      need('tui/node_modules', 'npm --prefix tui ci --ignore-scripts');
-      node([path.join(REPO, 'tui/node_modules/typescript/bin/tsc'), '-p', '.'], { cwd: path.join(REPO, 'tui') });
-    }
-    STEPS.smoke();
-    node([path.join(REPO, 'collector/selftest.mjs')]);
-    nodeTests(REPO, testFiles(path.join(REPO, 'collector/test')));
-    STEPS.verify();
+    node([path.join(REPO, 'vitest-guard/scripts/bundle-setup.mjs'), '--check'], { cwd: path.join(REPO, 'vitest-guard') });
+    nodeTests(path.join(REPO, 'vitest-guard'), testFiles(path.join(REPO, 'vitest-guard/test')));
   },
 };
 
 const wanted = argv.filter((a) => !a.startsWith('--'));
-const order = ['lint', 'analyzer', 'collector', 'mcp', 'tui', 'vitest-guard', 'verify', 'smoke', 'oddpath']; // smoke after tui: it needs tui/dist
+const order = ['lint', 'vitest-guard'];
 const steps = wanted.flatMap((w) => (w === 'all' ? order : [w]));
 if (!steps.length || steps.some((s) => !Object.hasOwn(STEPS, s))) {
   process.stderr.write(`usage: node .github/scripts/ci.mjs <install|${order.join('|')}|all>… [--allow-skips]\n`);
@@ -257,6 +142,6 @@ for (const s of steps) {
   }
 }
 if (results.length > 1 || results.some((r) => r[1] !== 'ok')) {
-  process.stdout.write('\nSummary\n' + results.map(([s, st, ms, msg]) => `  ${st.padEnd(6)} ${s.padEnd(10)} ${(ms / 1000).toFixed(1)} s${msg ? `   ${msg}` : ''}`).join('\n') + '\n');
+  process.stdout.write('\nSummary\n' + results.map(([s, st, ms, msg]) => `  ${st.padEnd(6)} ${s.padEnd(13)} ${(ms / 1000).toFixed(1)} s${msg ? `   ${msg}` : ''}`).join('\n') + '\n');
 }
 process.exit(results.some((r) => r[1] !== 'ok') ? 1 : 0);
