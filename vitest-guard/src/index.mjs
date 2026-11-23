@@ -102,7 +102,7 @@ export function readQuarantineFile(root, file = '.vitest-guard/incompatible.json
   if (txt === null) return {};
   let q;
   try { q = JSON.parse(txt); } catch (e) { throw quarantineError(file, `is not valid JSON (${/^(<{7}|={7}|>{7})/m.test(txt) ? 'merge-conflict markers' : sanitize(e.message, 120)})`); }
-  if (!q || typeof q !== 'object' || Array.isArray(q)) throw quarantineError(file, 'is not a JSON object { "version": 1, "vm": {...}, "shared": {...} }');
+  if (!q || typeof q !== 'object' || Array.isArray(q)) throw quarantineError(file, 'is not a JSON object { "version": 2, "vm": {...}, "shared": {...} }');
   const problem = versionProblem('incompatible.json', q, sanitize(file));
   if (problem) {
     if (process.env.VITEST_GUARD_NEWER_STATE !== 'failsafe') throw quarantineError(file, `${problem} (or set VITEST_GUARD_NEWER_STATE=failsafe to run every test file it names isolated)`);
@@ -121,8 +121,21 @@ export function readQuarantine(root, mode, file = '.vitest-guard/incompatible.js
   const q = readQuarantineFile(root, file);
   const keys = q[mode] && typeof q[mode] === 'object' && !Array.isArray(q[mode]) ? Object.keys(q[mode]) : [];
   if (!keys.length) return [];
-  return validateTestPaths(root, keys, { include, exclude, files: globProjectFiles(root, include, exclude), label: `${file} (${mode})`, warn: warn && !q.newer }).ok;
+  // Note 2: entries another config wrote are applied when they name a file of this config (running it isolated is
+  // always safe), but are not warned about when they do not (they are that config's business)
+  const me = ownConfigId(root);
+  const foreign = (k) => isForeignEntry(q[mode][k], me);
+  const files = globProjectFiles(root, include, exclude);
+  const own = validateTestPaths(root, keys.filter((k) => !foreign(k)), { include, exclude, files, label: `${file} (${mode})`, warn: warn && !q.newer }).ok;
+  const other = validateTestPaths(root, keys.filter(foreign), { include, exclude, files, warn: false }).ok;
+  return [...own, ...other];
 }
+
+/** Note 2: id of the config this process loads (the config file relative to the root, as the CLI stores it in `config`) */
+function ownConfigId(root) {
+  try { const f = findConfigFile(root, process.argv.slice(2)); return f ? path.relative(root, f).split(path.sep).join('/') : null; } catch { return null; }
+}
+const isForeignEntry = (info, me) => !!info && typeof info === 'object' && typeof info.config === 'string' && info.config !== me;
 
 /**
  * R6: quarantine keys are relative to the config root (where the CLI runs); a project with its own `root` globs
@@ -325,9 +338,17 @@ function buildConfig(userConfig, g) {
     moduleState: g.moduleState, detectPollution: g.detectPollution, diag: g.diag, ignoreListeners: g.ignoreListeners || [], ignoreModules: g.ignoreModules || [], log: g.log ?? true,
     integrity: g.integrity ?? true,
   };
-  // shared mode: a tail setup file marks "setup files done" (M6); that needs the setup files to run in list order
+  // shared mode: a tail setup file marks "setup files done" (M6); that needs the setup files to run in list order.
+  // Note 3 (alpha.3): the shared-mode baseline (env, globals, DOM) is taken there, so the tail is not optional: `tail:
+  // false` is refused (fail closed) and `sequence.setupFiles: 'parallel'` runs in list order (a valid order of a
+  // parallel start) with a warning.
   const userSeq = test.sequence?.setupFiles;
-  const tailFor = (m, t) => m === 'shared' && g.tail !== false && (t?.sequence?.setupFiles ?? userSeq) !== 'parallel';
+  const tailFor = (m, t) => {
+    if (m !== 'shared') return false;
+    if (g.tail === false) throw new Error("[vitest-guard] tail: false is not supported in shared mode: the baseline that the resets restore (process.env, globals, DOM) must be taken after the setup files, which the tail setup file marks. Remove `tail: false` (or use mode 'vm' / 'isolated').");
+    if ((t?.sequence?.setupFiles ?? userSeq) === 'parallel') warnOnce("[vitest-guard] sequence.setupFiles 'parallel' runs in list order in shared mode: the baseline is taken after the last setup file (tail setup file).");
+    return true;
+  };
   const seqFor = (m, t) => (tailFor(m, t) ? { sequence: { ...(t?.sequence || {}), setupFiles: 'list' } } : {});
   const withSetup = (setup, m, t) => [...(g.setup === 'import' ? [] : [setupFileFor(root)]), ...setup, ...(tailFor(m, t) ? [setupFileFor(root, SETUP_TAIL_FILE)] : [])];
   const vmLimit = () => test.vmMemoryLimit ?? g.memoryLimit ?? autoMemoryLimit(maxWorkers);
@@ -394,7 +415,8 @@ function buildConfig(userConfig, g) {
     for (const m of ['vm', 'shared']) {
       if (!qRaw || !used.has(m)) continue;
       const keys = qRaw[m] && typeof qRaw[m] === 'object' ? Object.keys(qRaw[m]) : [];
-      const stray = keys.filter((k) => !claimed.has(`${m}\0${k}`));
+      const me = ownConfigId(root);
+      const stray = keys.filter((k) => !claimed.has(`${m}\0${k}`) && !isForeignEntry(qRaw[m][k], me));
       for (const k of stray.slice(0, 20)) if (!qRaw.newer) warnOnce(`[vitest-guard] ignoring ${sanitize(quarantineFile)} (${m}) entry ${sanitize(JSON.stringify(String(k)), 200)}: no project runs it in mode ${m} (stale entry? \`vitest-guard check --prune\` removes it)`);
     }
     for (const r of remaps) warnOnce(`[vitest-guard] ${sanitize(quarantineFile)} (${r.mode}) entry ${sanitize(JSON.stringify(r.key), 200)} is spelled differently on disk (case or Unicode form): applied to ${sanitize(JSON.stringify(r.to), 200)}; re-spell the key (\`vitest-guard check\` rewrites it)`);

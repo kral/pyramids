@@ -176,8 +176,10 @@ export function restoreDom(base) {
   try { if (base.href && location.href !== base.href) history.replaceState(null, '', base.href); } catch {}
 }
 
-// S5: own properties of the global object that a file added (globalThis.__cfg = …, window.x = …). They are reported,
-// not deleted: a package in node_modules (cached for the whole worker) may have defined one on first import.
+// S5: own properties of the global object that a file added (globalThis.__cfg = …, window.x = …). The setup file
+// deletes them after the file when the stack showed the test file chain (or a project module, with resetModules) as
+// their origin; a package in node_modules (cached for the whole worker) that defined one on first import keeps it,
+// and a name of unknown origin is reported.
 const LIB_GLOBALS = /^(__vite|__vitest|IS_REACT_ACT_ENVIRONMENT$|__EMOTION_|__REACT_DEVTOOLS_|regeneratorRuntime$|__core-js)/;
 export function captureGlobalKeys() {
   try { return new Set(Object.getOwnPropertyNames(globalThis).filter((k) => !LIB_GLOBALS.test(k))); } catch { return new Set(); }
@@ -188,6 +190,50 @@ export function addedKeys(base, now, known = null) {
   if (!base || !now) return out;
   for (const k of now) if (!base.has(k) && !(known && known.has(k))) out.push(k);
   return out;
+}
+
+// S5 (alpha.3): overrides of navigator properties (Object.defineProperty(navigator, 'language', ...)) live on the
+// navigator object (or Navigator.prototype) that every file of a shared worker sees. Snapshot of the own property
+// descriptors of both; two accessors count as equal when they are the same function or have the same source (a setup
+// file that defines the same getter again for every file is not a change).
+const descKeys = ['value', 'get', 'set', 'writable', 'enumerable', 'configurable'];
+const fnSame = (a, b) => { if (a === b) return true; if (typeof a !== 'function' || typeof b !== 'function') return false; try { return Function.prototype.toString.call(a) === Function.prototype.toString.call(b); } catch { return false; } };
+const descSame = (a, b) => !!a && !!b && descKeys.every((k) => (k === 'get' || k === 'set' ? fnSame(a[k], b[k]) : Object.is(a[k], b[k])));
+export function captureNavigator() {
+  let ref; try { ref = globalThis.navigator; } catch { return null; }
+  if (!ref || typeof ref !== 'object') return null;
+  const snap = (o) => { const m = new Map(); try { for (const k of Reflect.ownKeys(o)) { if (typeof k === 'string') m.set(k, Object.getOwnPropertyDescriptor(o, k)); } } catch {} return m; };
+  let proto = null; try { proto = Object.getPrototypeOf(ref); } catch {}
+  if (proto === Object.prototype) proto = null;
+  return { ref, own: snap(ref), proto, protoOwn: proto ? snap(proto) : new Map() };
+}
+/** names of navigator properties that differ between two snapshots ('language', 'prototype.language') */
+export function diffNavigator(base, now) {
+  if (!base || !now || base.ref !== now.ref) return [];
+  const out = [];
+  const cmp = (a, b, pre) => { for (const k of new Set([...a.keys(), ...b.keys()])) if (!descSame(a.get(k), b.get(k))) out.push(pre + k); };
+  cmp(base.own, now.own, '');
+  if (base.proto && base.proto === now.proto) cmp(base.protoOwn, now.protoOwn, 'prototype.');
+  return out;
+}
+/** Puts the navigator properties back to `base`, except the names `keep(name)` says to keep. @returns names left changed */
+export function restoreNavigator(base, keep = () => false) {
+  if (!base) return [];
+  const left = [];
+  const fix = (o, snapMap, pre) => {
+    let now; try { now = new Map(Reflect.ownKeys(o).filter((k) => typeof k === 'string').map((k) => [k, Object.getOwnPropertyDescriptor(o, k)])); } catch { return; }
+    for (const k of new Set([...snapMap.keys(), ...now.keys()])) {
+      const b = snapMap.get(k), n = now.get(k);
+      if (descSame(b, n) || (!b && !n)) continue;
+      if (keep(pre + k)) { left.push(pre + k); continue; }
+      try { if (b) Object.defineProperty(o, k, b); else delete o[k]; } catch {}
+      const after = Object.getOwnPropertyDescriptor(o, k);
+      if (b ? !descSame(b, after) : after) left.push(pre + k);
+    }
+  };
+  fix(base.ref, base.own, '');
+  if (base.proto) fix(base.proto, base.protoOwn, 'prototype.');
+  return left;
 }
 
 // S5: expect.addEqualityTesters() pushes into one array shared by every file of a long-lived worker

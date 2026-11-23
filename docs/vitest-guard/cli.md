@@ -91,7 +91,9 @@ failing file in isolated forks and compares per test:
 
 Options: `--retries N` confirmation re-runs (default 2); `--no-confirm` quarantines every fast-only failure without
 confirming; `--no-hunt` skips predecessor replay (a pass on retry is then FLAKY); `--prune` first re-runs the
-quarantined files in the fast mode and releases those that pass; `--compare` runs `compare` afterwards; in `auto`
+quarantined files in the fast mode and releases those that pass (a false-green entry only when it also passes in
+isolated forks, an order-dependent one only when a replay after its recorded `after` files passes; one without
+`after` is never released; entries another config wrote are never pruned or reported as stale); `--compare` runs `compare` afterwards; in `auto`
 mode the first run calibrates when `modes.json` is missing (`--no-calibrate` skips, `--calibrate-sample N` sets
 files per group, default 20). Filters are Vitest file filters.
 
@@ -117,7 +119,9 @@ marks the record incomplete (the shared-mode warning of `vitest run` then stays)
 fast, fails isolated) -> exit 5; a lane or the reference that did not report every file it was given -> exit 1 and no
 record is written; a false red in the `gate` order (not quarantined: run `check`) or one not quarantined because of
 `--no-quarantine` -> exit 1; a false red that was quarantined -> exit 4; otherwise 0.
-Without `--no-quarantine`, false-green files and files failing in a non-gate order are quarantined. The record goes to
+Without `--no-quarantine`, false-green files and files failing in a non-gate order are quarantined; the latter as
+`orderDependent: true` with the files they failed after (`after`: the shortest failing lane prefix, bisected when it
+is longer than 20 files), so that `check --prune` keeps them until a replay of that order passes. The record goes to
 `.vitest-guard/run/verify-<mode>.json`. Defaults: `--sample all`, `--seed 1`.
 
 Shared mode and `conflicts.json`: conflict edges are applied **only by the planner**: `plan`, `run`, `check --mode shared`

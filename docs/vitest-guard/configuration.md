@@ -43,7 +43,7 @@ says how to resolve it first). The result is a config object; your own keys are 
 | `reset` | boolean | `true` | shared: reset hooks between files |
 | `resetModules` | boolean | `true` | shared: `vi.resetModules()` after each file. Required for `vi.mock` correctness |
 | `integrity` | boolean | `true` | shared: integrity check of `expect`, core matchers, `vi`, a few intrinsics |
-| `tail` | boolean | `true` | shared: tail setup file marking "all setup files done" (needs `setupFiles` order `list`, which vitest-guard sets unless you set `sequence.setupFiles: 'parallel'`) |
+| `tail` | boolean | `true` | shared: tail setup file marking "all setup files done"; the shared-mode baseline is taken there. Needs `setupFiles` order `list`, which vitest-guard sets (`sequence.setupFiles: 'parallel'` runs in list order in shared mode, with a warning). `tail: false` with shared mode is a config error |
 | `verifyWarning` | boolean | `true` | shared: warn when no clean `verify` exists for this commit/config |
 | `log` | boolean | `true` | write per-worker run logs to `.vitest-guard/run/logs` |
 | `diag` | boolean | on only under the CLI (`VITEST_GUARD_DIAG=1`) | pollution diff at file end, residual after reset, node_modules export scan (CPU cost) |

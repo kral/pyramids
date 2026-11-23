@@ -29,12 +29,12 @@ const listAll = (d) => fs.readdirSync(d, { recursive: true }).map(String).sort()
 // ---------------- B2: format versions ----------------
 
 test('B2: the CLI refuses a committed incompatible.json / conflicts.json with a newer format version (exit 2, untouched)', () => {
-  for (const name of ['incompatible.json', 'conflicts.json']) {
-    const body = JSON.stringify({ version: 2, files: { 'test/a.test.ts': {} } });
+  for (const [name, cur] of [['incompatible.json', 2], ['conflicts.json', 1]]) {
+    const body = JSON.stringify({ version: cur + 1, files: { 'test/a.test.ts': {} } });
     const root = mk({ [`.vitest-guard/${name}`]: body, 'package.json': '{}' });
     const r = cli(root, ['report']);
     assert.equal(r.code, 2, r.out);
-    assert.match(r.out, new RegExp(`\\.vitest-guard/${name.replace('.', '\\.')} has format version 2; this @jirikral/vitest-guard \\([^)]+\\) understands version 1 - upgrade`));
+    assert.match(r.out, new RegExp(`\\.vitest-guard/${name.replace('.', '\\.')} has format version ${cur + 1}; this @jirikral/vitest-guard \\([^)]+\\) understands version ${cur} - upgrade`));
     assert.match(r.out, /Nothing was run or written/);
     assert.equal(fs.readFileSync(path.join(root, '.vitest-guard', name), 'utf8'), body);
   }
@@ -50,7 +50,7 @@ test('B2: a missing version counts as 1; writers always stamp the current versio
   saveState(c, 'incompatible.json', q);
   const saved = JSON.parse(fs.readFileSync(statePath(c, 'incompatible.json'), 'utf8'));
   assert.equal(Object.keys(saved)[0], 'version');
-  assert.deepEqual(saved, { version: 1, vm: { 'a.test.ts': {} }, extra: 'kept', shared: {} }); // unknown fields survive
+  assert.deepEqual(saved, { version: 2, vm: { 'a.test.ts': {} }, extra: 'kept', shared: {} }); // unknown fields survive; version 1 is written as 2 (alpha.3)
   saveState(c, 'conflicts.json', { edges: [] });
   assert.equal(JSON.parse(fs.readFileSync(statePath(c, 'conflicts.json'), 'utf8')).version, 1);
   // a newer file on disk (written meanwhile by a newer vitest-guard) is not rewritten in the old shape
@@ -69,8 +69,8 @@ test('B2: a missing version counts as 1; writers always stamp the current versio
 
 test('B2 / S3 (review 3b): a newer incompatible.json stops the config (fail closed); VITEST_GUARD_NEWER_STATE=failsafe runs every file it names isolated', () => {
   const root = mk({ 'test/a.test.ts': '', 'test/b.test.ts': '', 'test/c.test.ts': '' });
-  w(root, '.vitest-guard/incompatible.json', JSON.stringify({ version: 2, quarantine: [{ file: 'test/a.test.ts', modes: ['vm'] }, { file: 'test/b.test.ts', modes: ['shared'] }], note: 'x' }));
-  assert.throws(() => readQuarantineFile(root), /has format version 2; this @jirikral\/vitest-guard .* understands version 1 - upgrade .*VITEST_GUARD_NEWER_STATE=failsafe.*refuses to run/s);
+  w(root, '.vitest-guard/incompatible.json', JSON.stringify({ version: 3, quarantine: [{ file: 'test/a.test.ts', modes: ['vm'] }, { file: 'test/b.test.ts', modes: ['shared'] }], note: 'x' }));
+  assert.throws(() => readQuarantineFile(root), /has format version 3; this @jirikral\/vitest-guard .* understands version 2 - upgrade .*VITEST_GUARD_NEWER_STATE=failsafe.*refuses to run/s);
   const old = process.env.VITEST_GUARD_NEWER_STATE;
   process.env.VITEST_GUARD_NEWER_STATE = 'failsafe';
   try {
@@ -80,7 +80,7 @@ test('B2 / S3 (review 3b): a newer incompatible.json stops the config (fail clos
     assert.equal(q.newer, true);
     for (const mode of ['vm', 'shared']) quiet(() => assert.deepEqual(readQuarantine(root, mode).sort(), ['test/a.test.ts', 'test/b.test.ts']));
     // S3: a newer file that names no existing test file cannot fail safe: it still stops the config
-    w(root, '.vitest-guard/incompatible.json', JSON.stringify({ version: 2, entries: [{ path: './test/a.test.ts' }] }));
+    w(root, '.vitest-guard/incompatible.json', JSON.stringify({ version: 3, entries: [{ path: './test/a.test.ts' }] }));
     assert.throws(() => readQuarantineFile(root), /names no existing test file/);
   } finally { if (old === undefined) delete process.env.VITEST_GUARD_NEWER_STATE; else process.env.VITEST_GUARD_NEWER_STATE = old; }
 });

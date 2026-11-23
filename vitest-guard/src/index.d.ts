@@ -35,7 +35,7 @@ export interface VitestGuardOptions {
   log?: boolean;
   /** shared mode: integrity check of the assertion API (expect/matchers) between files (default true) */
   integrity?: boolean;
-  /** shared mode: add the tail setup file that marks the end of the setup files (default true; needs setupFiles to run in list order) */
+  /** shared mode: the tail setup file that marks the end of the setup files, where the baseline is taken (default true; setupFiles run in list order). `false` with shared mode is a config error */
   tail?: boolean;
   /** shared mode: print a warning when no clean `vitest-guard verify --mode shared` is recorded for this commit/config (default true). Also VITEST_GUARD_VERIFY_WARNING=0. */
   verifyWarning?: boolean;

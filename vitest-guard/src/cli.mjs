@@ -178,13 +178,38 @@ export function unappliedQuarantine(c, q, mode, files) {
 }
 
 const fold = (x) => String(x).normalize('NFC').toLowerCase();
+
+// ---- incompatible.json version 2 (alpha.3) ----
+// Note 2: an entry records the config that wrote it (`config`: the config file relative to the root). Entries of
+// another config are foreign: never stale, never pruned, never re-spelled (two guarded configs in one root share the
+// file). Version 1 entries have no `config`: they count as this config's when it lists the file, as foreign when the
+// file exists but this config does not list it, and as stale only when the file is gone.
+// S2: an order-dependent entry carries `orderDependent: true` and, when known, `after` (the predecessors it fails
+// after); version 1 entries that verify wrote as "order-dependent: …" without them are migrated to the marker.
+/** the id of the config a command runs with (stored as `config` in the entries it writes) */
+export const configId = (c) => (c.config ? path.relative(c.root, c.config).split(path.sep).join('/') : null);
+const foreignEntry = (c, info) => !!info && typeof info === 'object' && typeof info.config === 'string' && info.config !== configId(c);
+/** entry fields that identify the writer */
+const ownership = (c) => (configId(c) ? { config: configId(c) } : {});
+export const isOrderDependent = (info) => !!info && typeof info === 'object' && (info.orderDependent === true || Array.isArray(info.after) || /^order-dependent:/.test(String(info.signature || '')));
+/** version 1 -> 2 in memory (written back by the next save): order-dependent entries get the marker */
+function loadQuarantine(c) {
+  const q = load(c, 'incompatible.json', { version: STATE_VERSIONS['incompatible.json'], vm: {}, shared: {} });
+  for (const m of ['vm', 'shared']) {
+    if (!q[m] || typeof q[m] !== 'object') continue;
+    for (const info of Object.values(q[m])) if (info && typeof info === 'object' && info.orderDependent === undefined && isOrderDependent(info)) info.orderDependent = true;
+  }
+  return q;
+}
+const existsInRoot = (c, key) => { try { const abs = path.resolve(c.root, key); return isInsideRoot(c.root, abs) && fs.lstatSync(abs).isFile(); } catch { return false; } };
+const isInsideRoot = (root, abs) => { const r = path.relative(root, abs); return !!r && !r.startsWith('..') && !path.isAbsolute(r); };
 /**
  * Review 3 item 3 / N2: quarantine keys that name no listed file. A key that equals exactly one listed file
  * case-insensitively after NFC normalization is re-spelled to it (the config already applies it there, with a
  * warning); the rest is stale. Returns { respelled: [[from, to, bucket]], stale: [[key, bucket]] } and updates `q`.
  */
-function normalizeQuarantineKeys(q, files) {
-  const respelled = [], stale = [];
+function normalizeQuarantineKeys(q, files, { c = null } = {}) {
+  const respelled = [], stale = [], foreign = [];
   const byFold = new Map();
   for (const f of files) { const k = fold(f); byFold.set(k, byFold.has(k) ? null : f); }
   const listed = new Set(files);
@@ -192,13 +217,15 @@ function normalizeQuarantineKeys(q, files) {
     if (!q[b] || typeof q[b] !== 'object') continue;
     for (const key of Object.keys(q[b])) {
       if (listed.has(key)) continue;
+      if (c && foreignEntry(c, q[b][key])) { foreign.push([key, b, q[b][key].config]); continue; } // Note 2
       const to = byFold.get(fold(key));
       if (to && !q[b][to]) { q[b][to] = q[b][key]; delete q[b][key]; respelled.push([key, to, b]); }
       else if (to) { delete q[b][key]; respelled.push([key, to, b]); } // both spellings present: the on-disk one stays
+      else if (c && typeof q[b][key]?.config !== 'string' && existsInRoot(c, key)) foreign.push([key, b, null]); // version 1 entry of another config?
       else stale.push([key, b]);
     }
   }
-  return { respelled, stale };
+  return { respelled, stale, foreign };
 }
 
 // pollution.json: { residual: {file: kinds}  – survived the reset hooks: drives conflict edges,
@@ -389,13 +416,14 @@ export async function cmdCheck(c, o) {
   const expectedFiles = listFiles(c);
   if (c.filters.length && !expectedFiles.length) { console.error(`[vitest-guard] check: no test file matches ${c.filters.map((f) => JSON.stringify(String(f).slice(0, 200))).join(' ')}\nsee --help`); return EXIT.USAGE; }
   clearRunLogs(c.runDir);
-  const q = load(c, 'incompatible.json', { version: 1, vm: {}, shared: {} });
+  const q = loadQuarantine(c);
   for (const m of auto ? ['vm', 'shared'] : [mode]) q[m] ||= {};
   // item 3 / N2 / R6: keys spelled differently from the file on disk are rewritten (exit 4); stale keys are reported,
   // a stale false-green entry fails the check until --prune removes it
   let respelled = 0, staleFg = [];
   if (!c.filters.length) {
-    const nk = normalizeQuarantineKeys(q, expectedFiles);
+    const nk = normalizeQuarantineKeys(q, expectedFiles, { c });
+    for (const [key, b, cfg] of nk.foreign) say(`kept quarantine entry (${b}) of ${cfg ? `config ${cfg}` : 'another config (version 1 entry: the file exists, this config does not list it)'}: ${key}`);
     for (const [from, to, b] of nk.respelled) say(`RE-SPELLED quarantine key (${b}): ${from} -> ${to} (the name on disk differs in case or Unicode form)`);
     respelled = nk.respelled.length;
     for (const [key, b] of nk.stale) {
@@ -454,8 +482,8 @@ export async function cmdCheck(c, o) {
     const sig = signature(fr.message, { root: c.root }) + (modeOnly.length ? ` [${modeOnly.length} test(s): ${modeOnly.slice(0, 3).join(' | ')}]` : '');
     if (v.kind === 'flaky') { flaky.push(f); say(`FLAKY (failed in ${bucket}, passed in forks and on a ${bucket} re-run under the same conditions: ${v.note}): ${f}`); continue; }
     if (v.kind === 'order' && bucket === 'shared') { addConflicts(c, f, v.polluters, sig); conflicts.push(`${f} <- ${v.polluters.join(' + ')} (${v.runs} runs)`); continue; }
-    q[bucket][f] = { signature: sig, tests: modeOnly.slice(0, 20), firstSeen: today, pool: bucket === 'vm' ? 'vmThreads' : 'threads isolate:false',
-      ...(v.kind === 'order' ? { after: v.polluters.slice(0, 20), reason: 'order-dependent: fails only after the listed file(s) in the same worker' } : {}) };
+    q[bucket][f] = { signature: sig, tests: modeOnly.slice(0, 20), firstSeen: today, pool: bucket === 'vm' ? 'vmThreads' : 'threads isolate:false', ...ownership(c),
+      ...(v.kind === 'order' ? { orderDependent: true, after: v.polluters.slice(0, 20), reason: 'order-dependent: fails only after the listed file(s) in the same worker' } : {}) };
     newQ.push(f);
     if (v.kind === 'order') say(`ORDER-DEPENDENT in ${bucket} (deterministic, not flaky): ${f} fails after ${v.polluters.join(' + ')} (state leaked through the worker realm)`);
   }
@@ -519,7 +547,9 @@ function report(c, workers, code) {
 // their recorded predecessors, before they are released. Returns the number of released entries.
 async function prune(c, q, mode) {
   const all = listFiles(c);
-  const files = Object.keys(pickKnown(q[mode], all));
+  const known = pickKnown(q[mode], all);
+  for (const [f, info] of Object.entries(known)) if (foreignEntry(c, info)) { say(`kept in quarantine (entry of config ${info.config}; only that config prunes it): ${f}`); delete known[f]; }
+  const files = Object.keys(known);
   if (!files.length) return 0;
   const r = await runVitest({ root: c.root, config: c.config, mode, files, env: { VITEST_GUARD_IGNORE_QUARANTINE: '1' }, verbose: c.verbose, tag: 'prune' });
   let fixed = files.filter((f) => r.files.get(f)?.status === 'passed');
@@ -529,11 +559,13 @@ async function prune(c, q, mode) {
     const iso = await runVitest({ root: c.root, config: c.config, mode: 'isolated', files: fg, verbose: c.verbose, tag: 'prune-isolated' });
     for (const f of fg) if (iso.files.get(f)?.status !== 'passed') held.set(f, 'false green: still fails in isolated forks');
   }
-  for (const f of fixed.filter((x) => !held.has(x) && Array.isArray(q[mode][x]?.after) && q[mode][x].after.length)) {
+  // S2: an order-dependent entry (marker, `after`, or a version 1 "order-dependent: …" signature) is released only after
+  // a lane replay of its recorded predecessors passes; without usable predecessors it stays (release by hand)
+  for (const f of fixed.filter((x) => !held.has(x) && isOrderDependent(q[mode][x]))) {
     const project = projectOf(c, f);
     const allowed = new Set(listSpecs(c).filter((x) => x.project === project).map((x) => x.file));
-    const preds = q[mode][f].after.filter((p) => typeof p === 'string' && allowed.has(p) && p !== f);
-    if (!preds.length) { held.set(f, 'order-dependent: recorded predecessors are gone; release by hand'); continue; }
+    const preds = (Array.isArray(q[mode][f].after) ? q[mode][f].after : []).filter((p) => typeof p === 'string' && allowed.has(p) && p !== f);
+    if (!preds.length) { held.set(f, `order-dependent: ${Array.isArray(q[mode][f].after) && q[mode][f].after.length ? 'the recorded predecessors are gone' : 'no predecessors recorded'}; release by hand (delete the entry, then run \`vitest-guard verify\`)`); continue; }
     const rr = await runLane(c, [...preds, f], 'prune-after', project, mode);
     if (rr.files.get(f)?.status !== 'passed') held.set(f, `order-dependent: still fails after ${preds.join(' + ')}`);
   }
@@ -577,7 +609,7 @@ export async function cmdVerify(c, o) {
   if (bad.length || !orders.length) { console.error(`[vitest-guard] verify: unknown --orders ${bad.join(',')} (known: ${VERIFY_ORDERS.join(', ')})\nsee --help`); return EXIT.USAGE; }
   if (orders.includes('planned') && mode !== 'shared') { console.error('[vitest-guard] verify: --orders planned needs --mode shared\nsee --help'); return EXIT.USAGE; }
 
-  const q = load(c, 'incompatible.json', { version: 1, vm: {}, shared: {} });
+  const q = loadQuarantine(c);
   for (const m of ['vm', 'shared']) q[m] = q[m] && typeof q[m] === 'object' ? q[m] : {};
   const knownEdges = validEdges(load(c, 'conflicts.json', { edges: [] }).edges, all);
   const specs = listSpecs(c).filter((x) => sample.includes(x.file));
@@ -673,7 +705,7 @@ export async function cmdVerify(c, o) {
     const put = (file, info) => {
       const m = modeOf(projectOf(c, file));
       if (!isFast(m) || q[m][file]) return;
-      q[m][file] = { ...info, firstSeen: today, pool: m === 'vm' ? 'vmThreads' : 'threads isolate:false' };
+      q[m][file] = { ...info, firstSeen: today, pool: m === 'vm' ? 'vmThreads' : 'threads isolate:false', ...ownership(c) };
       quarantined.push(file);
     };
     for (const file of new Set(falseGreen.map((k) => fileOf.get(k)))) {
@@ -682,7 +714,14 @@ export async function cmdVerify(c, o) {
     }
     for (const file of new Set(falseRed.filter((k) => !red.get(k).includes('gate')).map((k) => fileOf.get(k)))) {
       const tests = falseRed.filter((k) => fileOf.get(k) === file);
-      put(file, { signature: `order-dependent: fails in ${mode} order ${[...new Set(tests.flatMap((k) => red.get(k)))].join(', ')}, passes in isolated forks`, tests: tests.map((k) => k.slice(file.length + 3)).slice(0, 20) });
+      const failedIn = new Set(tests.flatMap((k) => red.get(k)));
+      // S2: the predecessors it failed after (the shortest failing lane prefix; bisected when long), so that
+      // `check --prune` releases it only after a replay of that order passes
+      const prefixes = laneRuns.filter((l) => failedIn.has(l.order) && l.files.includes(file)).map((l) => l.files.slice(0, l.files.indexOf(file))).filter((x) => x.length).sort((a, b) => a.length - b.length);
+      let after = prefixes[0] || null;
+      if (after && after.length > 20) { const h = await hunt(c, file, after, modeOf(projectOf(c, file))); after = h.found ? h.polluters.slice(0, 20) : null; }
+      put(file, { signature: `order-dependent: fails in ${mode} order ${[...failedIn].join(', ')}, passes in isolated forks`, tests: tests.map((k) => k.slice(file.length + 3)).slice(0, 20),
+        orderDependent: true, ...(after ? { after, reason: 'order-dependent: fails only after the listed file(s) in the same worker' } : { reason: 'order-dependent: the predecessors are not known; released by hand only' }) });
     }
     if (quarantined.length) {
       save(c, 'incompatible.json', q);
@@ -824,7 +863,7 @@ export async function cmdHunt(c, o) {
 
 export async function cmdScan(c, o) {
   const files = listFiles(c);
-  const q = load(c, 'incompatible.json', { version: 1, vm: {}, shared: {} });
+  const q = loadQuarantine(c);
   q.shared ||= {};
   let n = 0, risky = 0;
   for (const f of files) {
@@ -832,7 +871,7 @@ export async function cmdScan(c, o) {
     if (!s.pollutes.length) continue;
     risky++;
     say(`${f}: ${s.pollutes.join(', ')}${s.traits.topLevel.length ? ' [line ' + s.traits.topLevel.map((t) => t.line).join(',') + ']' : ''}`);
-    if (o.quarantine && !q.shared[f]) { q.shared[f] = { signature: 'static: ' + s.pollutes.join(', '), firstSeen: new Date().toISOString().slice(0, 10), pool: 'threads isolate:false' }; n++; }
+    if (o.quarantine && !q.shared[f]) { q.shared[f] = { signature: 'static: ' + s.pollutes.join(', '), firstSeen: new Date().toISOString().slice(0, 10), pool: 'threads isolate:false', ...ownership(c) }; n++; }
   }
   if (n) { save(c, 'incompatible.json', q); say(`${n} files quarantined for shared mode`); }
   say(`scan: ${risky} of ${files.length} test files have shared-mode risks`);
