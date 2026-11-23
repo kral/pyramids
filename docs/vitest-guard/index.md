@@ -3,7 +3,7 @@
 vitest-guard makes Vitest's two fast execution modes safe enough to use as the default for a whole suite. This page is
 the one-page overview; the other pages go deeper.
 
-> Status: pre-release `0.1.0-alpha.2`, published on npm under the dist-tag `next`: `npm i -D @jirikral/vitest-guard@next`
+> Status: pre-release `0.1.0-alpha.3`, published on npm under the dist-tag `next`: `npm i -D @jirikral/vitest-guard@next`
 > (pnpm: `pnpm add -D @jirikral/vitest-guard@next`, yarn: `yarn add -D @jirikral/vitest-guard@next`). Run the CLI through
 > an npm script or `node node_modules/@jirikral/vitest-guard/bin/vitest-guard.mjs`. **Never run `npx vitest-guard`**: the
 > unscoped name `vitest-guard` is not ours, and whoever owns it would run their code on your machine.
@@ -71,4 +71,4 @@ measurements (`vitest-guard calibrate`).
 | [security.md](security.md) | what it is not, what it writes, what is validated |
 | [limitations.md](limitations.md) | what does not help, residual risks |
 
-Package README: [../../vitest-guard/README.md](../../vitest-guard/README.md) (measurements and risk tables in detail).
+Package README: [vitest-guard/README.md](https://github.com/kral/pyramids/blob/main/vitest-guard/README.md) (measurements and risk tables in detail).

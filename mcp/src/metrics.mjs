@@ -18,7 +18,7 @@ export class Metrics {
     if (!run.startedAt) return;
     const ran = run.counts.pass + run.counts.fail + run.counts.skip;
     this.append({
-      t: 'run', runId: run.runId, kind: run.kind, mode: eng.mode, pool: run.pool || eng.poolName(), instrumented: run.instrumented, status: run.status,
+      t: 'run', runId: run.runId, kind: run.kind, origin: run.origin || 'daemon', mode: eng.mode, pool: run.pool || eng.poolName(), instrumented: run.instrumented, status: run.status,
       testsRun: ran, suiteTotal: Math.max(eng.store.testCount(), ran), filesRun: run.files, suiteFiles: eng.store.state.testFiles?.length || eng.store.tests.size,
       wallMs: run.ms ?? null, cpuMs: run.cpuMs ?? null, failed: run.counts.fail, ttffMs: run.firstFailureMs ?? null,
       testMsSum: run.testMsSum ?? null, classic: run.classic || null, ci: !!process.env.CI,
@@ -41,8 +41,9 @@ export class Metrics {
       since, runs: runs.length, fullRuns: runs.filter(isFull).length, partialRuns: 0, fullRunsAvoided: 0,
       wallSavedMs: 0, cpuSavedMs: 0, wallSavedVsForksMs: 0, cpuSavedVsForksMs: 0, testMinutesSaved: 0,
       tokens: { returned: tokTotal, classicDefault: 0, classicMinimal: 0, classicVerbose: 0, runsMeasured: 0, returnedMeasured: 0 },
-      ttffGainedMs: 0, ttffRuns: 0, estimated: { wall: 0, cpu: 0 }, measured: { wall: 0, cpu: 0 }, perPool: {},
+      byOrigin: {}, ttffGainedMs: 0, ttffRuns: 0, estimated: { wall: 0, cpu: 0 }, measured: { wall: 0, cpu: 0 }, perPool: {},
     };
+    for (const r of runs) { const o = r.origin || 'unknown'; out.byOrigin[o] = (out.byOrigin[o] || 0) + 1; }
     for (const r of runs) {
       if (isFull(r)) continue;
       out.partialRuns++; out.fullRunsAvoided++;

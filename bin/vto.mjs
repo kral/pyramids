@@ -124,7 +124,7 @@ const COMMANDS = {
     summary: 'vitest-guard: check | verify | compare | calibrate | scan | plan | run | hunt | report',
     usage: 'vto guard <check|verify|compare|calibrate|scan|plan|run|hunt|report> [options]',
     detail: 'Fast Vitest pools made safe (vmThreads / shared workers). Needs vitest.config wrapped with defineVitestGuardConfig.',
-    node: 'vitest-guard/bin/vitest-guard.mjs', helpArgs: ['--help'],
+    node: 'vitest-guard/bin/vitest-guard.mjs', helpArgs: ['--help'], guard: true,
   },
   savings: {
     summary: 'savings: estimate (before installing) | measured (realised, from the daemon metrics)',
@@ -239,7 +239,18 @@ async function exec(target, args, env, { forHelp = false } = {}) {
     }
     return run(a.bin, [...(target.prepend ?? []), ...args], env);
   }
-  const script = path.join(HOME, target.node);
+  let script = path.join(HOME, target.node);
+  if (target.guard) {
+    // S6: run the project's installed @jirikral/vitest-guard (the copy that wraps its config); the checkout copy is the fallback
+    const ri = args.indexOf('--root');
+    const root = ri >= 0 && args[ri + 1] ? path.resolve(args[ri + 1]) : process.cwd();
+    try {
+      const { resolveGuard } = await import('../mcp/src/guard-resolve.mjs');
+      const g = resolveGuard(root);
+      if (g.dir) script = path.join(g.dir, 'bin', 'vitest-guard.mjs');
+      if (g.source === 'checkout' && !forHelp) process.stderr.write(`vto: @jirikral/vitest-guard is not installed in ${show(root)}: using the copy in this checkout (${g.version}); install it in the project to run the version that wraps your config\n`);
+    } catch (e) { process.stderr.write(`vto: ${show(e.message)}\n`); return 2; }
+  }
   if (!fs.existsSync(script)) { process.stderr.write(`vto: ${target.node} is missing from this installation (${HOME})\n`); return 2; }
   if (target.needs && !fs.existsSync(path.join(HOME, target.needs)) && !forHelp) { process.stderr.write(`vto: ${target.missing}\n`); return 2; }
   if (target.needs && !fs.existsSync(path.join(HOME, target.needs))) return 0; // help was already printed by the dispatcher

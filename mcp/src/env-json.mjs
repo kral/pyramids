@@ -13,6 +13,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { StateDir, writePrivate, readPrivate, openPrivate } from './safefs.mjs';
 import { isAlive } from './platform.mjs';
+import { resolveGuard } from './guard-resolve.mjs';
 
 export const ENV_FORMAT = 'vto-env/1';
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -27,7 +28,20 @@ async function loadEnvStore() {
   return null;
 }
 let store = await loadEnvStore();
-export function _setEnvStore(s) { store = s; }
+let injected = false;
+export function _setEnvStore(s) { store = s; injected = true; }
+// S6: the project's installed @jirikral/vitest-guard owns env.json of that project; the checkout copy (`store`) is the
+// fallback. A protocol mismatch between the project's copy and this vto throws (writeEnvJson logs it, nothing is written).
+const projectStores = new Map();
+function storeFor(root) {
+  if (injected) return store;
+  if (projectStores.has(root)) return projectStores.get(root) || store;
+  const g = resolveGuard(root);
+  let m = null;
+  if (g.source === 'project') { try { const r = createRequire(import.meta.url)(path.join(g.dir, 'src', 'envstore.mjs')); if (typeof r.updateEnv === 'function') m = r; } catch {} }
+  projectStores.set(root, m);
+  return m || store;
+}
 export const envStoreAvailable = () => !!store;
 
 /** cls: Map<absFile, {group, source, env, dom}> → entries keyed by root-relative path */
@@ -43,7 +57,8 @@ export function writeEnvJson(root, cls, relOf, { log = () => {} } = {}) {
   try {
     // N5: .vitest-guard/run/ can come from the repository – refuse symlinked directories before anyone writes
     new StateDir(root, '.vitest-guard').dir('run');
-    if (store) return store.updateEnv(root, entries, { producer: 'vto-daemon' });
+    const st = storeFor(root);
+    if (st) return st.updateEnv(root, entries, { producer: 'vto-daemon' });
     return fallbackUpdate(root, entries);
   } catch (e) { log(`env.json not updated: ${e.message}`); return null; }
 }

@@ -58,10 +58,6 @@ export function setupFileFor(root, file = SETUP_FILE) {
 export const DEFAULT_INCLUDE = ['**/*.{test,spec}.?(c|m)[jt]s?(x)'];
 export const DEFAULT_EXCLUDE = ['**/node_modules/**', '**/.git/**'];
 
-export function readJson(file, fallback) {
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
-}
-
 const warnedState = new Set();
 const warnOnce = (msg) => { if (!warnedState.has(msg)) { warnedState.add(msg); console.warn(msg); } };
 
@@ -95,6 +91,7 @@ function quarantineError(file, why) {
  * upgrade) instead treats every existing test file the newer file names (anywhere in it) as quarantined for both fast
  * modes, i.e. runs it isolated; a newer file that names no existing test file still throws.
  */
+/** @internal not part of the public API (no typings, may change without notice); exported for the package's own tests */
 export function readQuarantineFile(root, file = '.vitest-guard/incompatible.json') {
   let txt;
   try { txt = readStateFile(path.resolve(root, file)); }
@@ -219,11 +216,11 @@ function autoConfig(userConfig, g, root) {
   };
   const strip = (t) => { const { pool, isolate, ...rest } = t; return rest; };
   const groups = {};
-  const record = () => {
+  const record = (listed) => {
     // for the CLI: `check` on an auto config runs in auto mode and calibrates first when modes.json is missing
     try {
       const f = path.join(root, '.vitest-guard', 'run', 'auto.json');
-      const txt = JSON.stringify({ auto: true, groups, nodeEnvironment: g.nodeEnvironment ?? null });
+      const txt = JSON.stringify({ auto: true, groups, nodeEnvironment: g.nodeEnvironment ?? null, ...(listed != null ? { listed } : {}) });
       let old = null; try { old = JSON.stringify(readStateJson(f, null)); } catch {}
       if (old !== txt) writeStateFile(f, txt); // refuses a symlinked .vitest-guard/ or run/
     } catch (e) { if (e?.code === 'E_UNSAFE_STATE') warnOnce(`${e.message}; auto.json is not written`); }
@@ -258,7 +255,7 @@ function autoConfig(userConfig, g, root) {
   // runs, in isolated forks with the configured environment: the user's include minus the two groups' literal files
   groups[AUTO_REST] = 'isolated';
   projects.push({ extends: true, test: { name: AUTO_REST, include, exclude: [...exclude, ...files.map(escapeGlob)], ...POOL_OF.isolated } });
-  record();
+  record(files.length); // files the dom and node groups list: the CLI hides auto:rest when Vitest lists no more than that
   if (process.env.VITEST_GUARD_AUTO_VERBOSE) console.log(`[vitest-guard] auto: dom ${dom.length} files (${projects.find((p) => p.test.name === 'dom')?.test.pool ?? '-'}), node ${node.length} files (${projects.find((p) => p.test.name === 'node')?.test.pool ?? '-'})`);
   const { include: _i, ...rootRest } = base; // root include would be merged into the projects (extends: true)
   return { ...userConfig, test: { ...rootRest, exclude, projects } };
@@ -289,7 +286,7 @@ export function defineVitestGuardConfig(userConfig = {}, g = {}) {
     warnedVerify = true;
     try {
       const root = path.resolve(userConfig.root || userConfig.test?.root || process.cwd());
-      const st = verifyStatus(root, 'shared', { configFile: findConfigFile(root, process.argv.slice(2)), quarantineFile: g.quarantineFile, configMode: effectiveMode(g) });
+      const st = verifyStatus(root, 'shared', { configFile: findConfigFile(root, process.argv.slice(2)), configMode: effectiveMode(g) });
       if (!st.ok) console.warn(`[vitest-guard] shared mode is not verified against isolated forks: ${st.reason}. A test can pass here only because of state left by an earlier file in the same worker (false green). ` +
         'Run `vitest-guard verify --mode shared` (exit 5 = false green; records the result for this commit) and keep a periodic `VITEST_GUARD_MODE=isolated vitest run`. Silence: verifyWarning: false or VITEST_GUARD_VERIFY_WARNING=0.');
     } catch {}
@@ -299,6 +296,7 @@ export function defineVitestGuardConfig(userConfig = {}, g = {}) {
 
 function buildConfig(userConfig, g) {
   if (process.env.VITEST_GUARD_OPTS) g = { ...g, ...JSON.parse(process.env.VITEST_GUARD_OPTS) }; // CI / experiments
+  if (g.quarantineFile !== undefined) throw new Error('[vitest-guard] the `quarantineFile` option was removed in 0.1.0-alpha.3: the CLI always reads and writes .vitest-guard/incompatible.json, so another path could never be kept in sync. Delete the option (move the file to .vitest-guard/incompatible.json).');
   const envMode = process.env.VITEST_GUARD_MODE;
   if (envMode === 'off') return userConfig;
   if ((g.mode === 'auto' || envMode === 'auto') && !g._autoDone) {
@@ -308,7 +306,7 @@ function buildConfig(userConfig, g) {
   const test = { ...(userConfig.test || {}) };
   if (test.poolOptions) console.warn('[vitest-guard] test.poolOptions was removed in Vitest 4 and is ignored (use vmMemoryLimit / maxWorkers).');
   const root = path.resolve(userConfig.root || test.root || process.cwd());
-  const quarantineFile = g.quarantineFile || '.vitest-guard/incompatible.json';
+  const quarantineFile = '.vitest-guard/incompatible.json';
   const laneFile = process.env.VITEST_GUARD_LANE_FILE;
   const lane = laneFile ? readLane(laneFile) : null;
   const ignoreQ = !!process.env.VITEST_GUARD_IGNORE_QUARANTINE;

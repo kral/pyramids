@@ -94,7 +94,7 @@ test('savings estimate --from-measured: mixed isolated+vm label is a fast pool; 
     const o = parse(['--from-measured', dir, '--pool-gain', '0.2']);
     assert.equal(Math.round(o['suite-min'] * 1000) / 1000, Math.round((100 / 60 / 0.8) * 1000) / 1000, 'converted with the explicit gain');
     assert.equal(o['pool-gain'], 0.2);
-    assert.match(o.sources['local-runs'] || '', /AI-agent runs included/);
+    assert.match(o.sources['local-runs'] || '', /AI-agent run/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 

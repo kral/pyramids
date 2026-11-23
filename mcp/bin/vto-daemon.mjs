@@ -156,6 +156,7 @@ async function printSavings(r) {
       ['CPU saved', `${r.cpuHoursSaved} h`, 'green'],
       ['vs forks baseline', r.wallSavedVsForksMs ? `${min(r.wallSavedVsForksMs)} wall, ${(r.cpuSavedVsForksMs / 3600e3).toFixed(2)} h CPU` : undefined],
       ['test-minutes skipped', r.testMinutesSaved || undefined],
+      ['run origin', Object.keys(r.byOrigin || {}).length ? Object.entries(r.byOrigin).map(([k, v]) => `${k} ${n(v)}`).join(', ') : undefined],
       ['first failure sooner', r.ttffRuns ? `${min(r.ttffGainedMs)} over ${n(r.ttffRuns)} failing runs` : undefined],
       ['basis', `measured ${r.measured.wall} runs, estimated ${r.estimated.wall} (no full run of that pool to compare with)`, est ? 'yellow' : undefined],
     ],

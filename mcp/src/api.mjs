@@ -42,7 +42,7 @@ export const METHODS = {
     if (!KINDS.has(kind)) throw userError(`kind must be one of ${[...KINDS].join(', ')}`);
     if (Array.isArray(e.config.mcpAllowRuns) && p.__via === 'mcp' && !e.config.mcpAllowRuns.includes(kind)) throw userError(`run kind "${kind}" is not allowed by the mcpAllowRuns setting (user-level vto config or .vto/config.json)`);
     return e.startRun({ kind, base: base(p.base), filters: kind === 'tests' ? filters(e, p.filters) : undefined, ids: Array.isArray(p.ids) ? p.ids.slice(0, 500).map((x) => testId(x)) : undefined,
-      bail: num(p.bail, 0, 0, 1000), timeoutS: p.timeoutS == null ? undefined : num(p.timeoutS, 600, 1, 3600), instrumented: p.instrumented !== false, lane: lane(p.lane) });
+      bail: num(p.bail, 0, 0, 1000), timeoutS: p.timeoutS == null ? undefined : num(p.timeoutS, 600, 1, 3600), instrumented: p.instrumented !== false, lane: lane(p.lane), origin: p.__via === 'mcp' ? 'agent' : /^vto-(cli|tui)/.test(String(p.__client || '')) ? 'cli' : 'daemon' });
   },
   wait_run: (e, p) => e.waitRun(str(p.runId, 40), { timeoutS: p.timeoutS == null ? undefined : num(p.timeoutS, 600, 1, 3600) }),
   run_status: (e, p) => e.runStatus({ runId: str(p.runId, 40) }),

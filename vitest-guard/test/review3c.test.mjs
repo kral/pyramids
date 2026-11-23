@@ -174,15 +174,23 @@ test('R6: a quarantine entry of a project with its own root, or under a ./ inclu
 });
 
 test('R6: check fails when the config does not apply a quarantine entry (quarantine never silently ignored)', integration, () => {
-  // the config reads another quarantine file than the CLI writes: its entries are not applied
-  const root = P({ 'src/a.test.js': pass, 'src/fg.test.js': fgFile }, {}, { quarantineFile: '.vitest-guard/other.json', verifyWarning: false });
-  const v = cli(root, ['verify']);
+  // a config that does not apply the quarantine (here: every run ignores it) must not pass silently
+  const root = P({ 'src/a.test.js': pass, 'src/fg.test.js': fgFile }, {}, { verifyWarning: false });
+  const env = { VITEST_GUARD_IGNORE_QUARANTINE: '1' };
+  const v = cli(root, ['verify'], { env });
   assert.equal(v.code, 5, v.out);
   assert.match(v.out, /QUARANTINE NOT APPLIED: the config still runs src\/fg\.test\.js in a fast mode/);
   assert.match(v.out, /INCOMPLETE: quarantine not applied/);
-  const c = cli(root, ['check']);
+  const c = cli(root, ['check'], { env });
   assert.equal(c.code, 1, c.out);
   assert.match(c.out, /QUARANTINE NOT APPLIED: src\/fg\.test\.js/);
+});
+
+test('S2: the removed quarantineFile option fails loudly instead of desynchronising CLI and config', integration, () => {
+  const root = P({ 'src/a.test.js': pass }, {}, { quarantineFile: '.vitest-guard/other.json', verifyWarning: false });
+  const r = vitestRun(root);
+  assert.notEqual(r.code, 0);
+  assert.match(r.out, /`quarantineFile` option was removed/);
 });
 
 test('N2 / R6: a stale false-green entry fails check until --prune removes it (exit 4)', integration, () => {

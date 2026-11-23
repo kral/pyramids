@@ -2,7 +2,7 @@
 
 ## Depends on Vitest internals
 
-- Vitest `>=5.1 <6` (developed against 5.1.1). The shared-mode planner relies on how Vitest 5.1.1 groups
+- Vitest `>=5.1 <6` (developed against 5.1.1; CI tests only the version in the lockfile, 5.1.1, so 5.1.0 and later 5.x releases are accepted by the peer range but untested). The shared-mode planner relies on how Vitest 5.1.1 groups
   specs and hands them to workers (`groupSpecs` / `pool.run`): with `isolate: false` and `maxWorkers: 1`, one
   project's files go to one worker in sequencer order. A Vitest change here would break the lane model.
 - It reads Vitest's JSON reporter output, `test.provide`/`inject`, `vitest list --filesOnly --json`, and the
