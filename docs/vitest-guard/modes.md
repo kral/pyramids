@@ -1,7 +1,7 @@
 # Modes
 
 `mode` selects how test files are executed. All numbers are CPU seconds (user+sys of the whole process tree)
-from [`vitest-guard/README.md`](https://github.com/kral/vto/blob/main/vitest-guard/README.md), [`VALIDATION-real-suite.md`](https://github.com/kral/vto/blob/vto/VALIDATION-real-suite.md) ("the real-world suite") and [`perf/RESULTS.md`](https://github.com/kral/vto/blob/vto/perf/RESULTS.md) (the lab); these two files are on the `vto` branch of the source repository, not part of the npm package.
+from [`vitest-guard/README.md`](https://github.com/kral/vitest-guard/blob/main/vitest-guard/README.md), [`VALIDATION-real-suite.md`](https://github.com/kral/vitest-guard/blob/vto/VALIDATION-real-suite.md) ("the real-world suite") and [`perf/RESULTS.md`](https://github.com/kral/vitest-guard/blob/vto/perf/RESULTS.md) (the lab); these two files are on the `vto` branch of the source repository, not part of the npm package.
 They are measurements of those suites on a shared 2-core box, not promises for yours: measure with
 `vitest-guard compare --sample all`.
 

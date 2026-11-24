@@ -36,11 +36,11 @@ Mitigations exist **only** for risks that reproduced or that the Vitest docs and
 ## Documentation
 
 Full documentation (getting started, modes, CLI, configuration, internals, CI, troubleshooting, security,
-limitations): [docs/vitest-guard/index.md](https://github.com/kral/vto/blob/main/docs/vitest-guard/index.md).
+limitations): [docs/vitest-guard/index.md](https://github.com/kral/vitest-guard/blob/main/docs/vitest-guard/index.md).
 
 > **Removed in 0.2.0-alpha.0:** mode `auto` and `calibrate`, the shared-mode planner (`plan`, `run`, `--lanes` planning,
 > `durations.json`, `pollution.json`), `scan`, `report`, the animated swan and every vto integration. They live on the
-> [`vto` branch](https://github.com/kral/vto/tree/vto) (paused). Removed commands and options exit with 2 and say so.
+> [`vto` branch](https://github.com/kral/vitest-guard/tree/vto) (paused). Removed commands and options exit with 2 and say so.
 
 ## Quick start
 

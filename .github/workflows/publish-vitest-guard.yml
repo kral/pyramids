@@ -16,7 +16,7 @@
 #      environment auto-created by GitHub without protection can never publish).
 #   4. Auth, either:
 #      a) npm trusted publishing (preferred, no token): on npmjs.com → package settings → Trusted
-#         publisher → GitHub Actions, repository kral/vto, workflow publish-vitest-guard.yml,
+#         publisher → GitHub Actions, repository kral/vitest-guard, workflow publish-vitest-guard.yml,
 #         environment npm-publish. (npm may require the package to exist first – see b.)
 #      b) a granular npm token (publish-only, short expiry) as environment secret NPM_TOKEN, needed for
 #         the first publish (the package must exist before a trusted publisher can be configured). Delete

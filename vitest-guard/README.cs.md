@@ -38,11 +38,11 @@ rizika, která se reprodukovala nebo je potvrzuje dokumentace/zdroják Vitestu.
 
 ## Dokumentace
 
-Úplná dokumentace (anglicky): [docs/vitest-guard/index.md](https://github.com/kral/vto/blob/main/docs/vitest-guard/index.md).
+Úplná dokumentace (anglicky): [docs/vitest-guard/index.md](https://github.com/kral/vitest-guard/blob/main/docs/vitest-guard/index.md).
 
 > **Odstraněno ve verzi 0.2.0-alpha.0:** režim `auto` a `calibrate`, plánovač pro shared režim (`plan`, `run`, plánování
 > přes `--lanes`, `durations.json`, `pollution.json`), `scan`, `report`, animovaná labuť a veškerá integrace s vto. Žijí
-> na [větvi `vto`](https://github.com/kral/vto/tree/vto) (pozastaveno). Odstraněné příkazy a volby skončí exit kódem 2 s vysvětlením.
+> na [větvi `vto`](https://github.com/kral/vitest-guard/tree/vto) (pozastaveno). Odstraněné příkazy a volby skončí exit kódem 2 s vysvětlením.
 
 ## Rychlý start
 

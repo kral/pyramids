@@ -67,12 +67,12 @@ Used bare, these modes either fail tests that pass in forks (false red) or, wors
 | [security.md](security.md) | what it is not, what it writes, what is validated |
 | [limitations.md](limitations.md) | what does not help, residual risks |
 
-Package README: [vitest-guard/README.md](https://github.com/kral/vto/blob/main/vitest-guard/README.md) (measurements and risk tables in detail).
+Package README: [vitest-guard/README.md](https://github.com/kral/vitest-guard/blob/main/vitest-guard/README.md) (measurements and risk tables in detail).
 
 ## Removed in 0.2.0-alpha.0
 
 0.2.0-alpha.0 slims vitest-guard down to the safety layer. Removed, all of it still available on the
-[`vto` branch](https://github.com/kral/vto/tree/vto) (paused):
+[`vto` branch](https://github.com/kral/vitest-guard/tree/vto) (paused):
 
 - mode `auto` (the dom/node split, `auto:dom`/`auto:node`/`auto:rest` groups, `autoModes`, `respectPools`, `nodeEnvironment`,
   the probes, `env.json`, `modes.json`) and the `calibrate` command;
