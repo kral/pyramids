@@ -39,8 +39,8 @@ Full documentation (getting started, modes, CLI, configuration, internals, CI, t
 limitations): [docs/vitest-guard/index.md](https://github.com/kral/vitest-guard/blob/main/docs/vitest-guard/index.md).
 
 > **Removed in 0.2.0-alpha.0:** mode `auto` and `calibrate`, the shared-mode planner (`plan`, `run`, `--lanes` planning,
-> `durations.json`, `pollution.json`), `scan`, `report`, the animated swan and every vto integration. They live on the
-> [`vto` branch](https://github.com/kral/vitest-guard/tree/vto) (paused). Removed commands and options exit with 2 and say so.
+> `durations.json`, `pollution.json`), `scan`, `report`, the animated swan and every vto integration. The last release
+> that has them is `0.1.0-alpha.4` (source: [commit `2e19ab7`](https://github.com/kral/vitest-guard/tree/2e19ab7)). Removed commands and options exit with 2 and say so.
 
 ## Quick start
 

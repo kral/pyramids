@@ -871,7 +871,7 @@ export function helpFor(cmd) {
 }
 const KNOWN_FLAGS = new Set(['mode', 'config', 'root', 'verbose', 'diag', 'reset-modules', 'help', 'version']);
 
-/** Features removed in 0.2.0-alpha.0 (they live on the `vto` branch): asking for one is a usage error with the reason. */
+/** Features removed in 0.2.0-alpha.0 (the last release with them is 0.1.0-alpha.4): asking for one is a usage error with the reason. */
 const REMOVED_COMMANDS = {
   plan: 'the planner', run: 'planned runs', calibrate: 'mode auto', scan: 'the static scan', report: 'the run-log report',
 };
@@ -879,7 +879,7 @@ const REMOVED_OPTIONS = {
   plan: 'the planner', 'vto-raw': 'the vto integration', calibrate: 'mode auto', 'calibrate-sample': 'mode auto', heal: 'planned runs', replan: 'planned runs',
   clean: 'planned runs', write: 'modes.json (mode auto)', 'commit-state': 'committed durations/pollution state (they belonged to the planner)',
 };
-const removedMsg = (what, why) => `[vitest-guard] ${what} was removed in 0.2.0 (${why}; it lives on the \`vto\` branch)\nsee --help`;
+const removedMsg = (what, why) => `[vitest-guard] ${what} was removed in 0.2.0 (${why}; the last release with it is 0.1.0-alpha.4)\nsee --help`;
 
 /** U-2: refuse to measure a config that does not go through defineVitestGuardConfig (VITEST_GUARD_MODE would do nothing). */
 export function requireWrapped(c) {

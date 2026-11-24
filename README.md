@@ -13,6 +13,4 @@ npm i -D @jirikral/vitest-guard@next
 Status: **alpha**, published on npm under the dist-tag `next`. Linux, macOS and Windows are tested in CI
 (Node `^22.22.2 || >=24.15.0`, Vitest 4.1 or 5.1).
 
-vto (affected-test selection, overlap detection, MCP) lives on the `vto` branch (paused).
-
 Licence: MIT OR Apache-2.0.

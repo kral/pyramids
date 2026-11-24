@@ -58,7 +58,7 @@ test('removed commands and options are usage errors that say what went (exit 2)'
   ]) {
     const r = cli(root, args);
     assert.equal(r.code, 2, args.join(' ') + ': ' + r.out); assert.match(r.stderr, re, args.join(' '));
-    assert.match(r.stderr, /`vto` branch/);
+    assert.match(r.stderr, /0\.1\.0-alpha\.4/);
   }
 });
 

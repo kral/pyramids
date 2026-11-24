@@ -303,7 +303,7 @@ function buildConfig(userConfig, g) {
   if (g.quarantineFile !== undefined) throw new Error('[vitest-guard] the `quarantineFile` option was removed in 0.1.0-alpha.3: the CLI always reads and writes .vitest-guard/incompatible.json, so another path could never be kept in sync. Delete the option (move the file to .vitest-guard/incompatible.json).');
   const envMode = process.env.VITEST_GUARD_MODE;
   if (envMode === 'off' || g.mode === 'off') return userConfig;
-  if (g.mode === 'auto' || envMode === 'auto') throw new Error("[vitest-guard] mode 'auto' was removed in 0.2.0-alpha.0 (it lives on the `vto` branch). Use mode 'vm' or 'shared' (run `vitest-guard compare` to pick one), or keep per-project modes with `projects`.");
+  if (g.mode === 'auto' || envMode === 'auto') throw new Error("[vitest-guard] mode 'auto' was removed in 0.2.0-alpha.0 (the last release with it is 0.1.0-alpha.4). Use mode 'vm' or 'shared' (run `vitest-guard compare` to pick one), or keep per-project modes with `projects`.");
   if (g.mode !== undefined && !['vm', 'shared', 'isolated'].includes(g.mode)) throw new Error(`[vitest-guard] unknown mode ${sanitize(JSON.stringify(String(g.mode)), 40)}: use 'vm', 'shared', 'isolated' or 'off'.`);
   const test = { ...(userConfig.test || {}) };
   if (test.poolOptions) console.warn('[vitest-guard] test.poolOptions was removed in Vitest 4 and is ignored (use vmMemoryLimit / maxWorkers).');

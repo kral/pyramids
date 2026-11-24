@@ -71,8 +71,8 @@ Package README: [vitest-guard/README.md](https://github.com/kral/vitest-guard/bl
 
 ## Removed in 0.2.0-alpha.0
 
-0.2.0-alpha.0 slims vitest-guard down to the safety layer. Removed, all of it still available on the
-[`vto` branch](https://github.com/kral/vitest-guard/tree/vto) (paused):
+0.2.0-alpha.0 slims vitest-guard down to the safety layer. Removed; the last release that has them is `0.1.0-alpha.4`
+(`npm i -D @jirikral/vitest-guard@0.1.0-alpha.4`, source: [commit `2e19ab7`](https://github.com/kral/vitest-guard/tree/2e19ab7)):
 
 - mode `auto` (the dom/node split, `auto:dom`/`auto:node`/`auto:rest` groups, `autoModes`, `respectPools`, `nodeEnvironment`,
   the probes, `env.json`, `modes.json`) and the `calibrate` command;
